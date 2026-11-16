@@ -2,6 +2,7 @@ import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
+import { openTeamworkDialog } from "./teamwork/teamworkDialogState";
 import {
   scopedThreadKey,
   scopeProjectRef,
@@ -1499,6 +1500,19 @@ function OpenCommandPaletteDialog(props: {
       icon: <UserPlusIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         openGuestShareDialog(threadRef);
+      },
+    });
+  }
+
+  if (activeThread !== null && activeThreadServerConfig?.environment.capabilities.projectTeamwork) {
+    actionItems.push({
+      kind: "action",
+      value: "action:project-teamwork",
+      searchTerms: ["teamwork", "swarm", "team", "coordinator", "knowledge"],
+      title: "Open project teamwork",
+      icon: <UserPlusIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        openTeamworkDialog(scopeThreadRef(activeThread.environmentId, activeThread.id));
       },
     });
   }

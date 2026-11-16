@@ -1000,6 +1000,15 @@ function ThreadRouteContent(
             props.inspectorPresentation ? null : (
               <ThreadHeader
                 title={selectedThread.title}
+                {...(serverConfig?.environment.capabilities.projectTeamwork
+                  ? {
+                      teamwork: {
+                        environmentId: selectedThread.environmentId,
+                        projectId: selectedThread.projectId,
+                        threadId: selectedThread.id,
+                      },
+                    }
+                  : {})}
                 subtitle={threadSyncLabel ?? headerSubtitle}
                 gitControls={threadGitControlProps}
                 hasThreadCwd={selectedThreadCwd !== null}
