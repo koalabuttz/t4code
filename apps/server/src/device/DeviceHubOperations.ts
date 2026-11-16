@@ -8,6 +8,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import type { DeviceHostReady, DeviceOperations, HostDevice } from "./DeviceHost.ts";
@@ -67,6 +68,28 @@ const errorHead = (error: string) => {
 
 const vendorPrefix = (platform: DevicePlatform) =>
   platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";
+
+const requireHubSuccess = Effect.fn("DeviceHubOperations.requireHubSuccess")(function* (
+  response: HttpClientResponse.HttpClientResponse,
+) {
+  if (response.status >= 200 && response.status < 300) return response;
+  // Retain only a bounded diagnostic prefix; a stalled error body must not hide the HTTP failure.
+  const cause = yield* response.stream.pipe(
+    Stream.flatMap((bytes) => Stream.fromIterable(bytes.subarray(0, 2_000))),
+    Stream.take(2_000),
+    Stream.runCollect,
+    Effect.map((bytes) => new Error(new TextDecoder().decode(Uint8Array.from(bytes)))),
+    Effect.timeout(Duration.seconds(1)),
+    Effect.catch((error) => Effect.succeed(error)),
+  );
+  return yield* new HttpClientError.HttpClientError({
+    reason: new HttpClientError.StatusCodeError({
+      request: response.request,
+      response,
+      cause,
+    }),
+  });
+});
 
 /** Device operations for a host that runs expo-device-hub at `origin`. */
 export const makeDeviceHubOperations = (options: {
@@ -296,7 +319,7 @@ export const makeDeviceHubOperations = (options: {
         ),
       )
       .pipe(
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap(requireHubSuccess),
         Effect.flatMap((response) => response.arrayBuffer),
         Effect.map((buffer) => new Uint8Array(buffer)),
         Effect.scoped,
