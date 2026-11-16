@@ -1508,8 +1508,8 @@ function OpenCommandPaletteDialog(props: {
     actionItems.push({
       kind: "action",
       value: "action:project-teamwork",
-      searchTerms: ["teamwork", "swarm", "team", "coordinator", "knowledge"],
-      title: "Open project teamwork",
+      searchTerms: ["crew", "teamwork", "swarm", "team", "coordinator", "knowledge"],
+      title: "Open project crew",
       icon: <UserPlusIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         openTeamworkDialog(scopeThreadRef(activeThread.environmentId, activeThread.id));

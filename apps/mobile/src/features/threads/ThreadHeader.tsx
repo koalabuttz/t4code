@@ -47,7 +47,7 @@ export function ThreadHeader(props: {
   const menus = [gitMenu, terminalMenu].filter((menu): menu is AppBarMenu => menu !== null);
   if (props.teamwork)
     actions.push({
-      accessibilityLabel: "Project teamwork",
+      accessibilityLabel: "Project crew",
       icon: "person.2",
       onPress: () => setTeamworkOpen(true),
     });

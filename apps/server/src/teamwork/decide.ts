@@ -81,7 +81,7 @@ export function decideTeamwork(
         kind: "stop",
         threadId: task.ownerThreadId,
         initiativeId: task.initiativeId,
-        text: "Teamwork paused or cancelled this assignment.",
+        text: "Crew paused or cancelled this assignment.",
       });
   };
   switch (action.type) {
@@ -176,7 +176,7 @@ export function decideTeamwork(
         );
       } else if (action.type === "initiative.status") {
         if (action.status === "active" && !initiative.approved)
-          return invalid("The user must approve the Teamwork brief first.");
+          return invalid("The user must approve the brief before workers can start.");
         if (
           action.status === "completed" &&
           (initiative.status !== "active" ||
@@ -505,7 +505,7 @@ export function decideTeamwork(
     return Result.fail(
       new TeamworkError({
         reason: "capacity",
-        message: "This project has reached its teamwork capacity.",
+        message: "This project has reached its Crew capacity.",
       }),
     );
   return Result.succeed({ snapshot: { ...next, revision: state.revision + 1 }, intents });

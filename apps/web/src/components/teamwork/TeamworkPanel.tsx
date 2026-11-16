@@ -46,12 +46,12 @@ export function TeamworkButton(props: Props) {
   return (
     <>
       <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>
-        Teamwork
+        Crew
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogPopup className="w-[min(96vw,72rem)] max-w-6xl">
           <DialogHeader>
-            <DialogTitle>Project teamwork</DialogTitle>
+            <DialogTitle>Project crew</DialogTitle>
             <DialogDescription>
               Coordinate work, review results, and retain what the project learns.
             </DialogDescription>
@@ -103,9 +103,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
       });
       if (result._tag === "Failure") {
         const failure = squashAtomCommandFailure(result);
-        setError(
-          failure instanceof Error ? failure.message : "Could not save this teamwork change.",
-        );
+        setError(failure instanceof Error ? failure.message : "Could not save this Crew change.");
         return false;
       }
       return true;
@@ -113,7 +111,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
       setBusy(false);
     }
   };
-  if (!state) return <p role="status">{query.error ?? "Loading teamwork…"}</p>;
+  if (!state) return <p role="status">{query.error ?? "Loading crew…"}</p>;
   const initiative = state.initiatives.find((i) => i.id === selected) ?? state.initiatives.at(-1);
   const disabled = busy || !permission;
   return (
@@ -124,7 +122,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
         </p>
       )}
       {!permission && (
-        <p className="text-sm text-muted-foreground">You have read-only access to this team.</p>
+        <p className="text-sm text-muted-foreground">You have read-only access to this crew.</p>
       )}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-medium">Project coordinator</span>
@@ -184,15 +182,15 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
           />
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-sm">
-              Mode{" "}
+              Swarm{" "}
               <select
-                aria-label="Initiative mode"
+                aria-label="Swarm start"
                 value={mode}
                 onChange={(e) => setMode(e.target.value as "swarm" | "teamwork")}
                 className="rounded border bg-background px-2 py-1"
               >
-                <option value="swarm">Swarm: start now</option>
-                <option value="teamwork">Teamwork: agree on a plan first</option>
+                <option value="swarm">Start now</option>
+                <option value="teamwork">Require plan approval</option>
               </select>
             </label>
             <Button
@@ -311,7 +309,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
                       })
                     }
                   >
-                    Promote to Teamwork
+                    Require plan approval
                   </Button>
                 )}
               </div>
@@ -345,7 +343,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
           )}
         </div>
       )}
-      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Teamwork views">
+      <div className="flex flex-wrap gap-1" role="tablist" aria-label="Crew views">
         {(["tasks", "board", "knowledge", "roles", "history"] as const).map((value) => (
           <Button
             key={value}

@@ -52,7 +52,7 @@ const isTeamworkError = Schema.is(TeamworkError);
 const storageError = (cause: unknown) =>
   isTeamworkError(cause)
     ? cause
-    : new TeamworkError({ reason: "storage", message: "Could not access project teamwork state." });
+    : new TeamworkError({ reason: "storage", message: "Could not access project crew state." });
 
 export class TeamworkService extends Context.Service<
   TeamworkService,
@@ -114,7 +114,7 @@ const make = Effect.gen(function* () {
       )
         return yield* new TeamworkError({
           reason: "forbidden",
-          message: "A restricted linked agent cannot access project teamwork.",
+          message: "A restricted linked agent cannot access this project's crew.",
         });
       return { runtimeMode: thread.runtimeMode, interactionMode: thread.interactionMode };
     }
@@ -261,7 +261,7 @@ const make = Effect.gen(function* () {
     if (limit?.interactionMode === "plan")
       return yield* new TeamworkError({
         reason: "forbidden",
-        message: "Switch out of Plan mode before changing teamwork state.",
+        message: "Switch out of Plan mode before changing Crew state.",
       });
     if (input.action.type === "coordinator.set" || input.action.type === "task.assign")
       yield* requireThread(input.projectId, input.action.threadId);
@@ -279,7 +279,7 @@ const make = Effect.gen(function* () {
             if (previous[0].actor_thread_id !== actor || previous[0].action_json !== actionJson)
               return yield* new TeamworkError({
                 reason: "conflict",
-                message: "This request id was already used for a different teamwork action.",
+                message: "This request id was already used for a different Crew action.",
               });
             return;
           }
