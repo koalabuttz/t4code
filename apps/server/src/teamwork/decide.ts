@@ -390,8 +390,10 @@ export function decideTeamwork(
       const initiative = state.initiatives.find((i) => i.id === initiativeId);
       if (!initiative || ["completed", "cancelled"].includes(initiative.status))
         return invalid("Reopen the initiative before changing tasks.");
-      if (existing && ["delegating", "running"].includes(existing.status))
-        return invalid("Stop and reset the assignment before editing it.");
+      if (existing && !["ready", "cancelled"].includes(existing.status))
+        return invalid(
+          "Use task.review to request changes without losing the worker or submission. Editing an assigned task requires an explicit task.reset first.",
+        );
       if (
         milestoneHasStartedDependents(initiativeId, action.milestoneId) ||
         (existing && milestoneHasStartedDependents(initiativeId, existing.milestoneId))

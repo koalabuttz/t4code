@@ -387,7 +387,7 @@ export function TeamworkSheet({
                         }
                       />
                     </View>
-                    {!["delegating", "running"].includes(task.status) && (
+                    {["ready", "cancelled"].includes(task.status) && (
                       <TeamworkTaskEditor
                         key={`${task.id}:${task.updatedAt}`}
                         state={state}

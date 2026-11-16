@@ -131,6 +131,20 @@ it("keeps results under review until another participant approves and then unloc
     builder,
   ).snapshot;
   const firstSubmission = state.revision;
+  const rejectAssignedEdit = (snapshot: TeamworkSnapshot) => {
+    assert.isTrue(
+      Result.isFailure(
+        decideTeamwork(
+          snapshot,
+          { ...createTask("api"), type: "task.edit", criteria: "Also reject invalid timestamps" },
+          coordinator,
+          now,
+          "edit-assigned-task",
+        ),
+      ),
+    );
+  };
+  rejectAssignedEdit(state);
   assert.equal(state.tasks[0]?.submission?.revision, firstSubmission);
   assert.isTrue(
     Result.isFailure(
@@ -160,6 +174,7 @@ it("keeps results under review until another participant approves and then unloc
     },
     coordinator,
   ).snapshot;
+  rejectAssignedEdit(state);
   state = apply(
     state,
     {
@@ -200,6 +215,7 @@ it("keeps results under review until another participant approves and then unloc
     },
     coordinator,
   ).snapshot;
+  rejectAssignedEdit(state);
   state = assign(state, "ui", ThreadId.make("ui-worker"));
   assert.equal(state.tasks.find((t) => t.id === "ui")?.status, "running");
   assert.isTrue(

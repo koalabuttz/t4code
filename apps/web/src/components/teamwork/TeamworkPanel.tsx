@@ -538,7 +538,7 @@ export function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread
                     </Button>
                   )}
                 </div>
-                {!["delegating", "running"].includes(task.status) && (
+                {["ready", "cancelled"].includes(task.status) && (
                   <TaskForm
                     key={`${task.id}:${task.updatedAt}`}
                     state={state}
