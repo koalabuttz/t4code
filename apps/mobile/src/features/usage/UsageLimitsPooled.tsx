@@ -5,6 +5,7 @@ import { providerClients } from "@t3tools/client-runtime/provider-clients";
 import { normalizeProviderAccentColor } from "@t3tools/client-runtime/state/provider-instance-display";
 import {
   collectLimitAccounts,
+  collectBillingSources,
   collectExternalUsageLinks,
   collectLimitNotices,
   collectLimitPools,
@@ -28,6 +29,7 @@ import { ProviderIcon } from "../../components/ProviderIcon";
 import { SettingsScreen } from "../settings/components/SettingsScreen";
 import { environmentPresentations } from "../../state/presentation";
 import { ResetCredits } from "./UsageLimitsSection";
+import { BillingSources } from "./BillingSources";
 import { usageProviderKind, useProviderColors } from "./usageProviders";
 
 const PACE_LABEL = { ahead: "Ahead of pace", on: "On pace", under: "Under pace" } as const;
@@ -420,12 +422,14 @@ export function UsageLimitsSection({
   const pools = collectLimitPools(collectLimitAccounts(selected), now);
   const notices = collectLimitNotices(selected);
   const externalLinks = collectExternalUsageLinks(selected);
+  const billingSources = collectBillingSources(selected);
   const colors = useProviderColors();
   return (
     <View className="gap-6">
       {pools.length === 0 &&
       notices.length === 0 &&
       failedLabels.length === 0 &&
+      billingSources.length === 0 &&
       externalLinks.length === 0 ? (
         <Text className="py-12 text-center text-base text-foreground-muted">
           {selected.size === 0
@@ -433,6 +437,7 @@ export function UsageLimitsSection({
             : "No provider on the selected environments reports subscription limits."}
         </Text>
       ) : null}
+      <BillingSources sources={billingSources} now={now} />
       {pools.map((pool) => {
         const windows = displayLimitWindows(pool);
         return (

@@ -16,6 +16,7 @@ import {
   type ServerProviderUsageWindow,
   type UsageLimitSourceSnapshot,
   type UsageLimitSourceSnapshots,
+  type UsageLimitSourceKind,
 } from "@t3tools/contracts";
 
 import * as DateTime from "effect/DateTime";
@@ -23,6 +24,14 @@ import * as DateTime from "effect/DateTime";
 import { isLocalLoopbackHost, isWildcardHost } from "./hostClassification.ts";
 
 const MINUTE = 60_000;
+
+export const USAGE_SOURCE_PRESETS = {
+  cliproxy: { label: "CLIProxyAPI hub", url: "" },
+  deepseek: { label: "DeepSeek", url: "https://api.deepseek.com" },
+  "zai-coding": { label: "GLM Coding Plan", url: "https://api.z.ai" },
+  "zai-api": { label: "GLM prepaid API", url: "https://api.z.ai" },
+  abliteration: { label: "Abliteration", url: "https://api.abliteration.ai" },
+} as const satisfies Record<UsageLimitSourceKind, { label: string; url: string }>;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
@@ -206,6 +215,52 @@ export function collectExternalUsageLinks(presentations: LimitPresentations) {
     }
   }
   return [...links.values()];
+}
+
+export function collectBillingSources(presentations: LimitPresentations) {
+  const sources = new Map<
+    string,
+    {
+      key: string;
+      label: string;
+      environments: string[];
+      limits: ServerProviderUsageLimits | undefined;
+      error: string | undefined;
+    }
+  >();
+  for (const [environmentId, presentation] of presentations) {
+    for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
+      if (source.kind === "cliproxy") continue;
+      const fingerprint = source.usageLimits?.credentialFingerprint;
+      const key = fingerprint ? `${source.kind}:${fingerprint}` : `${environmentId}:${source.id}`;
+      const previous = sources.get(key);
+      const environment = presentation.entry.target.label;
+      const environments = [...new Set([...(previous?.environments ?? []), environment])];
+      if (
+        previous?.limits &&
+        source.usageLimits &&
+        Date.parse(previous.limits.checkedAt) > Date.parse(source.usageLimits.checkedAt)
+      ) {
+        previous.environments = environments;
+        continue;
+      }
+      sources.set(key, {
+        key,
+        label: source.label,
+        environments,
+        limits: source.usageLimits,
+        error: source.error,
+      });
+    }
+  }
+  return [...sources.values()];
+}
+
+export function formatUsageBalance(balance: {
+  readonly remaining: number;
+  readonly currency: string;
+}) {
+  return `${balance.remaining.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${balance.currency}`;
 }
 
 function accountKey(
@@ -439,6 +494,7 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
       if (notice) notices.add(`${label(environmentLabel, name)}: ${notice}`);
     }
     for (const source of presentation.serverConfig?.usageLimitSources ?? []) {
+      if (source.kind !== "cliproxy") continue;
       if (source.error) {
         notices.add(`${label(environmentLabel, source.label)}: ${source.error}`);
       } else if (source.accounts.length === 0) {
@@ -843,7 +899,7 @@ export function hasProviderUsageLimits(
     sources.some(
       (source) =>
         source.accounts.some((account) => account.driver === driver) ||
-        (source.error !== undefined && source.accounts.length === 0),
+        (source.kind === "cliproxy" && source.error !== undefined && source.accounts.length === 0),
     )
   );
 }
@@ -855,7 +911,7 @@ export function sameUsageLimitCommandCoverage(
   const coverage = (sources: UsageLimitSourceSnapshots) =>
     new Set(
       sources.flatMap((source) =>
-        source.error !== undefined && source.accounts.length === 0
+        source.kind === "cliproxy" && source.error !== undefined && source.accounts.length === 0
           ? ["*"]
           : source.accounts.map((account) => String(account.driver)),
       ),
@@ -875,7 +931,8 @@ export function withUsageLimitsCommands(
     ...sources.flatMap((source) => source.accounts.map((account) => account.driver)),
   ]);
   const unreadableSource = sources.some(
-    (source) => source.error !== undefined && source.accounts.length === 0,
+    (source) =>
+      source.kind === "cliproxy" && source.error !== undefined && source.accounts.length === 0,
   );
   return providers.map((provider) => {
     if (!unreadableSource && !supportedDrivers.has(provider.driver)) return provider;
@@ -1019,7 +1076,11 @@ export function collectProviderUsageLimits(
         limits: account.usageLimits,
       });
     }
-    if (source.error && (matching.length > 0 || source.accounts.length === 0)) {
+    if (
+      source.kind === "cliproxy" &&
+      source.error &&
+      (matching.length > 0 || source.accounts.length === 0)
+    ) {
       notices.push(`${source.label}: ${source.error}`);
     }
   }
