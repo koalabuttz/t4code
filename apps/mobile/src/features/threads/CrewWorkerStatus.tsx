@@ -1,10 +1,13 @@
 import { View } from "react-native";
+import { useEffect } from "react";
 import type { EnvironmentId, TeamworkTask } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { crewExecutionLabels, crewTaskExecution } from "@t3tools/shared/crewExecution";
 import { AppText } from "../../components/ui/AppText";
 import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentShellReadiness } from "../../state/shell";
+import { threadFamilies } from "../../state/threads";
+import { appAtomRegistry } from "../../state/atom-registry";
 
 export function CrewWorkerStatus({
   environmentId,
@@ -17,6 +20,12 @@ export function CrewWorkerStatus({
     task.ownerThreadId === null ? null : scopeThreadRef(environmentId, task.ownerThreadId),
   );
   const connected = useEnvironmentShellReadiness(environmentId).status === "live";
+  const familyThreadId = worker?.lineage.rootThreadId ?? task.ownerThreadId;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Retain the assigned worker's original family after coordinator handover.
+  useEffect(() => {
+    if (familyThreadId === null) return;
+    return threadFamilies.mount(appAtomRegistry, environmentId, familyThreadId);
+  }, [environmentId, familyThreadId]);
   const execution = crewTaskExecution(
     task,
     worker

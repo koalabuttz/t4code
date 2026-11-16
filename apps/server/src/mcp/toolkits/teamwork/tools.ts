@@ -21,7 +21,7 @@ const shared = {
 const read = Tool.make("t3_team_read", {
   ...shared,
   description:
-    "Read this project's Crew board and revision, 12 entries per collection. Follow nextOffset to page. Summaries are shortened; initiativeId, taskId or knowledgeId returns that item's full text. Ordinary chat needs no team tools.",
+    "Read this project's Crew board and revision, 12 entries per collection. Follow nextOffset to page. Summaries are shortened; initiativeId, taskId, knowledgeId or roleId returns full text. context=true includes current sourced context. history=true searches activity with query and optional initiativeId/taskId; page with history.nextBeforeRevision as beforeRevision, and use atRevision for full event text. archived=true lists archives; initiativeId or taskId reads archived work. artifactTaskId, or artifactMilestoneId with initiativeId, checks evidence availability. Restore leaves work paused. Ordinary chat needs no team tools.",
   parameters: Teamwork.TeamworkAgentReadInput,
   success: Teamwork.TeamworkAgentReadResult,
 })
@@ -30,7 +30,7 @@ const read = Tool.make("t3_team_read", {
 const update = Tool.make("t3_team_update", {
   ...shared,
   description:
-    "Change this project's Crew board using its latest revision and a unique commandId; reuse that id only for identical retries. Coordinator manages initiatives/tasks. Worker reports its own evidence for independent review; never self-approve. Mode swarm starts now; teamwork requires user-only brief approval. Board recipients get queued messages; omit recipients for a quiet update. Delegate with t3_team_delegate, not task.reserve/assign.",
+    "Change Crew using its latest revision and unique commandId; reuse only for identical retries. Worker task.report requires its current attemptId; status review requires an immutable artifact (full commit SHA or content SHA-256 and path). task.review requires that exact submissionRevision; never self-approve. Changes wake the worker for revision and fresh review. milestone.accept requires integrated artifact and verification evidence. initiative.policy bounds concurrent assignments, attempts and submissions. Swarm starts now; teamwork needs user brief approval. Board recipients get queued messages; omit for a quiet update. Use t3_team_delegate, not task.reserve/assign.",
   parameters: Schema.Struct({
     commandId: TeamworkMutateInput.fields.commandId,
     expectedRevision: TeamworkMutateInput.fields.expectedRevision,

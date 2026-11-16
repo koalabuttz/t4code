@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./crewHistory": {
+      "types": "./src/crewHistory.ts",
+      "import": "./src/crewHistory.ts"
+    },
     "./crewExecution": {
       "types": "./src/crewExecution.ts",
       "import": "./src/crewExecution.ts"

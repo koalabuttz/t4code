@@ -26,6 +26,8 @@ export function slashCommandItemsForPromptPosition(
       (item.type === "slash-command" &&
         item.command !== "side" &&
         item.command !== "btw" &&
+        item.command !== "crew" &&
+        item.command !== "swarm" &&
         item.command !== "clear"),
   );
 }

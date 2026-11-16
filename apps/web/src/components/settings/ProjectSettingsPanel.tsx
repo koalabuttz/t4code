@@ -3,7 +3,11 @@ import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useEnvironmentsWithScope } from "../../state/session";
 import { mapAtomCommandResult, settlePromise } from "@t3tools/client-runtime/state/runtime";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopedProjectKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
 import { type EnvironmentId, type SidebarProjectGroupingMode } from "@t3tools/contracts";
 import {
@@ -426,6 +430,23 @@ function ProjectDetail({
   // rule here so "Keep separate" can be undone.
   const checkoutControls = (member: SidebarProjectGroupMember) => (
     <div className="flex w-full min-w-0 items-center gap-2 @min-[32rem]/settings-row:w-auto">
+      {environmentById.get(member.environmentId)?.serverConfig?.environment.capabilities
+        .projectTeamwork && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            void navigate({
+              to: "/projects/$projectKey/crew",
+              params: {
+                projectKey: scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+              },
+            })
+          }
+        >
+          Open crew
+        </Button>
+      )}
       <div className="min-w-0 flex-1 @min-[32rem]/settings-row:w-72 @min-[32rem]/settings-row:flex-none">
         <CheckoutGroupingSelect member={member} />
       </div>

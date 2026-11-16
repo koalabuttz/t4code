@@ -18,6 +18,8 @@ import * as Orchestration from "../mcp/OrchestratorMcpService.ts";
 import type { McpInvocationScope } from "../mcp/McpInvocationContext.ts";
 import * as Teamwork from "./TeamworkService.ts";
 import * as Mcp from "./TeamworkMcpService.ts";
+import { crewRetainsArtifacts } from "./artifactRetention.ts";
+import { CrewArtifacts } from "./CrewArtifacts.ts";
 
 it.effect(
   "reserves one worker across retries and enforces owner reports and independent review",
@@ -41,6 +43,10 @@ it.effect(
       client: undefined,
     };
     const threadLayer = Layer.mock(Threads.ThreadManagementService)({
+      getShellSnapshot: () =>
+        Effect.succeed({
+          threads: [{ id: worker, status: workerStatus, deletedAt: null }],
+        } as never),
       getThreadShell: (id) =>
         Effect.succeed({
           id,
@@ -69,24 +75,31 @@ it.effect(
       taskStatus: () => Effect.succeed(result),
     });
     const teamLayer = Teamwork.layer.pipe(
+      Layer.provide(
+        Layer.mock(CrewArtifacts)({
+          inspect: () => Effect.succeed({ status: "available", detail: "Fixture artifact" }),
+        }),
+      ),
       Layer.provide(threadLayer),
       Layer.provide(
         Layer.mock(Projects.ProjectStoreV2)({
           get: () => Effect.succeedSome({ projectId } as never),
         }),
       ),
-      Layer.provide(Sqlite.layerMemory),
+      Layer.provideMerge(Sqlite.layerMemory),
     );
     return Effect.gen(function* () {
       const teams = yield* Teamwork.TeamworkService;
       const mcp = yield* Mcp.TeamworkMcpService;
-      let revision = 0;
       const update = (action: TeamworkAction) =>
-        teams.mutate({
-          projectId,
-          commandId: CommandId.make(`setup-${revision}`),
-          expectedRevision: revision++,
-          action,
+        Effect.gen(function* () {
+          const revision = (yield* teams.read(projectId)).snapshot.revision;
+          return yield* teams.mutate({
+            projectId,
+            commandId: CommandId.make(`setup-${revision}`),
+            expectedRevision: revision,
+            action,
+          });
         });
       yield* update({ type: "coordinator.set", threadId: coordinator });
       yield* update({
@@ -135,6 +148,8 @@ it.effect(
           id: "task",
           status: "review",
           evidence: "Focused expiration tests pass",
+          attemptId: "one",
+          artifact: { kind: "commit", ref: "a".repeat(40) },
         },
       });
       workerStatus = "completed";
@@ -166,10 +181,61 @@ it.effect(
           id: "task",
           decision: "approve",
           evidence: "Independently checked expiry and replay prevention",
+          submissionRevision: state.tasks[0]!.submission!.revision,
         },
       });
       assert.equal((yield* mcp.read(scope, { taskId: "task" })).snapshot.tasks[0]?.status, "done");
+      yield* update({
+        type: "initiative.policy",
+        id: "initiative",
+        policy: { maxConcurrent: 1, maxAttempts: 3, maxSubmissions: 4 },
+      });
+      yield* update({
+        type: "task.create",
+        id: "next-task",
+        initiativeId: "initiative",
+        title: "Next",
+        brief: "Next assignment",
+        criteria: "Tested",
+        roleId: null,
+        milestoneId: null,
+        dependencies: [],
+        knowledgeIds: [],
+      });
+      workerStatus = "running";
+      assert.isTrue(
+        Result.isFailure(
+          yield* Effect.result(
+            update({ type: "task.reserve", id: "next-task", delegationId: "next" }),
+          ),
+        ),
+      );
+      workerStatus = "completed";
+      yield* update({ type: "task.reserve", id: "next-task", delegationId: "next" });
+      yield* update({ type: "task.reset", id: "next-task", status: "cancelled" });
+      assert.isTrue(yield* crewRetainsArtifacts([worker]));
+      assert.isFalse(yield* crewRetainsArtifacts([coordinator]));
       yield* teams.drain;
+      yield* update({ type: "initiative.status", id: "initiative", status: "completed" });
+      assert.isFalse(yield* crewRetainsArtifacts([worker]));
+      yield* teams.drain;
+      yield* update({ type: "initiative.archive", id: "initiative" });
+      const archived = yield* mcp.read(scope, { archived: true, taskId: "task" });
+      assert.equal(archived.snapshot.tasks[0]?.evidence, "Focused expiration tests pass");
+      assert.equal(archived.snapshot.initiatives[0]?.status, "completed");
+      assert.equal(archived.history?.archives?.[0]?.taskCount, 2);
+      assert.equal(
+        (yield* mcp.read(scope, { artifactTaskId: "task" })).artifact?.status,
+        "available",
+      );
+      assert.equal((yield* mcp.read(scope, {})).snapshot.tasks.length, 0);
+      const history = yield* mcp.read(scope, {
+        history: true,
+        taskId: "task",
+        query: "expiration",
+      });
+      assert.equal(history.history?.events[0]?.kind, "task.report");
+      assert.equal(history.history?.events[0]?.text, "Focused expiration tests pass");
     }).pipe(
       Effect.provide(
         Mcp.layer.pipe(

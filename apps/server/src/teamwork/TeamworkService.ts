@@ -3,11 +3,14 @@ import {
   MessageId,
   ProjectId,
   TeamworkAction,
+  TeamworkArchive,
   TeamworkError,
   TeamworkHistoryResult,
   TeamworkReadResult,
   TeamworkSnapshot,
+  TeamworkContext,
   type TeamworkTaskExecution,
+  type OrchestrationV2ThreadShell,
   ThreadId,
   isProviderNativeSubagentThread,
   isRuntimeModeAbove,
@@ -32,6 +35,8 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import { DispatchModeLimit } from "../orchestration-v2/DispatchModeLimit.ts";
 import { RuntimeMode, ProviderInteractionMode } from "@t3tools/contracts";
 import { decideTeamwork, emptyTeamwork } from "./decide.ts";
+import { crewContext } from "./context.ts";
+import { CrewArtifacts } from "./CrewArtifacts.ts";
 
 const DeliveryPayload = Schema.Struct({
   text: Schema.String,
@@ -47,15 +52,25 @@ const decodeState = Schema.decodeUnknownEffect(Schema.fromJsonString(TeamworkSna
 const decodeDelivery = Schema.decodeUnknownEffect(Schema.fromJsonString(DeliveryPayload));
 const decodeAction = Schema.decodeUnknownEffect(Schema.fromJsonString(TeamworkAction));
 const decodeRead = Schema.decodeUnknownEffect(TeamworkReadResult);
-const decodeHistory = Schema.decodeEffect(TeamworkHistoryResult);
+const decodeHistory = Schema.decodeUnknownEffect(TeamworkHistoryResult);
 const encodeAction = Schema.encodeEffect(Schema.fromJsonString(TeamworkAction));
 const encodeState = Schema.encodeEffect(Schema.fromJsonString(TeamworkSnapshot));
+const decodeArchive = Schema.decodeUnknownEffect(Schema.fromJsonString(TeamworkArchive));
+const decodeContext = Schema.decodeUnknownEffect(Schema.fromJsonString(TeamworkContext));
+const encodeArchive = Schema.encodeEffect(Schema.fromJsonString(TeamworkArchive));
 const encodeDelivery = Schema.encodeEffect(Schema.fromJsonString(DeliveryPayload));
 const isTeamworkError = Schema.is(TeamworkError);
 const storageError = (cause: unknown) =>
   isTeamworkError(cause)
     ? cause
     : new TeamworkError({ reason: "storage", message: "Could not access project crew state." });
+const workerBusy = (thread: OrchestrationV2ThreadShell) =>
+  thread.deletedAt === null &&
+  (!["idle", "completed", "failed", "interrupted", "cancelled", "rolled_back"].includes(
+    thread.activityRunStatus ?? thread.status ?? "",
+  ) ||
+    thread.pendingRuntimeRequest != null ||
+    (thread.pendingBackgroundTasks?.length ?? 0) > 0);
 
 export class TeamworkService extends Context.Service<
   TeamworkService,
@@ -86,6 +101,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const projects = yield* ProjectStore.ProjectStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
+  const artifacts = yield* CrewArtifacts;
   const locks = yield* KeyedLock.make<ProjectId>();
   const changes = yield* PubSub.unbounded<ProjectId>();
 
@@ -128,6 +144,21 @@ const make = Effect.gen(function* () {
     }
     return null;
   });
+
+  const requireStopped = Effect.fn("TeamworkService.requireStopped")(function* (
+    threadIds: ReadonlyArray<ThreadId>,
+  ) {
+    for (const id of new Set(threadIds)) {
+      const thread = yield* threads.getThreadShell(id).pipe(Effect.mapError(storageError));
+      if (!thread || thread.deletedAt !== null) continue;
+      if (workerBusy(thread))
+        return yield* new TeamworkError({
+          reason: "invalid-state",
+          message:
+            "Wait for the previous coordinator and workers to stop before resuming or replacing work. A delivered stop request is not yet a stopped worker.",
+        });
+    }
+  });
   const load = Effect.fn("TeamworkService.load")(function* (projectId: ProjectId) {
     const rows = yield* sql<{
       payload_json: string;
@@ -142,20 +173,139 @@ const make = Effect.gen(function* () {
     const snapshot = yield* load(projectId);
     const rows =
       yield* sql`SELECT id, thread_id AS "threadId", kind, status FROM project_teamwork_outbox WHERE project_id = ${projectId} ORDER BY revision DESC, id DESC LIMIT 60`;
-    return yield* decodeRead({ snapshot, deliveries: rows });
+    return yield* decodeRead({
+      snapshot,
+      deliveries: rows,
+      capabilities: ["archive", "submissions", "context", "artifacts"],
+      context:
+        snapshot.coordinatorThreadId === null
+          ? null
+          : crewContext(snapshot, actor ?? snapshot.coordinatorThreadId),
+    });
   }, Effect.mapError(storageError));
   const history = Effect.fn("TeamworkService.history")(function* (
     input: typeof TeamworkHistoryInput.Type,
     actor: ThreadId | null = null,
   ) {
     yield* authorize(input.projectId, actor);
+    if (input.artifactTaskId !== undefined || input.artifactMilestoneId !== undefined) {
+      const state = yield* load(input.projectId);
+      const taskSource =
+        input.artifactTaskId === undefined
+          ? []
+          : yield* sql<{
+              initiative_id: string;
+            }>`SELECT initiative_id FROM project_teamwork_task_ids WHERE project_id = ${input.projectId} AND task_id = ${input.artifactTaskId}`;
+      const initiativeId = taskSource[0]?.initiative_id ?? input.initiativeId;
+      const archived = yield* sql<{
+        payload_json: string;
+      }>`SELECT payload_json FROM project_teamwork_archive WHERE project_id = ${input.projectId} AND initiative_id = ${initiativeId ?? null}`;
+      const archive = archived[0] ? yield* decodeArchive(archived[0].payload_json) : null;
+      const task = [...state.tasks, ...(archive?.tasks ?? [])].find(
+        (t) => t.id === input.artifactTaskId,
+      );
+      const initiative =
+        state.initiatives.find((i) => i.id === initiativeId) ?? archive?.initiative;
+      const verification = initiative?.milestones.find(
+        (m) => m.id === input.artifactMilestoneId,
+      )?.verification;
+      const artifact =
+        input.artifactTaskId === undefined ? verification?.artifact : task?.submission?.artifact;
+      if (!artifact)
+        return yield* decodeHistory({
+          events: [],
+          artifact: {
+            status: "unavailable",
+            detail: "No immutable artifact was recorded for this submission.",
+          },
+        });
+      const project = yield* projects.get(input.projectId);
+      const sourceThreadId =
+        input.artifactTaskId === undefined ? verification?.threadId : task?.ownerThreadId;
+      const thread = sourceThreadId ? yield* threads.getThreadShell(sourceThreadId) : null;
+      const roots = [
+        ...(Option.isSome(project) ? [project.value.workspaceRoot] : []),
+        ...(thread?.projectId === input.projectId && thread.worktreePath
+          ? [thread.worktreePath]
+          : []),
+      ];
+      return yield* decodeHistory({
+        events: [],
+        artifact: yield* artifacts.inspect(artifact, roots),
+      });
+    }
+    if (input.contextThreadId !== undefined) {
+      yield* requireThread(input.projectId, input.contextThreadId);
+      const rows = yield* sql<{
+        payload_json: string;
+        run_id: string;
+        delivered_at: string;
+      }>`SELECT payload_json, run_id, delivered_at FROM project_teamwork_context WHERE project_id = ${input.projectId} AND thread_id = ${input.contextThreadId}`;
+      const row = rows[0];
+      return yield* decodeHistory({
+        events: [],
+        context: row
+          ? {
+              packet: yield* decodeContext(row.payload_json),
+              runId: row.run_id,
+              deliveredAt: row.delivered_at,
+            }
+          : null,
+      });
+    }
+    if (input.archived) {
+      const source =
+        input.taskId === undefined
+          ? []
+          : yield* sql<{
+              initiative_id: string;
+            }>`SELECT initiative_id FROM project_teamwork_task_ids WHERE project_id = ${input.projectId} AND task_id = ${input.taskId}`;
+      const initiativeId = input.initiativeId ?? source[0]?.initiative_id;
+      const rows = yield* sql<{
+        id: string;
+        title: string;
+        status: string;
+        revision: number;
+        archivedAt: string;
+        taskCount: number;
+      }>`SELECT initiative_id AS id, title, status, revision, archived_at AS "archivedAt", task_count AS "taskCount"
+        FROM project_teamwork_archive WHERE project_id = ${input.projectId}
+        AND revision < ${input.beforeRevision ?? Number.MAX_SAFE_INTEGER}
+        AND (${initiativeId ?? null} IS NULL OR initiative_id = ${initiativeId ?? null})
+        AND (${input.taskId ?? null} IS NULL OR initiative_id = ${source[0]?.initiative_id ?? null})
+        AND instr(lower(payload_json), lower(${input.query?.trim() ?? ""})) > 0
+        ORDER BY revision DESC LIMIT 21`;
+      const detail =
+        initiativeId === undefined
+          ? []
+          : yield* sql<{ payload_json: string }>`
+        SELECT payload_json FROM project_teamwork_archive
+        WHERE project_id = ${input.projectId} AND initiative_id = ${initiativeId}`;
+      return yield* decodeHistory({
+        events: [],
+        archives: rows.slice(0, 20),
+        archive: detail[0] ? yield* decodeArchive(detail[0].payload_json) : null,
+        nextBeforeRevision: rows.length > 20 ? rows[19]!.revision : null,
+      });
+    }
     const rows = yield* sql<{
       revision: number;
       actor_thread_id: string | null;
       action_json: string;
       created_at: string;
-    }>`SELECT revision, actor_thread_id, action_json, created_at FROM project_teamwork_events WHERE project_id = ${input.projectId} AND revision < ${input.beforeRevision ?? Number.MAX_SAFE_INTEGER} ORDER BY revision DESC LIMIT 40`;
-    const events = yield* Effect.forEach(rows, (row) =>
+    }>`SELECT revision, actor_thread_id, action_json, created_at FROM project_teamwork_events
+      WHERE project_id = ${input.projectId} AND revision < ${input.beforeRevision ?? Number.MAX_SAFE_INTEGER}
+      AND (${input.atRevision ?? null} IS NULL OR revision = ${input.atRevision ?? null})
+      AND (${input.taskId ?? null} IS NULL OR (json_extract(action_json, '$.id') = ${input.taskId ?? null}
+        AND json_extract(action_json, '$.type') LIKE 'task.%'))
+      AND (${input.initiativeId ?? null} IS NULL
+        OR json_extract(action_json, '$.initiativeId') = ${input.initiativeId ?? null}
+        OR (json_extract(action_json, '$.type') LIKE 'initiative.%' AND json_extract(action_json, '$.id') = ${input.initiativeId ?? null})
+        OR (json_extract(action_json, '$.type') LIKE 'task.%' AND json_extract(action_json, '$.id') IN
+          (SELECT task_id FROM project_teamwork_task_ids WHERE project_id = ${input.projectId} AND initiative_id = ${input.initiativeId ?? null})))
+      AND instr(lower(action_json), lower(${input.query?.trim() ?? ""})) > 0
+      ORDER BY revision DESC LIMIT 41`;
+    const events = yield* Effect.forEach(rows.slice(0, 40), (row) =>
       decodeAction(row.action_json).pipe(
         Effect.map((action) => ({
           revision: row.revision,
@@ -165,7 +315,10 @@ const make = Effect.gen(function* () {
         })),
       ),
     );
-    return yield* decodeHistory({ events });
+    return yield* decodeHistory({
+      events,
+      nextBeforeRevision: rows.length > 40 ? rows[39]!.revision : null,
+    });
   }, Effect.mapError(storageError));
 
   const execution = Effect.fn("TeamworkService.execution")(function* (
@@ -342,6 +495,52 @@ const make = Effect.gen(function* () {
               reason: "conflict",
               message: "The team changed. Refresh its state and retry your action.",
             });
+          if (input.action.type === "task.reserve") {
+            const taskId = input.action.id;
+            const task = state.tasks.find((t) => t.id === taskId);
+            const initiative = state.initiatives.find((i) => i.id === task?.initiativeId);
+            if (initiative) {
+              const assignments = state.tasks.filter((t) => t.initiativeId === initiative.id);
+              const occupied = assignments.filter((t) =>
+                ["delegating", "running", "blocked", "review"].includes(t.status),
+              );
+              const assignedWorkers = new Set(
+                occupied.flatMap((t) => (t.ownerThreadId ? [t.ownerThreadId] : [])),
+              );
+              const stops = yield* sql<{
+                thread_id: string;
+              }>`SELECT DISTINCT thread_id FROM project_teamwork_outbox WHERE project_id = ${input.projectId} AND kind = 'stop' AND json_extract(payload_json, '$.initiativeId') = ${initiative.id}`;
+              const previousWorkers = new Set([
+                ...assignments.flatMap((t) => (t.ownerThreadId ? [t.ownerThreadId] : [])),
+                ...stops.map((s) => s.thread_id),
+              ]);
+              const shell = yield* threads
+                .getShellSnapshot({ projectId: input.projectId, unsettledOnly: true })
+                .pipe(Effect.mapError(storageError));
+              const finishing = shell.threads.filter(
+                (t) => previousWorkers.has(t.id) && !assignedWorkers.has(t.id) && workerBusy(t),
+              );
+              if (occupied.length + finishing.length >= (initiative.policy?.maxConcurrent ?? 4))
+                return yield* new TeamworkError({
+                  reason: "invalid-state",
+                  message:
+                    "The concurrency limit includes accepted or replaced workers that have not stopped yet. Wait for execution to finish before assigning more work.",
+                });
+            }
+          }
+          if (
+            input.action.type === "coordinator.set" &&
+            state.coordinatorThreadId !== null &&
+            state.coordinatorThreadId !== input.action.threadId
+          )
+            yield* requireStopped([
+              state.coordinatorThreadId,
+              ...state.tasks.flatMap((task) =>
+                task.ownerThreadId && !["done", "cancelled"].includes(task.status)
+                  ? [task.ownerThreadId]
+                  : [],
+              ),
+            ]);
           if (input.action.type === "task.reserve" || input.action.type === "coordinator.set") {
             const action = input.action;
             const task =
@@ -361,6 +560,13 @@ const make = Effect.gen(function* () {
                 message:
                   "Finish or retry the previous worker's stop before replacing its assignment or coordinator.",
               });
+            const deliveredStops = yield* sql<{
+              thread_id: string;
+            }>`SELECT DISTINCT thread_id FROM project_teamwork_outbox
+              WHERE project_id = ${input.projectId} AND kind = 'stop' AND status = 'delivered'
+              AND (${action.type === "coordinator.set"} OR json_extract(payload_json, '$.taskId') = ${task?.id ?? null}
+                OR (json_extract(payload_json, '$.taskId') IS NULL AND json_extract(payload_json, '$.initiativeId') = ${task?.initiativeId ?? null}))`;
+            yield* requireStopped(deliveredStops.map((row) => ThreadId.make(row.thread_id)));
           }
           if (
             input.action.type === "initiative.approve" ||
@@ -374,8 +580,54 @@ const make = Effect.gen(function* () {
                 message:
                   "Finish or retry the outstanding worker stops before resuming this initiative.",
               });
+            const stopped = yield* sql<{
+              thread_id: string;
+            }>`SELECT DISTINCT thread_id FROM project_teamwork_outbox WHERE project_id = ${input.projectId} AND kind = 'stop' AND status = 'delivered' AND json_extract(payload_json, '$.initiativeId') = ${input.action.id}`;
+            yield* requireStopped(stopped.map((row) => ThreadId.make(row.thread_id)));
           }
-          const decision = decideTeamwork(state, input.action, actor, now, input.commandId);
+          let archive: TeamworkArchive | undefined;
+          if (input.action.type === "initiative.create") {
+            const existing =
+              yield* sql`SELECT initiative_id FROM project_teamwork_archive WHERE project_id = ${input.projectId} AND initiative_id = ${input.action.id}`;
+            if (existing.length)
+              return yield* new TeamworkError({
+                reason: "conflict",
+                message: "Restore the archived initiative instead of reusing its identity.",
+              });
+          }
+          if (input.action.type === "task.create") {
+            const existing =
+              yield* sql`SELECT task_id FROM project_teamwork_task_ids WHERE project_id = ${input.projectId} AND task_id = ${input.action.id}`;
+            if (existing.length)
+              return yield* new TeamworkError({
+                reason: "conflict",
+                message: "This task identity already belongs to active or archived work.",
+              });
+          }
+          if (input.action.type === "initiative.archive") {
+            const pending =
+              yield* sql`SELECT id FROM project_teamwork_outbox WHERE project_id = ${input.projectId}
+              AND status IN ('pending', 'failed') AND json_extract(payload_json, '$.initiativeId') = ${input.action.id} LIMIT 1`;
+            if (pending.length)
+              return yield* new TeamworkError({
+                reason: "invalid-state",
+                message: "Finish or retry outstanding deliveries before archiving this initiative.",
+              });
+          }
+          if (input.action.type === "initiative.restore") {
+            const rows = yield* sql<{
+              payload_json: string;
+            }>`SELECT payload_json FROM project_teamwork_archive WHERE project_id = ${input.projectId} AND initiative_id = ${input.action.id}`;
+            if (rows[0]) archive = yield* decodeArchive(rows[0].payload_json);
+          }
+          const decision = decideTeamwork(
+            state,
+            input.action,
+            actor,
+            now,
+            input.commandId,
+            archive,
+          );
           if (input.action.type === "task.assign") {
             const child = yield* requireThread(input.projectId, input.action.threadId);
             if (
@@ -389,6 +641,8 @@ const make = Effect.gen(function* () {
           }
           if (Result.isFailure(decision)) return yield* decision.failure;
           const { snapshot, intents } = decision.success;
+          if (input.action.type === "coordinator.pause")
+            yield* sql`UPDATE project_teamwork_outbox SET status = 'cancelled' WHERE project_id = ${input.projectId} AND kind = 'message' AND status IN ('pending', 'failed')`;
           const encoded = yield* encodeState(snapshot);
           if (Buffer.byteLength(encoded) > 750_000)
             return yield* new TeamworkError({
@@ -397,6 +651,18 @@ const make = Effect.gen(function* () {
             });
           yield* sql`INSERT INTO project_teamwork (project_id, revision, payload_json) VALUES (${input.projectId}, ${snapshot.revision}, ${encoded}) ON CONFLICT(project_id) DO UPDATE SET revision = excluded.revision, payload_json = excluded.payload_json`;
           yield* sql`INSERT INTO project_teamwork_events (project_id, revision, command_id, actor_thread_id, action_json, created_at) VALUES (${input.projectId}, ${snapshot.revision}, ${input.commandId}, ${actor}, ${actionJson}, ${now})`;
+          if (input.action.type === "task.create")
+            yield* sql`INSERT INTO project_teamwork_task_ids (project_id, task_id, initiative_id) VALUES (${input.projectId}, ${input.action.id}, ${input.action.initiativeId})`;
+          if (input.action.type === "initiative.archive") {
+            const id = input.action.id;
+            const initiative = state.initiatives.find((i) => i.id === id)!;
+            const tasks = state.tasks.filter((t) => t.initiativeId === id);
+            const payload = yield* encodeArchive({ initiative, tasks });
+            yield* sql`INSERT INTO project_teamwork_archive (project_id, initiative_id, revision, archived_at, title, status, task_count, payload_json)
+              VALUES (${input.projectId}, ${id}, ${snapshot.revision}, ${now}, ${initiative.title}, ${initiative.status}, ${tasks.length}, ${payload})`;
+          }
+          if (input.action.type === "initiative.restore")
+            yield* sql`DELETE FROM project_teamwork_archive WHERE project_id = ${input.projectId} AND initiative_id = ${input.action.id}`;
           if (
             input.action.type === "coordinator.set" &&
             state.coordinatorThreadId !== input.action.threadId
