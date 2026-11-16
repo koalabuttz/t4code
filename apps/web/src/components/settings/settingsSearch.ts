@@ -1333,6 +1333,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
   },
   {
+    id: "outpost-fleets",
+    title: "Outpost fleets",
+    to: "/settings/connections",
+    searchTerms: ["polytoken sessions projects plugin surfaces stopped transcripts attachments"],
+  },
+  {
     id: "load-balancing",
     title: "Load balancing",
     to: "/settings/connections",

@@ -125,6 +125,8 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as DocumentText from "./provider/DocumentText.ts";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
+import * as Outpost from "./polytoken/Outpost.ts";
+import * as OutpostSurfaces from "./polytoken/OutpostSurfaces.ts";
 import * as TeamworkService from "./teamwork/TeamworkService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import * as GuestShareService from "./guest/GuestShareService.ts";
@@ -1473,6 +1475,8 @@ export const layerWsRpc = (
       const providerSessionManager = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const scheduledTasks = yield* ScheduledTasks.ScheduledTaskService;
       const teamwork = yield* TeamworkService.TeamworkService;
+      const outpost = yield* Outpost.Outpost;
+      const outpostSurfaces = yield* OutpostSurfaces.OutpostSurfaces;
       const secretRequests = yield* SecretRequests.SecretRequests;
       const guestShares = yield* GuestShareService.GuestShareService;
       const pullRequests = yield* PullRequestService.PullRequestService;
@@ -2297,6 +2301,16 @@ export const layerWsRpc = (
           providerSessionManager.subscribePromptSuggestion(input.threadId),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
           scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
+        [WS_METHODS.outpostSubscribe]: () => outpost.changes,
+        [WS_METHODS.outpostSave]: (input) => outpost.save(input),
+        [WS_METHODS.outpostRemove]: (input) => outpost.remove(input.connectionId),
+        [WS_METHODS.outpostTest]: (input) => outpost.test(input.connectionId),
+        [WS_METHODS.outpostHistory]: (input) => outpost.history(input),
+        [WS_METHODS.outpostAttachment]: (input) => outpost.attachment(input),
+        [WS_METHODS.outpostAction]: (input) => outpost.action(input),
+        [WS_METHODS.outpostSurfacesSubscribe]: (input) => outpostSurfaces.changes(input),
+        [WS_METHODS.outpostSurfaceDocument]: (input) => outpostSurfaces.document(input),
+        [WS_METHODS.outpostSurfaceRequest]: (input) => outpostSurfaces.request(input),
         [WS_METHODS.teamworkSubscribe]: (input) => teamwork.subscribe(input.projectId),
         [WS_METHODS.teamworkMutate]: (input) => teamwork.mutate(input),
         [WS_METHODS.teamworkHistory]: (input) => teamwork.history(input),

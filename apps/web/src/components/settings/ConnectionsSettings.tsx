@@ -44,6 +44,7 @@ import { searchableSetting } from "./settingsSearch";
 import { ConnectDeviceApprovalSettings } from "./ConnectDeviceApprovalSettings";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { OutpostSettings } from "./OutpostSettings";
 import { LinkedEnvironmentsSettings } from "./LinkedEnvironmentsSettings";
 import { usePeerLinkHosts } from "~/state/peerLinks";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
@@ -171,7 +172,10 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
   return view === "access" ? (
     <AccessSettings />
   ) : (
-    <ConnectionsSettingsContent view="environments" accessEnvironmentId={null} />
+    <>
+      <ConnectionsSettingsContent view="environments" accessEnvironmentId={null} />
+      <OutpostSettings />
+    </>
   );
 }
 

@@ -52,6 +52,24 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("separates Outpost readers, session operators, and connection administrators", () => {
+    for (const method of [
+      WS_METHODS.outpostSubscribe,
+      WS_METHODS.outpostHistory,
+      WS_METHODS.outpostAttachment,
+      WS_METHODS.outpostSurfacesSubscribe,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    for (const method of [
+      WS_METHODS.outpostAction,
+      WS_METHODS.outpostSurfaceDocument,
+      WS_METHODS.outpostSurfaceRequest,
+    ])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    for (const method of [WS_METHODS.outpostSave, WS_METHODS.outpostRemove, WS_METHODS.outpostTest])
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthSettingsWriteScope);
+  });
+
   it("separates passive terminal observation from operations that can change a shell", () => {
     for (const method of [WS_METHODS.terminalObserve, WS_METHODS.subscribeTerminalMetadata]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthTerminalReadScope);

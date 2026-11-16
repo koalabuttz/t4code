@@ -1,6 +1,6 @@
 import type { QueryPersistence } from "./queryPersistence.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
-import { followStreamInEnvironment } from "./environmentStreams.ts";
+import { followStreamInEnvironment, runStreamInEnvironment } from "./environmentStreams.ts";
 import { reuseUnchanged } from "./serverConfigProjection.ts";
 export { runStreamInEnvironment, followStreamInEnvironment } from "./environmentStreams.ts";
 import {
@@ -26,10 +26,12 @@ import {
   type EnvironmentRpcStreamFailure,
   type EnvironmentRpcStreamValue,
   type EnvironmentSubscriptionRpcTag,
+  type EnvironmentStreamCommandRpcTag,
   type EnvironmentUnaryRpcTag,
   EnvironmentRpcUnavailableError,
   request,
   requestGuarded,
+  runStreamGuarded,
   RpcPermissionGuard,
   subscribe,
 } from "../rpc/client.ts";
@@ -1031,6 +1033,49 @@ export function createEnvironmentRpcSubscriptionAtomFamily<
         : options.transform(stream);
     },
   });
+}
+
+export function createEnvironmentRpcStreamCommand<
+  R,
+  ER,
+  TTag extends EnvironmentStreamCommandRpcTag,
+>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, ER>,
+  options: { readonly label: string; readonly tag: TTag },
+) {
+  const permissions = createCommandPermissions(runtime, options.tag);
+  const command = createRuntimeCommand(runtime, {
+    label: options.label,
+    execute: Effect.fn("EnvironmentRpc.streamCommand")(function* (
+      target: {
+        readonly environmentId: EnvironmentIdType;
+        readonly input: EnvironmentRpcInput<TTag>;
+        readonly onValue: (value: EnvironmentRpcStreamValue<TTag>) => void;
+        readonly signal: AbortSignal;
+      },
+      registry,
+    ) {
+      if (target.signal.aborted) return yield* Effect.interrupt;
+      const cancelled = Effect.callback<never>((resume) => {
+        const abort = () => resume(Effect.interrupt);
+        target.signal.addEventListener("abort", abort, { once: true });
+        if (target.signal.aborted) abort();
+        return Effect.sync(() => target.signal.removeEventListener("abort", abort));
+      });
+      return yield* runStreamInEnvironment(
+        target.environmentId,
+        runStreamGuarded(options.tag, target.input),
+      ).pipe(
+        Stream.runForEach((value) => Effect.sync(() => target.onValue(value))),
+        Effect.provideService(RpcPermissionGuard, {
+          authorize: (environmentId, _method, payload) =>
+            permissions.authorize(registry, environmentId, payload),
+        }),
+        Effect.raceFirst(cancelled),
+      );
+    }),
+  });
+  return { ...command, permissionAtom: permissions.permissionAtom };
 }
 
 export function createEnvironmentRpcCommand<
