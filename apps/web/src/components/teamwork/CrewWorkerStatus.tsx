@@ -18,8 +18,8 @@ export function CrewWorkerStatus({
     task.ownerThreadId === null ? null : scopeThreadRef(environmentId, task.ownerThreadId),
   );
   const connected = useEnvironmentShellStatus(environmentId) === "live";
-  const familyThreadId = worker?.lineage.rootThreadId ?? task.ownerThreadId;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Retain the assigned worker's original family after coordinator handover.
+  const familyThreadId = task.ownerThreadId;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Keep the worker's family mounted; changing the key when its root arrives drops those same rows.
   useEffect(() => {
     if (familyThreadId === null) return;
     return threadFamilies.mount(appAtomRegistry, environmentId, familyThreadId);
