@@ -1,4 +1,5 @@
 import type { EnvironmentId, UnifiedSettings } from "@t3tools/contracts";
+import { USAGE_SOURCE_PRESETS } from "@t3tools/shared/usageLimits";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -40,13 +41,13 @@ export function UsageProviderSettings({
           !readOnly ? (
             <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
               <PlusIcon className="size-3" aria-hidden />
-              Add hub
+              Add source
             </Button>
           ) : null
         }
       >
         {entries.length === 0 ? (
-          <SettingsRow title="No hubs configured." />
+          <SettingsRow title="No usage sources configured." />
         ) : (
           entries.map(([id, source]) => {
             const label = source.label?.trim() || source.url;
@@ -56,7 +57,8 @@ export function UsageProviderSettings({
                 title={label}
                 description={
                   <span className="break-all">
-                    CLI Proxy{source.enabled ? "" : " · Disabled"}
+                    {USAGE_SOURCE_PRESETS[source.kind].label}
+                    {source.enabled ? "" : " · Disabled"}
                     {label !== source.url ? ` · ${source.url}` : ""}
                   </span>
                 }
@@ -104,9 +106,8 @@ function RemoveUsageProviderButton({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {label}?</AlertDialogTitle>
             <AlertDialogDescription>
-              The hub's management key is deleted from this server. Its accounts leave the Limits
-              view; the hub itself is untouched. Add it again with the URL and key to bring them
-              back.
+              The saved credential is deleted from this server and this source leaves the Limits
+              view. You can add it again at any time.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -118,7 +119,7 @@ function RemoveUsageProviderButton({
                 onConfirm();
               }}
             >
-              Remove hub
+              Remove source
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

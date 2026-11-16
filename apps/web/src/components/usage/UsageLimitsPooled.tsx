@@ -1,6 +1,7 @@
 import {
   CHATGPT_USAGE_URL,
   collectLimitAccounts,
+  collectBillingSources,
   collectExternalUsageLinks,
   collectLimitNotices,
   collectLimitPools,
@@ -31,6 +32,7 @@ import {
 } from "react";
 
 import { ensureLocalApi } from "../../localApi";
+import { BillingSources } from "./BillingSources";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
@@ -631,13 +633,18 @@ export function UsageLimitsPooled({
   const pools = collectLimitPools(collectLimitAccounts(presentations), now);
   const notices = collectLimitNotices(presentations);
   const externalLinks = collectExternalUsageLinks(presentations);
+  const billingSources = collectBillingSources(presentations);
   return (
     <div className="flex flex-col gap-8">
-      {pools.length === 0 && notices.length === 0 && externalLinks.length === 0 ? (
+      {pools.length === 0 &&
+      notices.length === 0 &&
+      externalLinks.length === 0 &&
+      billingSources.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No provider on the selected environments reports subscription limits.
         </p>
       ) : null}
+      <BillingSources sources={billingSources} now={now} />
       <SegmentPopoverContext value={segmentPopover}>
         {pools.map((pool) => (
           <Fragment key={pool.driver}>

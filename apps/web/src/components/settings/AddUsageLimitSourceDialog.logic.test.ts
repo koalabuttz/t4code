@@ -5,6 +5,21 @@ import { describe, expect, it } from "vite-plus/test";
 import { sourceIdFromUrl } from "./AddUsageLimitSourceDialog.logic";
 
 describe("adding usage limit sources", () => {
+  it("keeps multiple API accounts and GLM billing types separate at the same origin", () => {
+    let settings: ServerSettings = DEFAULT_SERVER_SETTINGS;
+    for (const kind of ["zai-coding", "zai-api", "zai-coding"] as const) {
+      const url = "https://api.z.ai";
+      const id = sourceIdFromUrl(url, settings.usageLimitSources, kind);
+      settings = applyServerSettingsPatch(settings, {
+        usageLimitSources: { [id]: { kind, url, managementKey: "key", enabled: true } },
+      });
+    }
+    expect(Object.values(settings.usageLimitSources).map((source) => source.kind)).toEqual([
+      "zai-coding",
+      "zai-api",
+      "zai-coding",
+    ]);
+  });
   it.each([
     ["http://proxy.test:8318/hub-a", "http://proxy.test:8318/hub-b"],
     ["localhost:8318", "localhost:9318"],
