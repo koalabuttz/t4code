@@ -44,6 +44,8 @@ select known environment-local checkouts; the group itself does not store inheri
 
 ## Durable intent and side effects
 
+Project teamwork keeps its coordination journal and outbox separate from thread execution so board traffic does not fan out through every thread projection. Its [service](../../apps/server/src/teamwork/TeamworkService.ts) commits state, command receipts, and delivery intent together, then delegates execution to ThreadManagementService. Delivery identities must remain stable across restart: execution can commit before its outbox acknowledgement. A task's reservation spans a separate delegation transaction; retry with the same request id to reconcile it, or reset it before a new assignment. Thread projections remain authoritative for whether an agent is actually running; a board's task status records reported progress and review.
+
 Orchestration state is decided as events, and projections are the source of truth once they apply
 them. The [v2 orchestrator](../../apps/server/src/orchestration-v2/Orchestrator.ts) serializes commands and
 decides events without performing provider or filesystem work.
