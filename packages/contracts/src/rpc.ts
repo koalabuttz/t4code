@@ -553,6 +553,9 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
+  teamworkSubscribe: "teamwork.subscribe",
+  teamworkMutate: "teamwork.mutate",
+  teamworkHistory: "teamwork.history",
   scheduledTasksUpsert: "scheduledTasks.upsert",
   scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
   scheduledTasksDelete: "scheduledTasks.delete",
@@ -2029,6 +2032,23 @@ const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe
   stream: true,
 });
 
+const WsTeamworkSubscribeRpc = Rpc.make(WS_METHODS.teamworkSubscribe, {
+  payload: TeamworkReadInput,
+  success: TeamworkReadResult,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsTeamworkMutateRpc = Rpc.make(WS_METHODS.teamworkMutate, {
+  payload: TeamworkMutateInput,
+  success: TeamworkReadResult,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+});
+const WsTeamworkHistoryRpc = Rpc.make(WS_METHODS.teamworkHistory, {
+  payload: TeamworkHistoryInput,
+  success: TeamworkHistoryResult,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksUpsertRpc = Rpc.make(WS_METHODS.scheduledTasksUpsert, {
   payload: ScheduledTaskUpsertInput,
   success: ScheduledTaskMutationResult,
@@ -2173,6 +2193,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksSubscribeRpc,
+  WsTeamworkSubscribeRpc,
+  WsTeamworkMutateRpc,
+  WsTeamworkHistoryRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,
@@ -2333,3 +2356,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeCommandOutputRpc,
   WsOrchestrationV2SubscribePromptSuggestionRpc,
 ).middleware(RpcScopeAuthorization);
+import {
+  TeamworkReadInput,
+  TeamworkReadResult,
+  TeamworkMutateInput,
+  TeamworkError,
+  TeamworkHistoryInput,
+  TeamworkHistoryResult,
+} from "./teamwork.ts";

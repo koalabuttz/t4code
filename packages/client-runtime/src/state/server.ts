@@ -1503,6 +1503,14 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
     }),
+    teamworkLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:teamwork:live",
+      tag: WS_METHODS.teamworkSubscribe,
+    }),
+    teamworkHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:teamwork:history",
+      tag: WS_METHODS.teamworkHistory,
+    }),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan. With
     // nothing to show yet, the server's last scan answers first, then a plain
@@ -1770,6 +1778,10 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.scheduledTasksUpsert,
       scheduler: configScheduler,
       concurrency: configConcurrency,
+    }),
+    mutateTeamwork: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:teamwork:mutate",
+      tag: WS_METHODS.teamworkMutate,
     }),
     setScheduledTaskEnabled: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:set-enabled",

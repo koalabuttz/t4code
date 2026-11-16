@@ -66,6 +66,9 @@ import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 import * as OrchestratorHandlers from "./toolkits/orchestrator/handlers.ts";
 import { OrchestratorToolkit } from "./toolkits/orchestrator/tools.ts";
+import { TeamworkToolkit } from "./toolkits/teamwork/tools.ts";
+import * as TeamworkHandlers from "./toolkits/teamwork/handlers.ts";
+import * as TeamworkMcpService from "../teamwork/TeamworkMcpService.ts";
 import * as PreviewHandlers from "./toolkits/preview/handlers.ts";
 import {
   PreviewSnapshotTool,
@@ -1259,6 +1262,9 @@ export const layerOrchestratorToolkit = toolkitRegistration(
 ).pipe(Layer.provide(OrchestratorMcpService.layer), Layer.provide(ThreadMetadataMcpService.layer));
 
 export const layerThreadToolkit = toolkitRegistration(ThreadToolkit, ThreadHandlers.layer);
+const layerTeamworkToolkit = toolkitRegistration(TeamworkToolkit, TeamworkHandlers.layer).pipe(
+  Layer.provide(TeamworkMcpService.layer.pipe(Layer.provide(OrchestratorMcpService.layer))),
+);
 
 const layerMessageToolkit = toolkitRegistration(MessageToolkit, MessageHandlers.layer);
 
@@ -1342,6 +1348,7 @@ export const layerMcpTransport = <RA, RE, RR>(registrations: Layer.Layer<RA, RE,
 export const layerTools = Layer.mergeAll(
   layerPreviewToolkit,
   layerOrchestratorToolkit,
+  layerTeamworkToolkit,
   layerThreadToolkit,
   layerAttachmentToolkit,
   layerProjectRegistration,
