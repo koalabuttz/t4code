@@ -1,5 +1,7 @@
 # Settings and project overrides
 
+For a persistent coordinator, worker roles, reviewed tasks, and shared project knowledge, see [Project teamwork](teamwork.md).
+
 On web and desktop, the "Applying settings for …" sentence at the top of Settings pages picks
 the project and environment a change applies to. Pages that only hold device preferences, such as
 Appearance, don't show it. They start at **All projects** and **All environments**
