@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Hex from "effect/encoding/Hex";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { makeClaudeConsole } from "./claudeConsole.ts";
 
 const Numeric = Schema.Union([Schema.Number, Schema.String]);
 const DeepSeekBalance = Schema.Struct({
@@ -97,6 +98,7 @@ function quotaWindow(
 export const makeBillingApi = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient;
   const digest = yield* Digest.Digest;
+  const claudeConsole = yield* makeClaudeConsole;
   const read = Effect.fn("BillingApi.read")(
     function* (config: UsageLimitSourceConfig, key: string) {
       const checkedAt = DateTime.formatIso(yield* DateTime.now);
@@ -105,7 +107,9 @@ export const makeBillingApi = Effect.gen(function* () {
           ? "https://api.deepseek.com"
           : config.kind === "abliteration"
             ? "https://api.abliteration.ai"
-            : "https://api.z.ai";
+            : config.kind === "anthropic"
+              ? "https://platform.claude.com"
+              : "https://api.z.ai";
       const url = URL.parse(config.url);
       if (
         !url ||
@@ -115,6 +119,9 @@ export const makeBillingApi = Effect.gen(function* () {
         config.kind === "cliproxy"
       ) {
         return yield* new BillingReadError({ reason: "endpoint" });
+      }
+      if (config.kind === "anthropic") {
+        return yield* claudeConsole.read(key, checkedAt, config.organizationId);
       }
       const fingerprint = Hex.encode(
         yield* digest.digest(

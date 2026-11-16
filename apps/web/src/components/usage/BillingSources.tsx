@@ -19,6 +19,9 @@ export function BillingSources({
       <div>
         <h2 className="text-sm font-medium">{source.label}</h2>
         <p className="text-xs text-muted-foreground">{source.environments.join(", ")}</p>
+        {source.limits?.accountLabel ? (
+          <p className="text-xs text-muted-foreground">{source.limits.accountLabel}</p>
+        ) : null}
       </div>
       {source.error ? (
         <p role="status" className="text-sm text-muted-foreground">
@@ -33,6 +36,14 @@ export function BillingSources({
           {formatUsageBalance(balance)} remaining
         </p>
       ))}
+      {source.limits?.monthlySpend ? (
+        <p className="text-sm text-muted-foreground">
+          This month (UTC):{" "}
+          {source.limits.monthlySpend.amount === null
+            ? "Spend unavailable"
+            : `${formatUsageBalance({ currency: source.limits.monthlySpend.currency, remaining: source.limits.monthlySpend.amount })} spent`}
+        </p>
+      ) : null}
       {source.limits?.windows.map((window) => (
         <div key={window.id} className="space-y-1">
           <div className="flex justify-between gap-3 text-xs">

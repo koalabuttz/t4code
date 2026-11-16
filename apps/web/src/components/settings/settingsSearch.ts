@@ -984,7 +984,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Usage providers",
     to: "/settings/providers",
     searchTerms: [
-      "usage sources CLIProxyAPI CLI proxy hub quota subscription limits management key add remove DeepSeek GLM Z.ai Abliteration API balance credits prepaid",
+      "usage sources CLIProxyAPI CLI proxy hub quota subscription limits management key add remove DeepSeek GLM Z.ai Abliteration Claude Anthropic API balance credits prepaid Console session spend",
     ],
     providerSettingsOnly: true,
   },

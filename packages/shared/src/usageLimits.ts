@@ -31,6 +31,7 @@ export const USAGE_SOURCE_PRESETS = {
   "zai-coding": { label: "GLM Coding Plan", url: "https://api.z.ai" },
   "zai-api": { label: "GLM prepaid API", url: "https://api.z.ai" },
   abliteration: { label: "Abliteration", url: "https://api.abliteration.ai" },
+  anthropic: { label: "Claude API", url: "https://platform.claude.com" },
 } as const satisfies Record<UsageLimitSourceKind, { label: string; url: string }>;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;

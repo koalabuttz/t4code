@@ -1,4 +1,4 @@
-import type { EnvironmentId, UnifiedSettings } from "@t3tools/contracts";
+import { type EnvironmentId, type UnifiedSettings, UsageLimitSourceId } from "@t3tools/contracts";
 import { USAGE_SOURCE_PRESETS } from "@t3tools/shared/usageLimits";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
@@ -31,7 +31,9 @@ export function UsageProviderSettings({
 }) {
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<UsageLimitSourceId | null>(null);
   const entries = Object.entries(sources);
+  const editedSource = editing ? sources[editing] : undefined;
 
   return (
     <>
@@ -64,10 +66,21 @@ export function UsageProviderSettings({
                 }
                 control={
                   !readOnly ? (
-                    <RemoveUsageProviderButton
-                      label={label}
-                      onConfirm={() => updateSettings({ usageLimitSources: { [id]: null } })}
-                    />
+                    <div className="flex gap-2">
+                      {source.kind === "anthropic" ? (
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => setEditing(UsageLimitSourceId.make(id))}
+                        >
+                          Update session
+                        </Button>
+                      ) : null}
+                      <RemoveUsageProviderButton
+                        label={label}
+                        onConfirm={() => updateSettings({ usageLimitSources: { [id]: null } })}
+                      />
+                    </div>
                   ) : null
                 }
               />
@@ -75,13 +88,24 @@ export function UsageProviderSettings({
           })
         )}
       </SettingsSection>
-      {adding && !readOnly ? (
+      {(adding || editedSource) && !readOnly ? (
         <AddUsageLimitSourceDialog
+          key={editing ?? "new"}
           open
-          onOpenChange={setAdding}
+          onOpenChange={(open) => {
+            if (!open) {
+              setAdding(false);
+              setEditing(null);
+            }
+          }}
           environmentId={environmentId}
           environmentLabel={environmentLabel}
           sources={sources}
+          {...(editing && editedSource
+            ? {
+                initialSource: { id: editing, config: editedSource },
+              }
+            : {})}
         />
       ) : null}
     </>
