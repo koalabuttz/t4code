@@ -28,6 +28,7 @@ const dependencies = (
   stop: () => Effect.Effect<void, Threads.ThreadManagementProviderInstanceDisabledError> = () =>
     Effect.void,
   status: () => "running" | "completed" = () => "completed",
+  deleted: (id: ThreadId) => boolean = () => false,
 ) =>
   Layer.mergeAll(
     Layer.mock(CrewArtifacts)({
@@ -39,20 +40,22 @@ const dependencies = (
     Layer.mock(Threads.ThreadManagementService)({
       getShellSnapshot: () => Effect.succeed({ threads: [] } as never),
       getThreadShell: (id) =>
-        Effect.succeed({
-          id,
-          projectId: id === "other-project" ? ProjectId.make("other") : projectId,
-          deletedAt: null,
-          status: status(),
-          creationSource: "mcp",
-          lineage: {
-            parentThreadId: id === coordinator ? null : coordinator,
-            relationshipToParent: id === coordinator ? null : "subagent",
-            rootThreadId: coordinator,
-          },
-          runtimeMode: mode(),
-          interactionMode: "default",
-        } as never),
+        deleted(id)
+          ? Effect.succeed(null)
+          : Effect.succeed({
+              id,
+              projectId: id === "other-project" ? ProjectId.make("other") : projectId,
+              deletedAt: null,
+              status: status(),
+              creationSource: "mcp",
+              lineage: {
+                parentThreadId: id === coordinator ? null : coordinator,
+                relationshipToParent: id === coordinator ? null : "subagent",
+                rootThreadId: coordinator,
+              },
+              runtimeMode: mode(),
+              interactionMode: "default",
+            } as never),
       sendToThread: (input) => deliver(input.commandId).pipe(Effect.as({} as never)),
       dispatch: () => stop().pipe(Effect.as({} as never)),
     }),
@@ -238,6 +241,7 @@ it.effect(
   () => {
     let stopFails = true;
     let stillRunning = false;
+    let workerDeleted = false;
     return Effect.gen(function* () {
       const teams = yield* Teamwork.TeamworkService;
       const sql = yield* SqlClient.SqlClient;
@@ -337,6 +341,26 @@ it.effect(
         ),
       );
       stillRunning = false;
+      yield* update({ type: "task.reserve", id: "task", delegationId: "deleted-worker" });
+      yield* update({
+        type: "task.assign",
+        id: "task",
+        delegationId: "deleted-worker",
+        threadId: ThreadId.make("worker"),
+        delegatedTaskId: NodeId.make("deleted-worker"),
+      });
+      workerDeleted = true;
+      yield* update({
+        type: "board.post",
+        initiativeId: "initiative",
+        text: "A stale client still targets the deleted worker.",
+        recipients: [ThreadId.make("worker")],
+      });
+      yield* teams.drain;
+      assert.equal((yield* teams.read(projectId)).deliveries[0]?.status, "failed");
+      yield* update({ type: "task.reset", id: "task", status: "ready" });
+      yield* teams.drain;
+      assert.equal((yield* teams.read(projectId)).deliveries[0]?.status, "delivered");
       yield* update({
         type: "coordinator.set",
         threadId: ThreadId.make("replacement-coordinator"),
@@ -378,6 +402,7 @@ it.effect(
                     )
                   : Effect.void,
               () => (stillRunning ? "running" : "completed"),
+              (id) => id === "worker" && workerDeleted,
             ),
           ),
           Layer.provideMerge(Sqlite.layerMemory),

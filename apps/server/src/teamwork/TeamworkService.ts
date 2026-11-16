@@ -395,6 +395,12 @@ const make = Effect.gen(function* () {
           const commandId = CommandId.make(`teamwork:${row.id}`);
           const threadId = ThreadId.make(row.thread_id);
           const execution = Effect.gen(function* () {
+            if (row.kind === "stop") {
+              const thread = yield* threads
+                .getThreadShell(threadId)
+                .pipe(Effect.mapError(storageError));
+              if (!thread || thread.deletedAt !== null) return;
+            }
             yield* requireThread(projectId, threadId);
             if (row.kind === "stop") {
               yield* threads.dispatch({
