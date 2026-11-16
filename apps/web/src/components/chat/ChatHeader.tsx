@@ -43,6 +43,7 @@ import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { useClientSettings } from "../../hooks/useSettings";
 import { GuestShareIndicator } from "./GuestShareControls";
+import { TeamworkButton } from "../teamwork/TeamworkPanel";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -399,6 +400,14 @@ export const ChatHeader = memo(function ChatHeader({
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
       {isServerThread ? <GuestShareIndicator threadRef={activeThreadRef} /> : null}
+      {isServerThread && activeProject ? (
+        <TeamworkButton
+          environmentId={activeThreadEnvironmentId}
+          projectId={activeProject.id}
+          threadId={activeThreadId}
+          onOpenThread={onOpenThread}
+        />
+      ) : null}
     </div>
   );
 });
