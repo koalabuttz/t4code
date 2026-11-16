@@ -21,7 +21,7 @@ const shared = {
 const read = Tool.make("t3_team_read", {
   ...shared,
   description:
-    "Read this project's teamwork board and revision, 12 entries per collection. Follow nextOffset to page. Summaries are shortened; initiativeId, taskId or knowledgeId returns that item's full text. Ordinary chat needs no team tools.",
+    "Read this project's Crew board and revision, 12 entries per collection. Follow nextOffset to page. Summaries are shortened; initiativeId, taskId or knowledgeId returns that item's full text. Ordinary chat needs no team tools.",
   parameters: Teamwork.TeamworkAgentReadInput,
   success: Teamwork.TeamworkAgentReadResult,
 })
@@ -30,7 +30,7 @@ const read = Tool.make("t3_team_read", {
 const update = Tool.make("t3_team_update", {
   ...shared,
   description:
-    "Change this project's team board using its latest revision and a unique commandId; reuse that id only for identical retries. Coordinator manages initiatives/tasks. Worker reports its own evidence for independent review; never self-approve. Teamwork brief approval is user-only. Board recipients get queued messages; omit recipients for a quiet update. Delegate with t3_team_delegate, not task.reserve/assign.",
+    "Change this project's Crew board using its latest revision and a unique commandId; reuse that id only for identical retries. Coordinator manages initiatives/tasks. Worker reports its own evidence for independent review; never self-approve. Mode swarm starts now; teamwork requires user-only brief approval. Board recipients get queued messages; omit recipients for a quiet update. Delegate with t3_team_delegate, not task.reserve/assign.",
   parameters: Schema.Struct({
     commandId: TeamworkMutateInput.fields.commandId,
     expectedRevision: TeamworkMutateInput.fields.expectedRevision,

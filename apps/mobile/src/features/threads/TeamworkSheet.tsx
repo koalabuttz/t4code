@@ -66,9 +66,7 @@ export function TeamworkSheet({
       });
       if (result._tag === "Failure") {
         const failure = squashAtomCommandFailure(result);
-        setError(
-          failure instanceof Error ? failure.message : "Could not save this teamwork change.",
-        );
+        setError(failure instanceof Error ? failure.message : "Could not save this Crew change.");
         return false;
       }
       return true;
@@ -82,7 +80,7 @@ export function TeamworkSheet({
   };
   const disabled = busy || !canEdit;
   return (
-    <Sheet title="Project teamwork" onClose={onClose}>
+    <Sheet title="Project crew" onClose={onClose}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerClassName="gap-5 px-5 pb-10 pt-4"
@@ -94,7 +92,7 @@ export function TeamworkSheet({
           </AppText>
         )}
         {!state ? (
-          <AppText>Loading teamwork…</AppText>
+          <AppText>Loading crew…</AppText>
         ) : (
           <>
             {!canEdit && <AppText>Read-only access</AppText>}
@@ -130,12 +128,12 @@ export function TeamworkSheet({
             />
             <View className="flex-row flex-wrap gap-2">
               <Button
-                label="Swarm"
+                label="Swarm: start now"
                 tone={mode === "swarm" ? "primary" : "secondary"}
                 onPress={() => setMode("swarm")}
               />
               <Button
-                label="Teamwork"
+                label="Require plan approval"
                 tone={mode === "teamwork" ? "primary" : "secondary"}
                 onPress={() => setMode("teamwork")}
               />
@@ -231,7 +229,7 @@ export function TeamworkSheet({
                   )}
                   {initiative.mode === "swarm" && (
                     <Button
-                      label="Promote to Teamwork"
+                      label="Require plan approval"
                       disabled={disabled}
                       onPress={() =>
                         void act({
