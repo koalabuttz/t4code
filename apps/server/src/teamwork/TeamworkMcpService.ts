@@ -4,6 +4,7 @@ import {
   type OrchestratorMcpDelegateTaskResult,
   type TeamworkAction,
   TeamworkReadResult,
+  TeamworkTaskExecution,
   type TeamworkSnapshot,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -31,6 +32,7 @@ export const TeamworkAgentReadInput = Schema.Struct({
 export const TeamworkAgentReadResult = Schema.Struct({
   ...TeamworkReadResult.fields,
   nextOffset: Schema.NullOr(Schema.Number),
+  execution: Schema.Array(TeamworkTaskExecution),
 });
 export class TeamworkMcpService extends Context.Service<
   TeamworkMcpService,
@@ -94,6 +96,13 @@ const make = Effect.gen(function* () {
     );
     return {
       ...result,
+      execution: yield* teams
+        .execution(
+          thread.projectId,
+          tasks.slice(offset, offset + 12).map((task) => task.id),
+          thread.id,
+        )
+        .pipe(Effect.mapError((e) => failure(e.message))),
       deliveries: result.deliveries.filter((d) => d.status === "failed").slice(offset, offset + 12),
       nextOffset:
         Math.max(

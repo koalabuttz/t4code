@@ -1,5 +1,5 @@
 import { randomUUID } from "../../lib/utils";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
   CommandId,
@@ -20,6 +20,9 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { openTeamworkDialog, teamworkDialogThreadAtom } from "./teamworkDialogState";
+import { CrewWorkerStatus } from "./CrewWorkerStatus";
+import { threadFamilies } from "../../state/threads";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import {
   Dialog,
   DialogPopup,
@@ -87,6 +90,12 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
   const [brief, setBrief] = useState("");
   const [mode, setMode] = useState<"swarm" | "teamwork">("swarm");
   const state = query.data?.snapshot;
+  const coordinatorThreadId = state?.coordinatorThreadId;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Retain the coordinator's worker shells while its Crew view is open.
+  useEffect(() => {
+    if (coordinatorThreadId == null) return;
+    return threadFamilies.mount(appAtomRegistry, environmentId, coordinatorThreadId);
+  }, [environmentId, coordinatorThreadId]);
   const act = async (action: TeamworkAction) => {
     if (!state || busy || !permission) return false;
     setBusy(true);
@@ -369,6 +378,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
                 </div>
                 <p className="whitespace-pre-wrap text-sm">{task.brief}</p>
                 <p className="text-sm text-muted-foreground">Accept when: {task.criteria}</p>
+                <CrewWorkerStatus environmentId={environmentId} task={task} />
                 {task.dependencies.length > 0 && (
                   <p className="text-xs">
                     Depends on:{" "}

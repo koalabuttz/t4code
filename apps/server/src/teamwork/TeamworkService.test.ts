@@ -1,5 +1,12 @@
 import { assert, it } from "@effect/vitest";
-import { CommandId, NodeId, ProjectId, ThreadId, type TeamworkAction } from "@t3tools/contracts";
+import {
+  CommandId,
+  NodeId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type TeamworkAction,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
@@ -15,6 +22,8 @@ const coordinator = ThreadId.make("coordinator");
 const dependencies = (
   deliver: (id: string) => Effect.Effect<void, Threads.ThreadManagementError>,
   mode: () => "full-access" | "approval-required" = () => "full-access",
+  stop: () => Effect.Effect<void, Threads.ThreadManagementProviderInstanceDisabledError> = () =>
+    Effect.void,
 ) =>
   Layer.mergeAll(
     Layer.mock(ProjectStore.ProjectStoreV2)({
@@ -36,7 +45,7 @@ const dependencies = (
           interactionMode: "default",
         } as never),
       sendToThread: (input) => deliver(input.commandId).pipe(Effect.as({} as never)),
-      dispatch: () => Effect.succeed({} as never),
+      dispatch: () => stop().pipe(Effect.as({} as never)),
     }),
   );
 
@@ -159,6 +168,142 @@ it.effect("recovers pending work on service restart with the same dispatch id", 
       }).pipe(Effect.provide(second)),
     );
   }).pipe(Effect.provide(Sqlite.layerMemory)),
+);
+
+it.effect(
+  "waits for the previous worker's stop before reserving a replacement or changing coordinator",
+  () => {
+    let stopFails = true;
+    return Effect.gen(function* () {
+      const teams = yield* Teamwork.TeamworkService;
+      const sql = yield* SqlClient.SqlClient;
+      const update = Effect.fn("test.updateCrew")(function* (action: TeamworkAction) {
+        const { snapshot } = yield* teams.read(projectId);
+        return yield* teams.mutate({
+          projectId,
+          commandId: CommandId.make(`change-${snapshot.revision}`),
+          expectedRevision: snapshot.revision,
+          action,
+        });
+      });
+      yield* update({ type: "coordinator.set", threadId: coordinator });
+      yield* update({
+        type: "initiative.create",
+        id: "initiative",
+        title: "Build",
+        brief: "Build the API",
+        mode: "swarm",
+      });
+      yield* update({
+        type: "task.create",
+        id: "task",
+        initiativeId: "initiative",
+        title: "API",
+        brief: "Build API",
+        criteria: "Tests pass",
+        roleId: null,
+        milestoneId: null,
+        dependencies: [],
+        knowledgeIds: [],
+      });
+      yield* update({ type: "task.reserve", id: "task", delegationId: "first" });
+      yield* update({
+        type: "task.assign",
+        id: "task",
+        delegationId: "first",
+        threadId: ThreadId.make("worker"),
+        delegatedTaskId: NodeId.make("first"),
+      });
+      yield* update({ type: "task.reset", id: "task", status: "ready" });
+      yield* teams.drain;
+      const stop = (yield* teams.read(projectId)).deliveries.find(
+        (delivery) => delivery.kind === "stop",
+      )!;
+      assert.equal(stop.status, "failed");
+      yield* update({
+        type: "task.create",
+        id: "parallel",
+        initiativeId: "initiative",
+        title: "Independent work",
+        brief: "Build another endpoint",
+        criteria: "Tests pass",
+        roleId: null,
+        milestoneId: null,
+        dependencies: [],
+        knowledgeIds: [],
+      });
+      yield* update({ type: "task.reserve", id: "parallel", delegationId: "parallel" });
+      yield* update({ type: "task.reset", id: "parallel", status: "cancelled" });
+      for (const status of ["failed", "pending"] as const) {
+        yield* sql`UPDATE project_teamwork_outbox SET status = ${status} WHERE id = ${stop.id}`;
+        for (const action of [
+          { type: "task.reserve", id: "task", delegationId: "replacement" },
+          { type: "coordinator.set", threadId: ThreadId.make("replacement-coordinator") },
+        ] as const) {
+          const result = yield* Effect.result(update(action));
+          assert.isTrue(Result.isFailure(result));
+          if (Result.isFailure(result)) assert.equal(result.failure.reason, "invalid-state");
+        }
+      }
+      yield* sql`UPDATE project_teamwork_outbox SET payload_json = json_remove(payload_json, '$.taskId') WHERE id = ${stop.id}`;
+      assert.isTrue(
+        Result.isFailure(
+          yield* Effect.result(
+            update({ type: "task.reserve", id: "task", delegationId: "legacy-stop" }),
+          ),
+        ),
+      );
+      yield* sql`UPDATE project_teamwork_outbox SET status = 'failed' WHERE id = ${stop.id}`;
+      stopFails = false;
+      yield* update({ type: "delivery.retry", id: stop.id });
+      yield* teams.drain;
+      yield* update({
+        type: "coordinator.set",
+        threadId: ThreadId.make("replacement-coordinator"),
+      });
+      assert.isFalse(
+        (yield* teams.read(projectId)).deliveries.some(
+          (delivery) =>
+            delivery.kind === "message" &&
+            delivery.threadId === coordinator &&
+            ["pending", "failed"].includes(delivery.status),
+        ),
+      );
+      const result = yield* update({
+        type: "task.reserve",
+        id: "task",
+        delegationId: "replacement",
+      });
+      assert.equal(result.snapshot.tasks[0]?.delegationId, "replacement");
+    }).pipe(
+      Effect.provide(
+        Teamwork.layer.pipe(
+          Layer.provide(
+            dependencies(
+              () =>
+                Effect.fail(
+                  new Threads.ThreadManagementThreadNotFoundError({
+                    projectId,
+                    threadId: coordinator,
+                  }),
+                ),
+              () => "full-access",
+              () =>
+                stopFails
+                  ? Effect.fail(
+                      new Threads.ThreadManagementProviderInstanceDisabledError({
+                        projectId,
+                        instanceId: ProviderInstanceId.make("codex"),
+                      }),
+                    )
+                  : Effect.void,
+            ),
+          ),
+          Layer.provideMerge(Sqlite.layerMemory),
+        ),
+      ),
+    );
+  },
 );
 
 it.effect(

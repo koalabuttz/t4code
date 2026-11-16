@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ScrollView, View } from "react-native";
 import { useAtomValue } from "@effect/atom-react";
 import { StackActions, useNavigation } from "@react-navigation/native";
@@ -18,6 +18,9 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { uuidv4 } from "../../lib/uuid";
 import { TeamworkBriefEditor, TeamworkRoles, TeamworkTaskEditor } from "./TeamworkEditors";
+import { CrewWorkerStatus } from "./CrewWorkerStatus";
+import { threadFamilies } from "../../state/threads";
+import { appAtomRegistry } from "../../state/atom-registry";
 
 export interface TeamworkTarget {
   environmentId: EnvironmentId;
@@ -49,6 +52,12 @@ export function TeamworkSheet({
   const [knowledgeTitle, setKnowledgeTitle] = useState("");
   const [knowledgeText, setKnowledgeText] = useState("");
   const state = query.data?.snapshot;
+  const coordinatorThreadId = state?.coordinatorThreadId;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Retain the coordinator's worker shells while its Crew view is open.
+  useEffect(() => {
+    if (coordinatorThreadId == null) return;
+    return threadFamilies.mount(appAtomRegistry, environmentId, coordinatorThreadId);
+  }, [environmentId, coordinatorThreadId]);
   const initiative = state?.initiatives.find((i) => i.id === selected) ?? state?.initiatives.at(-1);
   const act = async (action: TeamworkAction) => {
     if (!state || busy || !canEdit) return false;
@@ -271,6 +280,7 @@ export function TeamworkSheet({
                       </AppText>
                       <AppText>{task.brief}</AppText>
                       <AppText>Accept when: {task.criteria}</AppText>
+                      <CrewWorkerStatus environmentId={environmentId} task={task} />
                       {task.ownerThreadId && (
                         <Button
                           label="Open worker"

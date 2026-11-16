@@ -7,6 +7,7 @@ import {
   TeamworkHistoryResult,
   TeamworkReadResult,
   TeamworkSnapshot,
+  type TeamworkTaskExecution,
   ThreadId,
   isProviderNativeSubagentThread,
   isRuntimeModeAbove,
@@ -25,6 +26,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { crewTaskExecution } from "@t3tools/shared/crewExecution";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { DispatchModeLimit } from "../orchestration-v2/DispatchModeLimit.ts";
@@ -34,6 +36,7 @@ import { decideTeamwork, emptyTeamwork } from "./decide.ts";
 const DeliveryPayload = Schema.Struct({
   text: Schema.String,
   planning: Schema.Boolean,
+  taskId: Schema.optional(Schema.String),
   initiativeId: Schema.NullOr(Schema.String),
   actor: Schema.NullOr(ThreadId),
   limit: Schema.NullOr(
@@ -65,6 +68,11 @@ export class TeamworkService extends Context.Service<
       input: typeof TeamworkHistoryInput.Type,
       actor?: ThreadId | null,
     ) => Effect.Effect<TeamworkHistoryResult, TeamworkError>;
+    readonly execution: (
+      projectId: ProjectId,
+      taskIds: ReadonlyArray<string>,
+      actor?: ThreadId | null,
+    ) => Effect.Effect<ReadonlyArray<TeamworkTaskExecution>, TeamworkError>;
     readonly subscribe: (projectId: ProjectId) => Stream.Stream<TeamworkReadResult, TeamworkError>;
     readonly mutate: (
       input: TeamworkMutateInput,
@@ -158,6 +166,51 @@ const make = Effect.gen(function* () {
       ),
     );
     return yield* decodeHistory({ events });
+  }, Effect.mapError(storageError));
+
+  const execution = Effect.fn("TeamworkService.execution")(function* (
+    projectId: ProjectId,
+    taskIds: ReadonlyArray<string>,
+    actor: ThreadId | null = null,
+  ) {
+    yield* authorize(projectId, actor);
+    if (taskIds.length > 12)
+      return yield* new TeamworkError({
+        reason: "capacity",
+        message: "Read at most 12 worker states at a time.",
+      });
+    const state = yield* load(projectId);
+    const tasks = state.tasks.filter((task) => taskIds.includes(task.id));
+    const threadIds = [
+      ...new Set(tasks.flatMap((task) => (task.ownerThreadId ? [task.ownerThreadId] : []))),
+    ];
+    const shells = yield* Effect.forEach(threadIds, (id) => threads.getThreadShell(id), {
+      concurrency: 4,
+    });
+    const byId = new Map(
+      shells.flatMap((thread) =>
+        thread && thread.projectId === projectId && thread.deletedAt === null
+          ? [[thread.id, thread] as const]
+          : [],
+      ),
+    );
+    return tasks.map((task) => {
+      const thread = task.ownerThreadId === null ? undefined : byId.get(task.ownerThreadId);
+      const request = thread?.pendingRuntimeRequest;
+      return crewTaskExecution(
+        task,
+        thread
+          ? {
+              status: thread.activityRunStatus ?? thread.status,
+              hasPendingApprovals:
+                request != null && request.kind !== "user_input" && request.kind !== "auth_refresh",
+              hasPendingUserInput: request?.kind === "user_input",
+              hasPendingBackgroundTasks: (thread.pendingBackgroundTasks?.length ?? 0) > 0,
+              lastError: thread.lastError,
+            }
+          : "unavailable",
+      );
+    });
   }, Effect.mapError(storageError));
 
   const deliver = Effect.fn("TeamworkService.deliver")(function* (projectId: ProjectId) {
@@ -289,6 +342,26 @@ const make = Effect.gen(function* () {
               reason: "conflict",
               message: "The team changed. Refresh its state and retry your action.",
             });
+          if (input.action.type === "task.reserve" || input.action.type === "coordinator.set") {
+            const action = input.action;
+            const task =
+              action.type === "task.reserve"
+                ? state.tasks.find((candidate) => candidate.id === action.id)
+                : undefined;
+            const stops = yield* sql`SELECT id FROM project_teamwork_outbox
+              WHERE project_id = ${input.projectId} AND kind = 'stop' AND status IN ('pending', 'failed')
+              AND (${input.action.type === "coordinator.set"}
+                OR json_extract(payload_json, '$.taskId') = ${task?.id ?? null}
+                OR (json_extract(payload_json, '$.taskId') IS NULL
+                  AND json_extract(payload_json, '$.initiativeId') = ${task?.initiativeId ?? null}))
+              LIMIT 1`;
+            if (stops.length)
+              return yield* new TeamworkError({
+                reason: "invalid-state",
+                message:
+                  "Finish or retry the previous worker's stop before replacing its assignment or coordinator.",
+              });
+          }
           if (
             input.action.type === "initiative.approve" ||
             (input.action.type === "initiative.status" && input.action.status === "active")
@@ -324,6 +397,11 @@ const make = Effect.gen(function* () {
             });
           yield* sql`INSERT INTO project_teamwork (project_id, revision, payload_json) VALUES (${input.projectId}, ${snapshot.revision}, ${encoded}) ON CONFLICT(project_id) DO UPDATE SET revision = excluded.revision, payload_json = excluded.payload_json`;
           yield* sql`INSERT INTO project_teamwork_events (project_id, revision, command_id, actor_thread_id, action_json, created_at) VALUES (${input.projectId}, ${snapshot.revision}, ${input.commandId}, ${actor}, ${actionJson}, ${now})`;
+          if (
+            input.action.type === "coordinator.set" &&
+            state.coordinatorThreadId !== input.action.threadId
+          )
+            yield* sql`UPDATE project_teamwork_outbox SET status = 'cancelled' WHERE project_id = ${input.projectId} AND thread_id = ${state.coordinatorThreadId} AND kind = 'message' AND status IN ('pending', 'failed')`;
           for (const initiative of snapshot.initiatives) {
             if (
               initiative.status !== "active" &&
@@ -364,6 +442,7 @@ const make = Effect.gen(function* () {
   return TeamworkService.of({
     read,
     history,
+    execution,
     mutate,
     drain: worker.drain,
     subscribe: (projectId) =>

@@ -27,6 +27,7 @@ it.effect(
     const worker = ThreadId.make("worker");
     const taskId = NodeId.make("native-task");
     const calls: string[] = [];
+    let workerStatus: "running" | "completed" = "running";
     const scope: McpInvocationScope = {
       environmentId: EnvironmentId.make("environment"),
       capabilities: new Set(["orchestration"]),
@@ -45,6 +46,8 @@ it.effect(
           id,
           projectId,
           deletedAt: null,
+          status: workerStatus,
+          pendingRuntimeRequest: null,
           lineage: {
             parentThreadId: id === coordinator ? null : coordinator,
             relationshipToParent: id === coordinator ? null : "subagent",
@@ -120,7 +123,9 @@ it.effect(
       assert.equal(calls.length, 1);
       assert.include(calls[0]!, "Expired invitations rejected");
       const workerScope = { ...scope, thread: { ...scope.thread!, threadId: worker } };
-      let state = (yield* mcp.read(workerScope, { taskId: "task" })).snapshot;
+      const running = yield* mcp.read(workerScope, { taskId: "task" });
+      assert.equal(running.execution[0]?.state, "working");
+      let state = running.snapshot;
       assert.equal(state.tasks[0]?.ownerThreadId, worker);
       yield* mcp.update(workerScope, {
         commandId: CommandId.make("report"),
@@ -132,7 +137,11 @@ it.effect(
           evidence: "Focused expiration tests pass",
         },
       });
-      state = (yield* mcp.read(workerScope, { taskId: "task" })).snapshot;
+      workerStatus = "completed";
+      const submitted = yield* mcp.read(workerScope, { taskId: "task" });
+      assert.equal(submitted.execution[0]?.state, "finished");
+      assert.equal(submitted.snapshot.tasks[0]?.status, "review");
+      state = submitted.snapshot;
       assert.isTrue(
         Result.isFailure(
           yield* Effect.result(

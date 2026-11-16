@@ -80,6 +80,29 @@ export const TeamworkTask = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type TeamworkTask = typeof TeamworkTask.Type;
+export const TeamworkExecutionState = Schema.Literals([
+  "unassigned",
+  "starting",
+  "working",
+  "approval",
+  "input",
+  "waiting",
+  "finished",
+  "stopped",
+  "failed",
+  "unavailable",
+  "unknown",
+  "disconnected",
+]);
+export type TeamworkExecutionState = typeof TeamworkExecutionState.Type;
+export const TeamworkTaskExecution = Schema.Struct({
+  taskId: Id,
+  threadId: Schema.NullOr(ThreadId),
+  state: TeamworkExecutionState,
+  detail: Schema.NullOr(Schema.String),
+  needsAttention: Schema.Boolean,
+});
+export type TeamworkTaskExecution = typeof TeamworkTaskExecution.Type;
 export const TeamworkKnowledge = Schema.Struct({
   id: Id,
   title: Title,

@@ -8,6 +8,8 @@ The coordinator uses the team tools to create tasks, assign workers, and collect
 
 Tasks have acceptance criteria, dependencies, and optional milestones. Include selected project knowledge in a worker's briefing. Open a worker to inspect its conversation and changes. A result needs evidence and review by someone other than its owner before it becomes done. You can approve a result or request changes yourself. Completing an initiative requires all remaining tasks to pass review and all milestones to be accepted. Completion does not merge or publish changes.
 
+Each task also shows its worker's current execution state, including pending approvals, questions, failures, and interruptions. A finished worker still needs to submit evidence and pass review. Open the worker to respond or inspect the result; reconnect before relying on a disconnected client's last known state. If a worker stop fails, retry that delivery before assigning its replacement or changing coordinators.
+
 **Pause workers** stops assigned execution and cancels pending team notifications. **Resume** asks the coordinator to reconcile interrupted assignments and continue. **Cancel** retains the record; **Reopen** makes it active again. Reset a task to give it a fresh assignment. Reset dependent work before changing a prerequisite whose result it already uses. Changing the brief stops workers and requires fresh approval when plan approval is required, or a resume otherwise.
 
 The board keeps decisions and questions together. A quiet update does not start an agent turn; **Notify coordinator** asks the coordinator to respond. Agents can address individual teammates. Failed deliveries stay visible with a retry action.

@@ -25,6 +25,7 @@ export interface TeamworkIntent {
   readonly initiativeId: string | null;
   readonly text: string;
   readonly planning?: boolean;
+  readonly taskId?: string;
 }
 
 export function decideTeamwork(
@@ -81,6 +82,7 @@ export function decideTeamwork(
         kind: "stop",
         threadId: task.ownerThreadId,
         initiativeId: task.initiativeId,
+        taskId: task.id,
         text: "Crew paused or cancelled this assignment.",
       });
   };
