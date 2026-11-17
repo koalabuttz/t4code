@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import { DispatchModeLimit } from "../orchestration-v2/DispatchModeLimit.ts";
 import {
   CommandId,
   NodeId,
@@ -45,6 +46,9 @@ it.effect(
     let queued = false;
     let busy = false;
     let failed = false;
+    let questionStatus: "pending" | "resolved" = "pending";
+    let coordinatorMode: "approval-required" | "full-access" = "approval-required";
+    const returnModes: Array<string | undefined> = [];
     return Effect.gen(function* () {
       const teams = yield* Teamwork.TeamworkService;
       const now = yield* DateTime.now;
@@ -96,7 +100,15 @@ it.effect(
         context,
         replyTo: null,
       };
-      yield* command(2, "consult", { type: "consultation.request", request });
+      yield* teams.conversationCommand(
+        {
+          scope,
+          expectedRevision: 2,
+          commandId: CommandId.make("consult"),
+          action: { type: "consultation.request", request },
+        },
+        coordinator,
+      );
       yield* teams.drain;
       const page = yield* teams.conversationQuery({
         scope,
@@ -130,6 +142,7 @@ it.effect(
         senderThreadId: worker,
       };
       messages.set(answer.id, answer);
+      coordinatorMode = "full-access";
       const completed = {
         sequence: 10,
         commandId: null,
@@ -142,6 +155,7 @@ it.effect(
       } as OrchestrationV2StoredEvent;
       yield* teams.observeConversationEvent(completed);
       yield* teams.drain;
+      assert.deepEqual(returnModes, ["approval-required"]);
       const answered = (yield* teams.conversationQuery({ scope, collection: "consultations" }))
         .consultations[0]!;
       assert.equal(answered.progress.state, "answered");
@@ -217,7 +231,7 @@ it.effect(
         conversation: { ...scope, threadId: worker },
         messageId: direct.id,
       };
-      yield* change("handoff", {
+      const handoff = {
         type: "handoff.propose",
         id: "route-api",
         origin,
@@ -231,7 +245,27 @@ it.effect(
           actor: "agent",
           sender: { ...scope, threadId: coordinator },
         },
+      } as const;
+      const otherQuestion = { ...direct, id: MessageId.make("other-question") };
+      messages.set(otherQuestion.id, otherQuestion);
+      yield* change("other-consultation", {
+        type: "consultation.request",
+        request: {
+          ...request,
+          id: "other-consultation",
+          origin: { ...origin, messageId: otherQuestion.id },
+          destination: handoff.destination,
+        },
       });
+      yield* teams.drain;
+      const unrelated = yield* Effect.result(
+        change("wrong-handoff", {
+          ...handoff,
+          consultationId: "other-consultation",
+        }),
+      );
+      assert.isTrue(Result.isFailure(unrelated));
+      yield* change("handoff", handoff);
       busy = true;
       assert.isTrue(
         Result.isFailure(
@@ -248,10 +282,19 @@ it.effect(
       );
       queued = false;
       failed = true;
-      yield* change("offline", {
-        type: "consultation.request",
-        request: { ...request, id: "offline" },
-      });
+      coordinatorMode = "approval-required";
+      yield* teams.conversationCommand(
+        {
+          scope,
+          expectedRevision: (yield* teams.read(projectId)).snapshot.revision,
+          commandId: CommandId.make("offline"),
+          action: {
+            type: "consultation.request",
+            request: { ...request, id: "offline", origin, destination: handoff.destination },
+          },
+        },
+        coordinator,
+      );
       yield* teams.drain;
       const offline = (yield* teams.conversationQuery({
         scope,
@@ -260,6 +303,7 @@ it.effect(
       })).consultations[0]!;
       assert.equal(offline.progress.state, "failed");
       failed = false;
+      coordinatorMode = "full-access";
       yield* change("retry", {
         type: "consultation.retry",
         id: offline.id,
@@ -273,8 +317,33 @@ it.effect(
       })).consultations[0]!;
       assert.equal(retried.progress.state, "delivered");
       assert.notEqual(retried.deliveryId, offline.deliveryId);
-      yield* teams.observeConversationEvent({
-        sequence: 30,
+      const retriedMessage = messages.get(MessageId.make(retried.deliveryId))!;
+      const retryAnswer = {
+        ...answer,
+        id: MessageId.make("retry-answer"),
+        threadId: api,
+        senderThreadId: api,
+        runId: retriedMessage.runId,
+      };
+      messages.set(retryAnswer.id, retryAnswer);
+      const retryCompleted = {
+        sequence: 22,
+        commandId: null,
+        event: {
+          type: "run.updated",
+          occurredAt: now,
+          threadId: api,
+          payload: { id: retriedMessage.runId, status: "completed" },
+        },
+      } as OrchestrationV2StoredEvent;
+      yield* teams.observeConversationEvent(retryCompleted);
+      yield* teams.drain;
+      yield* teams.observeConversationEvent(retryCompleted);
+      yield* teams.drain;
+      assert.deepEqual(returnModes, ["approval-required", "approval-required"]);
+      assert.equal(sent.at(-1)?.threadId, worker);
+      const pendingEvent = {
+        sequence: 23,
         commandId: null,
         event: {
           type: "runtime-request.updated",
@@ -283,7 +352,8 @@ it.effect(
           runId: direct.runId,
           payload: { id: "human-question", kind: "user_input", status: "pending" },
         },
-      } as OrchestrationV2StoredEvent);
+      } as OrchestrationV2StoredEvent;
+      yield* teams.observeConversationEvent(pendingEvent);
       const human = (yield* teams.conversationQuery({
         scope,
         collection: "attention",
@@ -291,6 +361,26 @@ it.effect(
       assert.equal(human.pendingRequest?.responder, "user-only");
       assert.equal(human.pendingRequest?.requestId, "human-question");
       assert.equal(human.progress.state, "pending");
+      questionStatus = "resolved";
+      if (pendingEvent.event.type !== "runtime-request.updated") throw new Error("fixture");
+      const resolved = {
+        ...pendingEvent,
+        event: {
+          ...pendingEvent.event,
+          payload: {
+            ...pendingEvent.event.payload,
+            status: "resolved" as const,
+          },
+        },
+      };
+      yield* teams.observeConversationEvent({ ...resolved, sequence: 24 });
+      yield* teams.observeConversationEvent({ ...resolved, sequence: 25 });
+      yield* teams.observeConversationEvent({ ...pendingEvent, sequence: 26 });
+      const historical = yield* teams.conversationQuery({ scope, collection: "attention" });
+      assert.deepEqual(
+        historical.attention.filter((a) => a.reason === "question").map((a) => a.pendingRequest),
+        [null],
+      );
       const directAttention = (yield* teams.conversationQuery({
         scope,
         collection: "attention",
@@ -315,13 +405,13 @@ it.effect(
       };
       yield* teams.observeConversationEvent({
         ...directEvent,
-        sequence: 22,
+        sequence: 33,
         event: { ...directEvent.event, type: "message.updated", payload: reflected },
       } as OrchestrationV2StoredEvent);
       if ("deliveryId" in directAttention.progress) {
         const delivered = messages.get(MessageId.make(directAttention.progress.deliveryId))!;
         yield* teams.observeConversationEvent({
-          sequence: 32,
+          sequence: 34,
           commandId: null,
           event: {
             type: "run.updated",
@@ -456,7 +546,12 @@ it.effect(
                     projectId,
                     deletedAt: null,
                     status: busy ? "running" : "completed",
-                    runtimeMode: "full-access",
+                    runtimeMode:
+                      id === coordinator
+                        ? coordinatorMode
+                        : id === worker
+                          ? "full-access"
+                          : "approval-required",
                     interactionMode: "default",
                     creationSource: "mcp",
                     lineage: {
@@ -476,6 +571,7 @@ it.effect(
                   ),
                 getThreadRecords: (threadId, _fields, filter) =>
                   Effect.succeed({
+                    runtimeRequests: [{ id: "human-question", status: questionStatus }],
                     runs: [
                       {
                         id: source.runId,
@@ -494,6 +590,8 @@ it.effect(
                   } as never),
                 sendToThread: (input) =>
                   Effect.gen(function* () {
+                    if (input.commandId.endsWith(":return"))
+                      returnModes.push((yield* DispatchModeLimit)?.runtimeMode);
                     if (failed)
                       return yield* new Threads.ThreadManagementThreadNotFoundError({
                         projectId,

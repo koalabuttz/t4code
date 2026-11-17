@@ -376,6 +376,12 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                   : retryCrewConsultation(current, action.previousDeliveryId, deliveryId, now);
               if (!next?.accepted)
                 return yield* fail("Only the exact failed consultation delivery can be retried.");
+              const authority = yield* requestDelivery(projectId, action.previousDeliveryId);
+              if (actor !== null && authority.actor !== actor)
+                return yield* fail(
+                  "Only the original coordinator or the user can retry this delivery.",
+                  "forbidden",
+                );
               yield* put(
                 projectId,
                 "consultations",
@@ -389,7 +395,7 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                 deliveryId,
                 next.consultation.destination.threadId,
                 "crew-consultation",
-                { id: next.consultation.id, actor, limit },
+                authority,
               );
               break;
             }
@@ -460,6 +466,7 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                     consultation.origin.conversation,
                     action.origin.conversation,
                   ) ||
+                  consultation.origin.messageId !== action.origin.messageId ||
                   !sameCrewConversation(consultation.destination, action.destination)
                 )
                   return yield* fail("Handoff consultation must return to its exact origin.");
@@ -631,6 +638,19 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
       }),
     ),
   });
+  const decodeDelivery = Schema.decodeEffect(Schema.fromJsonString(deliveryPayload));
+  const requestDelivery = Effect.fn("CrewConversations.requestDelivery")(function* (
+    projectId: ProjectId,
+    deliveryId: CommandId,
+  ) {
+    const rows = yield* sql<{
+      payload_json: string;
+    }>`SELECT payload_json FROM project_teamwork_outbox
+      WHERE project_id = ${projectId} AND id = ${deliveryId} AND kind = 'crew-consultation'`;
+    if (!rows[0])
+      return yield* fail("Consultation delivery authority is unavailable.", "forbidden");
+    return yield* decodeDelivery(rows[0].payload_json);
+  });
   const deliver = Effect.fn("CrewConversations.deliver")(function* (row: {
     id: string;
     project_id: ProjectId;
@@ -646,17 +666,15 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
           status: string;
         }>`SELECT status FROM project_teamwork_outbox WHERE id = ${row.id} AND project_id = ${projectId}`;
         if (active[0]?.status !== "pending") return;
-        const payload = yield* Schema.decodeEffect(Schema.fromJsonString(deliveryPayload))(
-          row.payload_json,
-        );
+        const storedPayload = yield* decodeDelivery(row.payload_json);
         const state = yield* deps.load(projectId);
         const consultation =
           row.kind === "crew-attention"
             ? null
-            : yield* get(projectId, "consultations", payload.id, CrewConsultation);
+            : yield* get(projectId, "consultations", storedPayload.id, CrewConsultation);
         const attention =
           row.kind === "crew-attention"
-            ? yield* get(projectId, "attention", payload.id, CrewAttention)
+            ? yield* get(projectId, "attention", storedPayload.id, CrewAttention)
             : null;
         const now = DateTime.formatIso(yield* DateTime.now);
         if (
@@ -669,6 +687,10 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
         }
         const outcome = yield* Effect.result(
           Effect.gen(function* () {
+            const payload =
+              row.kind === "crew-return" && consultation
+                ? yield* requestDelivery(projectId, consultation.deliveryId)
+                : storedPayload;
             yield* deps.requireThread(projectId, row.thread_id);
             if (payload.actor !== null) yield* deps.authorize(projectId, payload.actor as ThreadId);
             const members = state.tasks.filter(
@@ -880,12 +902,43 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
           }
           const now = DateTime.formatIso(yield* DateTime.now);
           if (event.type === "runtime-request.updated") {
-            if (event.payload.status !== "pending" || event.runId == null) return;
+            if (event.runId == null) return;
+            const existing = yield* sql<{ id: string }>`SELECT id FROM project_crew_conversations
+              WHERE project_id = ${projectId} AND collection = 'attention' AND thread_id = ${event.threadId}
+              AND json_extract(payload_json, '$.pendingRequest.requestId') = ${event.payload.id}
+              AND json_extract(payload_json, '$.pendingRequest.runId') = ${event.runId}`;
+            if (event.payload.status !== "pending") {
+              if (!existing.length) return;
+              for (const row of existing) {
+                const attention = yield* get(projectId, "attention", row.id, CrewAttention);
+                if (attention)
+                  yield* put(projectId, "attention", row.id, event.threadId, {
+                    ...attention,
+                    pendingRequest: null,
+                    updatedAt: now,
+                  });
+              }
+              yield* commit(
+                state,
+                CommandId.make(`crew:event:${stored.sequence}`),
+                null,
+                yield* encodeState({ type: "crew.conversation", eventSequence: stored.sequence }),
+                now,
+              );
+              return;
+            }
+            if (existing.length) return;
             const records = yield* deps.threads.getThreadRecords(
               event.threadId,
-              ["runs", "messages"],
+              ["runs", "messages", "runtimeRequests"],
               { runIds: [event.runId], messageRunIds: [event.runId], messageRoles: ["user"] },
             );
+            if (
+              !records.runtimeRequests.some(
+                (request) => request.id === event.payload.id && request.status === "pending",
+              )
+            )
+              return;
             const requestMessage = records.messages.find(
               (m) => m.id === records.runs[0]?.userMessageId,
             );
@@ -895,9 +948,6 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
             const member = yield* get(projectId, "workstreams", event.threadId, CrewWorkstream);
             if (!member || member.status === "unlinked" || event.threadId === coordinator.threadId)
               return;
-            const existing =
-              yield* sql`SELECT id FROM project_crew_conversations WHERE project_id = ${projectId} AND collection = 'attention' AND thread_id = ${event.threadId} AND json_extract(payload_json, '$.pendingRequest.requestId') = ${event.payload.id} LIMIT 1`;
-            if (existing.length) return;
             const id = `request:${stored.sequence}`;
             yield* put(projectId, "attention", id, event.threadId, {
               id,
