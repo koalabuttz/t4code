@@ -7,6 +7,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  ProviderSessionId,
   ProviderThreadId,
   ProviderTurnId,
   RunAttemptId,
@@ -19,11 +20,13 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as EffectWorker from "./EffectWorker.ts";
+import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
@@ -44,6 +47,7 @@ const stopEarlierBackgroundWork = ({
   backgroundWorkAfterStop,
   stalledRun,
   workflowMember = false,
+  external,
 }: {
   readonly wakeAfterStop?: boolean;
   readonly failedStart?: boolean;
@@ -51,6 +55,7 @@ const stopEarlierBackgroundWork = ({
   readonly stopWithQueue?: "thread.stop" | "run.interrupt";
   readonly olderStart?: boolean;
   readonly workflowMember?: boolean;
+  readonly external?: "connected" | "disconnected" | "runless";
   readonly stalledRun?: "missing-session-terminal" | "returned-interrupt" | "superseded-attempt";
 }) =>
   Effect.gen(function* () {
@@ -58,11 +63,20 @@ const stopEarlierBackgroundWork = ({
     const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
     const started: ProviderAdapter.ProviderAdapterV2TurnInput[] = [];
     const interrupts: ProviderAdapter.ProviderAdapterV2InterruptInput[] = [];
+    const nativeStops: ProviderThreadId[] = [];
+    const capabilities = {
+      ...CodexProviderCapabilitiesV2,
+      sessions: {
+        ...CodexProviderCapabilitiesV2.sessions,
+        runtimeSurvivesServerExit: external !== undefined,
+        ...(external === undefined ? {} : { supportsMultipleProviderThreadsPerSession: false }),
+      },
+    };
     const interruptCalls = yield* Queue.unbounded<void>();
     const adapter: ProviderAdapter.ProviderAdapterV2["Service"] = {
       instanceId,
       driver,
-      getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
+      getCapabilities: () => Effect.succeed(capabilities),
       planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
       openSession: (input) =>
         Effect.gen(function* () {
@@ -78,12 +92,24 @@ const stopEarlierBackgroundWork = ({
               status: "ready",
               cwd,
               model: modelSelection.model,
-              capabilities: CodexProviderCapabilitiesV2,
+              capabilities,
               createdAt: now,
               updatedAt: now,
               lastError: null,
             },
             events: Stream.fromQueue(events),
+            ...(external === undefined
+              ? {}
+              : {
+                  stopThread: ({
+                    providerThread,
+                  }: {
+                    readonly providerThread: ProviderAdapter.ProviderAdapterV2TurnInput["providerThread"];
+                  }) =>
+                    Effect.sync(() => {
+                      nativeStops.push(providerThread.id);
+                    }),
+                }),
             ...(failedStart
               ? {
                   hasPendingBackgroundWorkForThread: (providerThread) =>
@@ -693,6 +719,7 @@ const stopEarlierBackgroundWork = ({
         });
       }
       const settledRun = (input: {
+        readonly id?: RunId;
         readonly ordinal: number;
         readonly providerThreadId: ProviderThreadId;
         readonly runningItem?: {
@@ -700,7 +727,7 @@ const stopEarlierBackgroundWork = ({
           readonly kind: "command" | "subagent";
         };
       }) => {
-        const runId = RunId.make(`run:${input.ordinal}`);
+        const runId = input.id ?? RunId.make(`run:${input.ordinal}`);
         const attemptId = RunAttemptId.make(`attempt:${input.ordinal}`);
         const nodeId = NodeId.make(`node:${input.ordinal}`);
         const providerTurnId = ProviderTurnId.make(`provider-turn:${input.ordinal}`);
@@ -870,11 +897,34 @@ const stopEarlierBackgroundWork = ({
         providerThreadId: codexProviderThread.id,
         runningItem: { id: reviewerId, kind: "subagent" },
       });
-      const latestRun = settledRun({ ordinal: 4, providerThreadId: otherProviderThreadId });
+      const latestRun = settledRun({
+        ordinal: 4,
+        providerThreadId: otherProviderThreadId,
+        // Stop the newer scope first so an older disconnected scope remains unconfirmed.
+        ...(external === undefined ? {} : { id: RunId.make("run:0-latest") }),
+      });
+      const otherProviderSessionId = ProviderSessionId.make("session:other-external");
+      const externalSession =
+        external === undefined
+          ? undefined
+          : (yield* orchestrator.getThreadProjection(threadId)).providerSessions.find(
+              (session) => session.id === codexProviderThread.providerSessionId,
+            );
       yield* sink.write({
         events: [
           ...watcherRun.events,
           ...reviewerRun.events,
+          ...(externalSession === undefined
+            ? []
+            : [
+                {
+                  id: EventId.make("other-external-session"),
+                  type: "provider-session.attached" as const,
+                  threadId,
+                  occurredAt: now,
+                  payload: { ...externalSession, id: otherProviderSessionId },
+                },
+              ]),
           {
             id: EventId.make("provider-thread:other"),
             type: "provider-thread.updated",
@@ -883,6 +933,16 @@ const stopEarlierBackgroundWork = ({
             payload: {
               ...codexProviderThread,
               id: otherProviderThreadId,
+              ...(external === undefined
+                ? {}
+                : {
+                    providerSessionId: otherProviderSessionId,
+                    nativeThreadRef: {
+                      driver,
+                      nativeId: "native-other",
+                      strength: "strong" as const,
+                    },
+                  }),
               firstRunOrdinal: 4,
               lastRunOrdinal: 4,
               ...(failedStart ? { pendingBackgroundTasks: otherBackgroundTasks } : {}),
@@ -1026,6 +1086,32 @@ const stopEarlierBackgroundWork = ({
         });
       }
 
+      if (external === "disconnected") {
+        const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        yield* sessions.detach({
+          threadId,
+          providerSessionId: codexProviderThread.providerSessionId!,
+        });
+      }
+      if (external === "runless") {
+        const current = yield* orchestrator.getThreadProjection(threadId);
+        yield* sink.write({
+          events: current.turnItems
+            .filter((item) => [devServerId, watcherId, reviewerId].includes(item.id))
+            .map((item) => ({
+              id: EventId.make(`runless:${item.id}`),
+              type: "turn-item.updated" as const,
+              threadId,
+              occurredAt: now,
+              payload: {
+                ...item,
+                runId: null,
+                providerTurnId: null,
+                providerThreadId: codexProviderThread.id,
+              },
+            })),
+        });
+      }
       yield* orchestrator.dispatch(
         stopWithQueue === "thread.stop"
           ? {
@@ -1045,15 +1131,70 @@ const stopEarlierBackgroundWork = ({
               ...(stopWithQueue === undefined ? {} : { holdQueue: true }),
             },
       );
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const stops =
+        external === undefined
+          ? []
+          : (yield* outbox.listByCommandId(CommandId.make("stop-background-work"))).filter(
+              (effect) => effect.request.type === "provider-runtime.stop",
+            );
+      let replayedStopId: string | undefined;
+      if (external === "disconnected") {
+        const claimed = yield* outbox.claimNext({ workerId: "lost-stop-worker" });
+        assert.isTrue(Option.isSome(claimed));
+        if (Option.isNone(claimed)) return;
+        assert.equal(claimed.value.request.type, "provider-runtime.stop");
+        replayedStopId = claimed.value.id;
+        const executor = yield* EffectWorker.OrchestrationEffectExecutorV2;
+        yield* executor.execute(claimed.value);
+        assert.equal(
+          claimed.value.request.type === "provider-runtime.stop" &&
+            claimed.value.request.providerThreadId,
+          otherProviderThreadId,
+        );
+        if (claimed.value.request.type === "provider-runtime.stop") {
+          const partial = yield* orchestrator.getThreadProjection(threadId);
+          assert.equal(partial.turnItems.find((item) => item.id === watcherId)?.status, "running");
+          assert.equal(partial.turnItems.find((item) => item.id === reviewerId)?.status, "running");
+        }
+        // Native confirmation committed, but the worker lost its outbox acknowledgement.
+        const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+        yield* sessions.detach({
+          threadId,
+          providerSessionId: otherProviderSessionId,
+        });
+        assert.equal((yield* outbox.reconcileAfterProcessLoss).requeued, 1);
+      }
       yield* worker.drain();
 
-      assert.sameDeepMembers(
-        interrupts.map((interrupt) => [interrupt.providerThread.id, interrupt.providerTurnId]),
-        [
-          ...(olderStart || failedStart ? [] : [[otherProviderThreadId, latestRun.providerTurnId]]),
-          [codexProviderThread.id, reviewerRun.providerTurnId],
-        ],
-      );
+      if (external !== undefined) {
+        assert.sameMembers(
+          [...new Set(nativeStops)],
+          [otherProviderThreadId, codexProviderThread.id],
+        );
+        assert.lengthOf(nativeStops, external === "disconnected" ? 3 : 2);
+        assert.lengthOf(stops, 2);
+        for (const stop of stops) {
+          const settled = yield* outbox.get(stop.id);
+          assert.isTrue(Option.isSome(settled));
+          if (Option.isSome(settled)) {
+            assert.deepEqual(settled.value.request, stop.request);
+            assert.equal(settled.value.status, "succeeded");
+            assert.equal(settled.value.attemptCount, stop.id === replayedStopId ? 2 : 1);
+          }
+        }
+        assert.lengthOf(interrupts, 0);
+        assert.lengthOf(started, 1);
+      } else
+        assert.sameDeepMembers(
+          interrupts.map((interrupt) => [interrupt.providerThread.id, interrupt.providerTurnId]),
+          [
+            ...(olderStart || failedStart
+              ? []
+              : [[otherProviderThreadId, latestRun.providerTurnId]]),
+            [codexProviderThread.id, reviewerRun.providerTurnId],
+          ],
+        );
       const after = yield* orchestrator.getThreadProjection(threadId);
       if (olderStart) {
         assert.equal(after.runs.find((run) => run.id === watcherRun.runId)?.status, "interrupted");
@@ -1110,8 +1251,9 @@ const stopEarlierBackgroundWork = ({
     );
   });
 
-it.effect("Stop reaches background work an earlier provider thread still runs", () =>
-  stopEarlierBackgroundWork({}),
+it.effect.each([undefined, "connected", "disconnected", "runless"] as const)(
+  "Stop reaches background work an earlier provider thread still runs (%s)",
+  (external) => stopEarlierBackgroundWork(external === undefined ? {} : { external }),
 );
 
 it.effect("Stop settles workflow members without subagent turn items", () =>

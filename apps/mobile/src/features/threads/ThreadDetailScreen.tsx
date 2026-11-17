@@ -733,9 +733,12 @@ function ThreadDetailBody(
   );
   const extensionStatus = props.extensionStatuses?.length
     ? {
-        label: `Pi · ${props.extensionStatuses.map((status) => status.text).join(" · ")}`,
+        label: props.extensionStatuses.map((status) => status.text).join(" · "),
         onPress: () =>
-          Dialog.alert("Pi", props.extensionStatuses?.map((status) => status.text).join("\n\n")),
+          Dialog.alert(
+            "Runtime status",
+            props.extensionStatuses?.map((status) => status.text).join("\n\n"),
+          ),
       }
     : null;
   const backgroundLine = ((): ThreadStatusLineModel | null => {

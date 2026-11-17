@@ -54,6 +54,15 @@ it.effect("reuses an item's position without attempting another allocation inser
       yield* positions.allocate({ ...input, threadId: ThreadId.make("thread:other") }),
       1,
     );
+    const nativeReply = { ...input, turnItemId: TurnItemId.make("item:native-reply") };
+    assert.equal(yield* positions.allocate(nativeReply), 2_000_002);
+    yield* positions.allocate({
+      ...input,
+      turnItemId: TurnItemId.make("item:later-turn"),
+      runId: RunId.make("run:later"),
+      runOrdinal: 3,
+    });
+    assert.equal(yield* positions.allocate(nativeReply), 2_000_002);
   }).pipe(Effect.provide(layerTest)),
 );
 

@@ -7,6 +7,7 @@ import {
   CommandId,
   ContextHandoffId,
   ContextTransferId,
+  ComposerContextId,
   GitCommandError,
   MessageId,
   NodeId,
@@ -25,6 +26,7 @@ import {
   OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -94,9 +96,9 @@ const normalize = (target: string) => {
   }
   return `/${parts.join("/")}`;
 };
-const layerWorktreeLocation = (worktreesDir = managedWorktreesDir) =>
+const layerWorktreeLocation = (worktreesDir = managedWorktreesDir, path?: Path.Path) =>
   Layer.mergeAll(
-    Path.layer,
+    path === undefined ? Path.layer : Layer.succeed(Path.Path, path),
     Layer.mock(ServerConfig.ServerConfig)({ worktreesDir } as ServerConfig.ServerConfig["Service"]),
     ServerSettings.layerTest(),
   );
@@ -395,9 +397,11 @@ it.each([
 });
 
 function makeLocalCommandHarness(input: {
+  readonly path?: Path.Path;
   readonly text: string;
   readonly crewContext?: TeamworkContext;
   readonly manualContinuation?: boolean;
+  readonly stopRequested?: boolean;
   readonly nativeResumeUnsupported?: boolean;
   readonly steeringRestart?: boolean;
   readonly nativeGoals?: boolean;
@@ -1092,37 +1096,59 @@ function makeLocalCommandHarness(input: {
       : (input: ProviderAdapter.ProviderAdapterV2ResumeTurnInput) =>
           startTurn(ProviderAdapter.resumeTurnInput(input)),
   };
-  const open = vi.fn(() =>
-    input.sideChat !== undefined || input.crewContext !== undefined
-      ? Effect.succeed(sideChatSession as never)
-      : input.interruptOpen === true
-        ? Effect.interrupt
-        : "historyReadFailureAfterFallback" in input || "resumeFailure" in input
-          ? Effect.succeed(resumeFallbackSession as never)
-          : "ensureThreadFailure" in input
-            ? Effect.succeed({ driver: providerThread.driver, ensureThread } as never)
-            : "openFailure" in input
-              ? Effect.sync(() => {
-                  if (input.interruptRunBeforeOpenFailure === true) interruptRun();
-                }).pipe(
-                  Effect.andThen(
-                    Effect.fail(
-                      new ProviderSessionManager.ProviderSessionOpenError({
-                        instanceId: newInstanceId,
-                        providerSessionId,
-                        cause: input.openFailure,
-                      }),
+  const open = vi.fn(
+    (
+      _input?: Parameters<ProviderSessionManager.ProviderSessionManagerV2["Service"]["open"]>[0],
+    ): ReturnType<ProviderSessionManager.ProviderSessionManagerV2["Service"]["open"]> =>
+      input.sideChat !== undefined || input.crewContext !== undefined
+        ? Effect.succeed(sideChatSession as never)
+        : input.interruptOpen === true
+          ? Effect.interrupt
+          : "historyReadFailureAfterFallback" in input || "resumeFailure" in input
+            ? Effect.succeed(resumeFallbackSession as never)
+            : "ensureThreadFailure" in input
+              ? Effect.succeed({ driver: providerThread.driver, ensureThread } as never)
+              : "openFailure" in input
+                ? Effect.sync(() => {
+                    if (input.interruptRunBeforeOpenFailure === true) interruptRun();
+                  }).pipe(
+                    Effect.andThen(
+                      Effect.fail(
+                        new ProviderSessionManager.ProviderSessionOpenError({
+                          instanceId: newInstanceId,
+                          providerSessionId,
+                          cause: input.openFailure,
+                        }),
+                      ),
                     ),
-                  ),
-                )
-              : input.failReadsAfterRunning === true || input.previousTurn !== undefined
-                ? Effect.succeed({
-                    driver: providerThread.driver,
-                    providerSession,
-                    ensureThread: () => Effect.succeed(providerThread),
-                    resumeThread: () => Effect.succeed(projection.providerThreads[0]),
-                  } as never)
-                : Effect.die("A local command must not open a native session."),
+                  )
+                : input.failReadsAfterRunning === true || input.previousTurn !== undefined
+                  ? Effect.succeed({
+                      driver: providerThread.driver,
+                      providerSession,
+                      ensureThread: () => Effect.succeed(providerThread),
+                      resumeThread: () => Effect.succeed(projection.providerThreads[0]),
+                    } as never)
+                  : Effect.die("A local command must not open a native session."),
+  );
+  const getSession = vi.fn<ProviderSessionManager.ProviderSessionManagerV2["Service"]["get"]>(() =>
+    Effect.succeed(
+      input.previousTurn?.liveSession === false
+        ? Option.none()
+        : Option.some({
+            driver: providerThread.driver,
+            providerSessionId,
+            interruptTurn,
+          } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime),
+    ),
+  );
+  const getProviderSession = vi.fn<
+    ProjectionStore.ProjectionStoreV2["Service"]["getProviderSession"]
+  >((_threadId, sessionId) =>
+    Effect.succeed(projection.providerSessions.find((session) => session.id === sessionId)),
+  );
+  const detach = vi.fn<ProviderSessionManager.ProviderSessionManagerV2["Service"]["detach"]>(
+    () => Effect.void,
   );
   const startRootRun = vi.fn<
     (
@@ -1269,7 +1295,7 @@ function makeLocalCommandHarness(input: {
         }),
         IdAllocator.layer,
         Layer.mock(TurnItemPositionStore.TurnItemPositionStoreV2)({}),
-        layerWorktreeLocation(input.worktreesDir),
+        layerWorktreeLocation(input.worktreesDir, input.path),
         input.fileSystem === undefined
           ? FileSystem.layerNoop({ exists: () => Effect.succeed(true) })
           : Layer.succeed(FileSystem.FileSystem, input.fileSystem),
@@ -1289,6 +1315,8 @@ function makeLocalCommandHarness(input: {
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadRecords,
           getTurnStartContext,
+          getProviderSession,
+          hasRunInterruptRequest: () => Effect.succeed(input.stopRequested === true),
           getRuntimeRecoveryProjection,
           getRun,
           getTurnStartHistory: () =>
@@ -1303,16 +1331,8 @@ function makeLocalCommandHarness(input: {
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open,
-          get: () =>
-            Effect.succeed(
-              input.previousTurn?.liveSession === false
-                ? Option.none()
-                : Option.some({
-                    driver: providerThread.driver,
-                    providerSessionId,
-                    interruptTurn,
-                  } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime),
-            ),
+          get: getSession,
+          detach,
         }),
         Layer.mock(ProviderAuthService.ProviderAuthService)({ tryHandlePromptCommand }),
         Layer.mock(RunExecutionService.RunExecutionServiceV2)({
@@ -1346,6 +1366,9 @@ function makeLocalCommandHarness(input: {
     resolveRuntimePolicy,
     createWorktree,
     open,
+    getSession,
+    getProviderSession,
+    detach,
     fallbackEnsureThread,
     writeIfRunCurrent,
     startRootRun,
@@ -1404,6 +1427,424 @@ effectIt.effect(
         expect(control.recordCrewContext).not.toHaveBeenCalled();
       }
     }),
+);
+
+effectIt.effect.each([
+  "running",
+  "completed",
+  "detached-session",
+  "restart-context",
+  "unsent-context",
+  "accepted-context",
+  "context-failure",
+  "manual-context",
+  "side-chat-context",
+  "accepted-side-chat-context",
+  "unsent-compaction",
+  "accepted-compaction",
+  "unsupported-compaction",
+  "resume-unavailable",
+  "live-session",
+  "stale-attempt",
+  "native-helper",
+  "replaced-session",
+  "archived",
+  "pending-stop",
+  "stop",
+  "stop-live",
+  "stop-stale-attempt",
+  "stop-replaced-during-policy",
+  "stop-after-archive",
+  "stop-without-turn",
+] as const)("reattaches only the captured app-owned external runtime (%s)", (scenario) =>
+  Effect.gen(function* () {
+    const stopping = scenario.startsWith("stop");
+    const compaction = scenario.endsWith("compaction");
+    const harness = makeLocalCommandHarness({
+      text: "Original accepted input",
+      stopRequested: stopping || scenario === "pending-stop",
+      ...(scenario.includes("side-chat") ? { sideChat: { contextRun: "current" as const } } : {}),
+    });
+    const projection = harness.projection();
+    const run = {
+      ...projection.runs[0]!,
+      status: scenario === "completed" ? ("completed" as const) : ("running" as const),
+      ...(scenario === "restart-context"
+        ? { restartContinuationOfRunId: RunId.make("earlier-run") }
+        : {}),
+      ...(scenario === "manual-context"
+        ? { manualContinuationOfRunId: RunId.make("earlier-unsent") }
+        : {}),
+    };
+    const attempt = projection.attempts[0]!;
+    const providerThread = {
+      ...projection.providerThreads[0]!,
+      ownerNodeId: scenario === "native-helper" ? attempt.rootNodeId : null,
+      contextUsage: { usedTokens: 0, maxTokens: 200_000 },
+      nativeThreadRef: {
+        driver: projection.providerThreads[0]!.driver,
+        nativeId: "persistent-native-session",
+        strength: "strong" as const,
+      },
+    };
+    const savedSession: OrchestrationV2ThreadProjection["providerSessions"][number] = {
+      id: providerThread.providerSessionId!,
+      driver: providerThread.driver,
+      providerInstanceId: providerThread.providerInstanceId,
+      status: "stopped",
+      cwd: "/tmp/native-account-command",
+      model: run.modelSelection.model,
+      capabilities: {
+        ...CodexProviderCapabilitiesV2,
+        sessions: { ...CodexProviderCapabilitiesV2.sessions, runtimeSurvivesServerExit: true },
+      },
+      createdAt: projection.updatedAt,
+      updatedAt: projection.updatedAt,
+      lastError: null,
+    };
+    harness.setProjection({
+      ...projection,
+      thread: {
+        ...projection.thread,
+        deletedAt: null,
+        archivedAt:
+          scenario === "archived" || scenario === "stop-after-archive"
+            ? projection.updatedAt
+            : null,
+      },
+      runs: [run],
+      providerThreads: [providerThread],
+      providerSessions: scenario === "detached-session" ? [] : [savedSession],
+      providerTurns:
+        scenario === "stop-without-turn"
+          ? []
+          : [
+              {
+                id: ProviderTurnId.make("original-provider-turn"),
+                providerThreadId: providerThread.id,
+                nodeId: attempt.rootNodeId,
+                runAttemptId: attempt.id,
+                nativeTurnRef: null,
+                ordinal: 7,
+                status: "running",
+                startedAt: projection.updatedAt,
+                completedAt: null,
+              },
+            ],
+    });
+    const contextRecovery = [
+      "unsent-context",
+      "accepted-context",
+      "context-failure",
+      "manual-context",
+      "side-chat-context",
+      "accepted-side-chat-context",
+      "unsent-compaction",
+      "accepted-compaction",
+      "unsupported-compaction",
+    ].includes(scenario);
+    const acceptedContext =
+      scenario === "accepted-context" ||
+      scenario === "accepted-side-chat-context" ||
+      scenario === "accepted-compaction";
+    const record = {
+      kind: "terminal" as const,
+      version: 1 as const,
+      contextId: ComposerContextId.make("recovered-terminal"),
+      label: "Build failure",
+      terminalId: "build-terminal",
+      terminalLabel: "Build",
+      lineStart: 1,
+      lineEnd: 2,
+      text: "Original compiler error",
+    };
+    if (contextRecovery) {
+      const handoff = {
+        id: ContextHandoffId.make("recovered-context"),
+        transferId: null,
+        threadId: run.threadId,
+        targetRunId: run.id,
+        fromProviderThreadIds: [],
+        toProviderThreadId: providerThread.id,
+        coveredRunOrdinals: { from: 1, to: 1 },
+        strategy: "full_thread_summary" as const,
+        status: "ready" as const,
+        summaryMessageId: null,
+        summaryText: "Original handoff and selected knowledge",
+        createdByProviderInstanceId: null,
+        createdAt: projection.updatedAt,
+        updatedAt: projection.updatedAt,
+      };
+      harness.setProjection({
+        ...harness.projection(),
+        runs: [
+          {
+            ...run,
+            id: RunId.make("earlier-unsent"),
+            ordinal: run.ordinal - 1,
+            manualContinuationOfRunId: undefined,
+            status: "completed",
+            completedAt: projection.updatedAt,
+            userMessageId: MessageId.make("original-unsent"),
+            activeAttemptId: RunAttemptId.make("earlier-attempt"),
+            restartCancelledBackgroundWork: [{ kind: "shell", label: "original build job" }],
+          },
+          run,
+        ],
+        messages: projection.messages.flatMap((message) => [
+          {
+            ...message,
+            text: compaction
+              ? "/compact"
+              : scenario === "manual-context"
+                ? "Continue"
+                : `${message.text} ${formatComposerContextReference(record)}`,
+            context: { version: 1, records: [record] },
+          },
+          ...(scenario === "manual-context"
+            ? [
+                {
+                  ...message,
+                  id: MessageId.make("original-unsent"),
+                  text: `Original accepted input ${formatComposerContextReference(record)}`,
+                  context: { version: 1 as const, records: [record] },
+                },
+              ]
+            : []),
+        ]),
+        contextHandoffs: [
+          {
+            ...handoff,
+            ...(acceptedContext
+              ? {
+                  delivery: {
+                    nativeThreadId: "persistent-native-session",
+                    status: "pending" as const,
+                    itemIds: [],
+                  },
+                }
+              : {}),
+          },
+          ...projection.contextHandoffs.map((handoff) => ({
+            ...handoff,
+            ...(acceptedContext
+              ? {
+                  delivery: {
+                    nativeThreadId: "persistent-native-session",
+                    status: "pending" as const,
+                    itemIds: [],
+                  },
+                }
+              : {}),
+          })),
+          ...(scenario === "accepted-context"
+            ? [
+                {
+                  ...handoff,
+                  id: ContextHandoffId.make("later-context"),
+                  summaryText: "Not in the accepted input",
+                },
+              ]
+            : []),
+        ],
+      });
+    }
+    harness.getProviderSession.mockImplementation(() => Effect.succeed(savedSession));
+    const resumed = vi.fn(() => Effect.succeed(providerThread));
+    const stopThread = vi.fn(() => Effect.void);
+    let recoveredMessage: ProviderAdapter.ProviderAdapterV2TurnMessage | undefined;
+    const runtime = {
+      providerSession: savedSession,
+      providerSessionId: savedSession.id,
+      instanceId: savedSession.providerInstanceId,
+      driver: savedSession.driver,
+      resumeThread: resumed,
+      stopThread,
+      ...(compaction && scenario !== "unsupported-compaction"
+        ? { compactThread: () => Effect.void }
+        : {}),
+      resumeTurn: (input: ProviderAdapter.ProviderAdapterV2ResumeTurnInput) =>
+        Effect.gen(function* () {
+          if (!acceptedContext) {
+            expect(input.unsubmittedMessage).toBeDefined();
+            recoveredMessage = yield* input.unsubmittedMessage!;
+          }
+          if (scenario === "context-failure")
+            return yield* new ProviderAdapter.ProviderAdapterProtocolError({
+              driver: providerThread.driver,
+              detail: "Native input was not acknowledged",
+            });
+        }),
+    } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime;
+    let live: ProviderAdapter.ProviderAdapterV2SessionRuntime | undefined =
+      scenario === "live-session" || scenario === "stop-live" ? runtime : undefined;
+    harness.getSession.mockImplementation(() => Effect.succeed(Option.fromNullishOr(live)));
+    harness.open.mockImplementation(() =>
+      Effect.sync(() => {
+        live = runtime;
+        return runtime;
+      }),
+    );
+    harness.startRootRun.mockImplementation(() => Effect.void);
+    if (contextRecovery)
+      harness.startRootRun.mockImplementation((input) =>
+        input.session.resumeTurn!({
+          ...input,
+          threadId: run.threadId,
+          runId: run.id,
+          runOrdinal: run.ordinal,
+          rootNodeId: attempt.rootNodeId!,
+          messageId: run.userMessageId,
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new RunExecutionService.RunExecutionStartError({
+                commandId: input.commandId,
+                runId: run.id,
+                cause,
+              }),
+          ),
+        ),
+      );
+    if (scenario === "stop-replaced-during-policy") {
+      const resolve = harness.resolveRuntimePolicy.getMockImplementation()!;
+      harness.resolveRuntimePolicy.mockImplementation((input) =>
+        Effect.suspend(() => {
+          harness.setProjection({
+            ...harness.projection(),
+            runs: [{ ...run, activeAttemptId: RunAttemptId.make("replacement") }],
+          });
+          return resolve(input);
+        }),
+      );
+    }
+    if (scenario === "resume-unavailable")
+      harness.startRootRun.mockImplementationOnce((input) =>
+        Effect.fail(
+          new RunExecutionService.RunExecutionStartError({
+            commandId: input.commandId,
+            runId: input.run.id,
+            cause: "Native daemon is temporarily unavailable.",
+          }),
+        ),
+      );
+    const request = {
+      threadId: run.threadId,
+      runId: run.id,
+      attemptId:
+        scenario === "stale-attempt" || scenario === "stop-stale-attempt"
+          ? RunAttemptId.make("replaced-attempt")
+          : attempt.id,
+      providerThreadId: providerThread.id,
+      providerSessionId:
+        scenario === "replaced-session"
+          ? ProviderSessionId.make("replaced-session")
+          : savedSession.id,
+    };
+    yield* Effect.gen(function* () {
+      const service = yield* ProviderTurnStart.ProviderTurnStartServiceV2;
+      if (scenario === "context-failure" || scenario === "unsupported-compaction") {
+        expect((yield* Effect.result(service.reattach(request)))._tag).toBe("Failure");
+        return;
+      }
+      if (stopping) {
+        const result = yield* Effect.result(service.stopExternal(request));
+        expect(result._tag).toBe(
+          scenario === "stop-stale-attempt" || scenario === "stop-replaced-during-policy"
+            ? "Failure"
+            : "Success",
+        );
+        return;
+      }
+      if (scenario === "resume-unavailable") {
+        const result = yield* Effect.result(service.reattach(request));
+        expect(result).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "ProviderTurnStartError" },
+        });
+      }
+      yield* service.reattach(request);
+      yield* service.reattach(request);
+    }).pipe(Effect.provide(harness.layer));
+    if (stopping) {
+      const stopped =
+        scenario !== "stop-stale-attempt" && scenario !== "stop-replaced-during-policy";
+      expect(stopThread).toHaveBeenCalledTimes(stopped ? 1 : 0);
+      expect(harness.open).toHaveBeenCalledTimes(stopped && scenario !== "stop-live" ? 1 : 0);
+      expect(harness.startRootRun).not.toHaveBeenCalled();
+      expect(harness.events).toEqual([]);
+      return;
+    }
+    const restored = [
+      "running",
+      "completed",
+      "detached-session",
+      "restart-context",
+      "unsent-context",
+      "accepted-context",
+      "context-failure",
+      "manual-context",
+      "side-chat-context",
+      "accepted-side-chat-context",
+      "unsent-compaction",
+      "accepted-compaction",
+      "unsupported-compaction",
+      "resume-unavailable",
+    ].includes(scenario);
+    const connections = scenario === "resume-unavailable" ? 2 : restored ? 1 : 0;
+    expect(harness.open).toHaveBeenCalledTimes(connections);
+    expect(resumed).toHaveBeenCalledTimes(connections);
+    expect(harness.detach).toHaveBeenCalledTimes(scenario === "resume-unavailable" ? 1 : 0);
+    expect(harness.createWorktree).not.toHaveBeenCalled();
+    if (contextRecovery) {
+      expect(harness.projection().contextHandoffs[0]?.delivery?.status).toBe(
+        compaction
+          ? acceptedContext
+            ? "pending"
+            : undefined
+          : scenario === "context-failure"
+            ? "pending"
+            : "inline",
+      );
+      if (acceptedContext) {
+        expect(recoveredMessage).toBeUndefined();
+        if (scenario === "accepted-context")
+          expect(harness.projection().contextHandoffs[1]?.delivery).toBeUndefined();
+      } else if (compaction) {
+        if (scenario === "unsent-compaction") expect(recoveredMessage?.text).toBe("/compact");
+        else expect(recoveredMessage).toBeUndefined();
+      } else {
+        expect(recoveredMessage?.text).toContain("Original compiler error");
+        expect(recoveredMessage?.text).toContain("Original handoff and selected knowledge");
+        expect(recoveredMessage?.text).toContain("Original accepted input");
+        expect(recoveredMessage?.messageId).toBe(run.userMessageId);
+        expect(recoveredMessage?.text).toContain("original build job");
+        if (scenario === "side-chat-context")
+          expect(recoveredMessage?.text).toContain("SIDE_CHAT_CONTEXT");
+      }
+      if (scenario.includes("side-chat"))
+        expect(harness.projection().contextHandoffs[1]?.delivery?.status).toBe("inline");
+    } else expect(harness.events).toEqual([]);
+    expect(harness.startRootRun).toHaveBeenCalledTimes(scenario === "completed" ? 0 : connections);
+    if (restored && scenario !== "completed") {
+      const restoredRun = harness.startRootRun.mock.calls[0]![0];
+      expect(restoredRun).toMatchObject({
+        run,
+        attemptId: attempt.id,
+        providerTurnOrdinal: 7,
+        resume: true,
+        reattach: true,
+        modelSelection: run.modelSelection,
+        message: { messageId: run.userMessageId },
+      });
+      yield* restoredRun.baseline!;
+      expect(harness.open.mock.calls[0]?.[0]).toMatchObject({
+        providerSessionId: savedSession.id,
+        initialNativeThreadId: "persistent-native-session",
+        modelSelection: run.modelSelection,
+      });
+    }
+  }),
 );
 
 function layerStartEffectWorker(
@@ -1977,6 +2418,7 @@ effectIt.effect(
           worktreePath,
           worktreesDir,
           fileSystem,
+          path,
           gitWorkflow,
           failReadsAfterRunning: true,
         });
@@ -2029,6 +2471,7 @@ effectIt.effect("leaves a managed worktree folder without .git that holds user f
       worktreePath,
       worktreesDir,
       fileSystem,
+      path,
       failReadsAfterRunning: true,
     });
     yield* harness.start;
@@ -2052,6 +2495,7 @@ effectIt.effect(
         worktreesDir,
         worktreePath,
         fileSystem,
+        path,
         failReadsAfterRunning: true,
       });
       harness.createWorktree.mockImplementationOnce(() => Effect.interrupt);
@@ -2237,6 +2681,13 @@ effectIt.effect.each([
         manualContinuation: true,
         sideChat,
       });
+
+      if (context !== "")
+        harness.startTurn.mockImplementationOnce(() =>
+          Effect.sync(() => {
+            expect(harness.projection().contextHandoffs[0]?.delivery?.status).toBe("pending");
+          }),
+        );
 
       yield* harness.start;
 
@@ -2478,6 +2929,7 @@ effectIt.effect.each(["cleanup-first", "startup-first"])(
         worktreePath,
         worktreesDir: workspaceRoot,
         fileSystem,
+        path,
         failReadsAfterRunning: true,
       });
       harness.createWorktree.mockImplementation(() =>

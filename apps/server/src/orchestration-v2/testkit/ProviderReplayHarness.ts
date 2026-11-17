@@ -293,6 +293,7 @@ export function layerWithRegistry<Error>(
 ): Layer.Layer<
   | Orchestrator.OrchestratorV2
   | EffectOutbox.EffectOutboxV2
+  | EffectWorker.OrchestrationEffectExecutorV2
   | EffectWorker.OrchestrationEffectWorkerV2
   | EventSink.EventSinkV2
   | ProviderSessionManager.ProviderSessionManagerV2
@@ -565,6 +566,7 @@ export function layerWithRegistry<Error>(
     layerEffectOutboxProvided,
     layerOrchestratorProvided,
     layerProviderSessionManagerProvided,
+    layerEffectExecutorProvided,
     layerEffectWorkerProvided,
     layerEventSinkProvided,
     layerContinuationWorkerProvided,

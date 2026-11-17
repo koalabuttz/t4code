@@ -520,6 +520,7 @@ export interface ThreadManagementServiceShape {
     void,
     Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
   >;
+  readonly confirmStop: Orchestrator.OrchestratorV2["Service"]["confirmStop"];
   readonly getThreadEventSequence: Orchestrator.OrchestratorV2["Service"]["getThreadEventSequence"];
   readonly recoverDelegatedTask: Orchestrator.OrchestratorV2["Service"]["recoverDelegatedTask"];
   readonly cancelDelegatedTask: Orchestrator.OrchestratorV2["Service"]["cancelDelegatedTask"];
@@ -1326,6 +1327,24 @@ const make = Effect.gen(function* () {
               reason: "superseded",
             });
           }
+          for (const providerSessionId of new Set(
+            records.providerThreads.flatMap((providerThread) =>
+              providerThread.appThreadId === input.threadId &&
+              providerThread.providerSessionId !== null
+                ? [providerThread.providerSessionId]
+                : [],
+            ),
+          )) {
+            const session = yield* orchestrator.getProviderSession(
+              input.threadId,
+              providerSessionId,
+            );
+            if (session?.capabilities.sessions.runtimeSurvivesServerExit === true)
+              return yield* new OrchestrationV2ForceStopThreadError({
+                threadId: input.threadId,
+                reason: "external-runtime",
+              });
+          }
           // Shared scopes are never tracked per thread, so this only kills the thread's own agent.
           const killed = yield* agentScope.kill(input.threadId);
           return { records, target, killed };
@@ -1773,6 +1792,7 @@ const make = Effect.gen(function* () {
     settleThread,
     interruptThread,
     stopDelegatedTasks,
+    confirmStop: orchestrator.confirmStop,
     stopWorkflow,
     forceStopThread,
     awaitBackgroundTasks,

@@ -2,6 +2,7 @@ import type * as NodeWorkerThreads from "node:worker_threads";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  ProviderTurnId,
   CheckpointId,
   CheckpointRef,
   CheckpointScopeId,
@@ -3550,7 +3551,31 @@ it.layer(layerTest)("orchestration V2 foundation persistence", (it) => {
 
   it.effect.each([
     { type: "terminal.cleanup" },
+    {
+      type: "provider-runtime.steer",
+      providerSessionId: ProviderSessionId.make("session:external-steer"),
+      providerThreadId: ProviderThreadId.make("thread:external-steer"),
+      providerTurnId: ProviderTurnId.make("turn:external-steer"),
+      runId: RunId.make("run:external-steer"),
+      attemptId: RunAttemptId.make("attempt:external-steer"),
+      messageId: MessageId.make("message:external-steer"),
+    },
     { type: "provider-runtime.continue", sourceRunId: RunId.make("run:restart-replay") },
+    {
+      type: "provider-runtime.stop",
+      providerSessionId: ProviderSessionId.make("session:external-stop-replay"),
+      providerThreadId: ProviderThreadId.make("provider-thread:external-stop-replay"),
+      runId: RunId.make("run:external-stop-replay"),
+      attemptId: RunAttemptId.make("attempt:external-stop-replay"),
+      providerTurnId: null,
+    },
+    {
+      type: "provider-runtime.reattach",
+      providerSessionId: ProviderSessionId.make("session:external-replay"),
+      providerThreadId: ProviderThreadId.make("provider-thread:external-replay"),
+      runId: RunId.make("run:external-replay"),
+      attemptId: RunAttemptId.make("attempt:external-replay"),
+    },
   ] as const)(
     "retires live provider effects and requeues $type after process loss",
     (replayRequest) =>

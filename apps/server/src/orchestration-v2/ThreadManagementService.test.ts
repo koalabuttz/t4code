@@ -907,6 +907,7 @@ it.effect.each([
       ),
       Layer.provide(
         Layer.mock(Orchestrator.OrchestratorV2)({
+          getProviderSession: () => Effect.undefined,
           getThreadRecords: () =>
             Effect.succeed({
               thread: { id: threadId, deletedAt: null },

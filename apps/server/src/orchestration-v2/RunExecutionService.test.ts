@@ -1407,7 +1407,7 @@ it.effect("prompts the provider only after a forked baseline capture finishes", 
   }),
 );
 
-it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as const)(
+it.effect.each(["failure", "interruption", "stale-attempt", "start-guard", "reattach"] as const)(
   "handles %s before the provider turn starts",
   (scenario) =>
     Effect.gen(function* () {
@@ -1486,6 +1486,10 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
           appThread: rootAppThread(threadId),
           providerSessionId,
           session: {
+            driver,
+            providerSession: {
+              capabilities: { sessions: { runtimeSurvivesServerExit: scenario === "reattach" } },
+            },
             events: Stream.never,
             startTurn: () => Ref.update(providerStarts, (count) => count + 1),
           } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
@@ -1509,6 +1513,7 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
           } as OrchestrationV2RunAttempt,
           attemptId,
           providerTurnOrdinal: 1,
+          ...(scenario === "reattach" ? { resume: true, reattach: true } : {}),
           ...(scenario === "start-guard"
             ? { shouldStartProviderTurn: () => Effect.succeed(false) }
             : {}),
@@ -1536,6 +1541,16 @@ it.effect.each(["failure", "interruption", "stale-attempt", "start-guard"] as co
 
       assert.equal(yield* Ref.get(providerStarts), 0);
       const events = (yield* Ref.get(writes)).flat();
+      if (scenario === "reattach") {
+        assert.isTrue(Exit.isFailure(result));
+        assert.equal(yield* Ref.get(guardedWrites), 1);
+        assert.equal(yield* Ref.get(refreshes), 0);
+        assert.deepEqual(
+          events.map((event) => event.type),
+          ["provider-session.updated"],
+        );
+        return;
+      }
       if (scenario === "interruption") {
         assert.isTrue(Exit.isFailure(result));
         if (Exit.isFailure(result)) assert.isTrue(Cause.hasInterruptsOnly(result.cause));
@@ -3264,33 +3279,63 @@ it.effect("refreshes pull requests after a provider stream exits with an error",
   }),
 );
 
-it.effect("records a provider's input rejection at turn start in the terminal error", () =>
-  Effect.gen(function* () {
-    const rejection = "goal objective must be at most 4000 characters";
-    const { written, observed } = yield* captureRootRunTermination({
-      key: "start-failure:input-rejected",
-      shouldFinalizeRun: () => Effect.succeed(true),
-      events: () => Stream.never,
-      afterStart: (closed) => Deferred.succeed(closed, undefined),
-      startTurn: (turnInput) =>
+it.effect.each([
+  { external: false, unresolved: false, reattach: false },
+  { external: true, unresolved: false, reattach: false },
+  { external: true, unresolved: true, reattach: false },
+  { external: true, unresolved: false, reattach: true },
+])(
+  "distinguishes input rejection from uncertain acceptance (%o)",
+  ({ external, unresolved, reattach }) =>
+    Effect.gen(function* () {
+      const rejection = "goal objective must be at most 4000 characters";
+      const retriable = yield* Ref.make(false);
+      const fail = (turnInput: {
+        threadId: ThreadId;
+        providerThread: { id: ProviderThreadId };
+        runId: RunId;
+      }) =>
         Effect.fail(
           new ProviderAdapter.ProviderAdapterTurnStartError({
             driver,
             threadId: turnInput.threadId,
             providerThreadId: turnInput.providerThread.id,
             runId: turnInput.runId,
+            ...(unresolved ? { outcomeUnresolved: true } : {}),
             cause: new CodexAppServerRequestError({
               code: -32600,
               errorMessage: rejection,
               method: "thread/goal/set",
             }),
           }),
-        ),
-    });
-    assert.deepEqual(observed, ["run:failed", "pull-requests-refreshed"]);
-    const error = written.find((item) => item.type === "error");
-    assert.include(error?.failure.message ?? "", rejection);
-  }),
+        );
+      const { written, observed, finalEvents } = yield* captureRootRunTermination({
+        key: "start-failure:input-rejected",
+        runtimeSurvivesServerExit: external,
+        reattach,
+        shouldFinalizeRun: () => Effect.succeed(true),
+        events: () => Stream.never,
+        afterStart: (closed) => Deferred.succeed(closed, undefined),
+        startTurn: reattach ? () => Effect.die("Recovery must not submit another input.") : fail,
+        resumeTurn: fail,
+        onStartFailure: () => Ref.set(retriable, true),
+      });
+      assert.equal(yield* Ref.get(retriable), reattach);
+      assert.deepEqual(
+        observed,
+        unresolved || reattach ? [] : ["run:failed", "pull-requests-refreshed"],
+      );
+      if (unresolved || reattach) {
+        assert.deepEqual(written, []);
+        assert.deepEqual(
+          finalEvents.map((event) => event.type),
+          ["provider-session.updated"],
+        );
+        return;
+      }
+      const error = written.find((item) => item.type === "error");
+      assert.include(error?.failure.message ?? "", rejection);
+    }),
 );
 
 it.effect("tells the user why /compact failed on a provider without compaction", () =>
@@ -3539,59 +3584,76 @@ it.effect("does not interrupt an ended provider when its terminal write fails", 
   }),
 );
 
-it.effect("ends a running root command when the provider stream fails mid-turn", () =>
-  Effect.gen(function* () {
-    const now = yield* DateTime.now;
-    const { written, observed } = yield* captureRootRunTermination({
-      key: "stream-error-running-command",
-      shouldFinalizeRun: () => Effect.succeed(true),
-      events: (ids) =>
-        Stream.make(
-          {
-            type: "provider_turn.updated" as const,
-            driver,
-            providerTurn: {
-              id: ids.rootProviderTurnId,
-              providerThreadId: ids.providerThreadId,
-              nodeId: ids.rootNodeId,
-              runAttemptId: ids.attemptId,
-              nativeTurnRef: null,
-              ordinal: 1,
-              status: "running" as const,
-              startedAt: now,
-              completedAt: null,
+it.effect.each([false, true])(
+  "reconciles a failed root stream (external runtime: %s)",
+  (external) =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const interrupts = yield* Ref.make(0);
+      const { written, observed, finalEvents } = yield* captureRootRunTermination({
+        key: "stream-error-running-command",
+        runtimeSurvivesServerExit: external,
+        shouldFinalizeRun: () => Effect.succeed(true),
+        events: (ids) =>
+          Stream.make(
+            {
+              type: "provider_turn.updated" as const,
+              driver,
+              providerTurn: {
+                id: ids.rootProviderTurnId,
+                providerThreadId: ids.providerThreadId,
+                nodeId: ids.rootNodeId,
+                runAttemptId: ids.attemptId,
+                nativeTurnRef: null,
+                ordinal: 1,
+                status: "running" as const,
+                startedAt: now,
+                completedAt: null,
+              },
             },
-          },
-          backgroundTurnItemEvent(ids, "command_execution", "running", 1),
-        ).pipe(
-          Stream.concat(
-            Stream.fail(
-              new ProviderAdapter.ProviderAdapterEventStreamError({
-                driver,
-                providerSessionId: ProviderSessionId.make("session:stream-error-running-command"),
-                cause: "provider process exited",
-              }),
+            backgroundTurnItemEvent(ids, "command_execution", "running", 1),
+          ).pipe(
+            Stream.concat(
+              Stream.fail(
+                new ProviderAdapter.ProviderAdapterEventStreamError({
+                  driver,
+                  providerSessionId: ProviderSessionId.make("session:stream-error-running-command"),
+                  cause: "provider process exited",
+                }),
+              ),
             ),
           ),
-        ),
-      // The dead process cannot take the interrupt either.
-      interruptTurn: (input) =>
-        Effect.fail(
-          new ProviderAdapter.ProviderAdapterInterruptError({
-            driver,
-            providerThreadId: input.providerThread.id,
-            providerTurnId: input.providerTurnId,
-            cause: "provider already exited",
-          }),
-        ),
-    });
-    assert.deepEqual(observed, ["run:failed", "pull-requests-refreshed"]);
-    const ids = backgroundScenarioIds("stream-error-running-command");
-    const endedCommand = written.find(
-      (item) => item.id === ids.itemId && item.status !== "running",
-    );
-    assert.isDefined(endedCommand);
-  }),
+        // The dead process cannot take the interrupt either.
+        interruptTurn: (input) =>
+          Ref.update(interrupts, (count) => count + 1).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new ProviderAdapter.ProviderAdapterInterruptError({
+                  driver,
+                  providerThreadId: input.providerThread.id,
+                  providerTurnId: input.providerTurnId,
+                  cause: "provider already exited",
+                }),
+              ),
+            ),
+          ),
+      });
+      assert.deepEqual(observed, external ? [] : ["run:failed", "pull-requests-refreshed"]);
+      assert.equal(yield* Ref.get(interrupts), external ? 0 : 1);
+      if (external) {
+        const disconnected = finalEvents.find((event) => event.type === "provider-session.updated");
+        if (disconnected?.type === "provider-session.updated") {
+          assert.equal(disconnected.payload.status, "error");
+          assert.include(disconnected.payload.lastError ?? "", "may still be running");
+        } else assert.fail("The unresolved runtime needs a visible connection error");
+      }
+      const ids = backgroundScenarioIds("stream-error-running-command");
+      const endedCommand = written.find(
+        (item) => item.id === ids.itemId && item.status !== "running",
+      );
+      if (external) assert.isUndefined(endedCommand);
+      else assert.isDefined(endedCommand);
+    }),
 );
 
 it.effect("keeps a running root command open when a write fails under a live provider", () =>
@@ -3625,17 +3687,19 @@ it.effect("keeps a running root command open when a write fails under a live pro
 
 it.effect.each([
   { ended: true },
+  { ended: false, external: true },
   // T3 ending the stream proves no dead runtime; Stop settles the work it releases.
   { ended: false, raisedByT3: true },
   // A Stop that already settled the subagent keeps its result.
   { ended: false, stopped: true },
 ] as const)(
   "ends a subagent that outlived its root when the provider stream fails (%o)",
-  ({ ended, raisedByT3, stopped }) =>
+  ({ ended, raisedByT3, stopped, external }) =>
     Effect.gen(function* () {
       const providerInstanceId = ProviderInstanceId.make("codex");
       const { finalEvents } = yield* captureRootRunTermination({
         key: "stream-error-outlived-subagent",
+        runtimeSurvivesServerExit: external === true,
         shouldFinalizeRun: () => Effect.succeed(true),
         events: (ids) =>
           Stream.make(
@@ -3866,19 +3930,22 @@ it.effect.each([
   }),
 );
 
-it.effect("fails the run when its event stream ends without a root terminal", () =>
-  Effect.gen(function* () {
-    const { observed, finalEvents } = yield* captureRootRunTermination({
-      key: "stream-end-without-terminal",
-      shouldFinalizeRun: () => Effect.succeed(true),
-      events: () => Stream.empty,
-    });
-    assert.deepEqual(observed, ["run:failed", "pull-requests-refreshed"]);
-    assert.equal(
-      finalEvents.find((event) => event.type === "provider-thread.updated")?.payload.status,
-      "idle",
-    );
-  }),
+it.effect.each([false, true])(
+  "reconciles an ended stream without a terminal (external runtime: %s)",
+  (external) =>
+    Effect.gen(function* () {
+      const { observed, finalEvents } = yield* captureRootRunTermination({
+        key: "stream-end-without-terminal",
+        runtimeSurvivesServerExit: external,
+        shouldFinalizeRun: () => Effect.succeed(true),
+        events: () => Stream.empty,
+      });
+      assert.deepEqual(observed, external ? [] : ["run:failed", "pull-requests-refreshed"]);
+      assert.equal(
+        finalEvents.find((event) => event.type === "provider-thread.updated")?.payload.status,
+        external ? undefined : "idle",
+      );
+    }),
 );
 
 it.effect("leaves the run to restart recovery when shutdown interrupts its event stream", () =>
@@ -3983,6 +4050,8 @@ it.effect.each(["completed", "failed"] as const)(
 
 function captureRootRunTermination(input: {
   readonly key: string;
+  readonly runtimeSurvivesServerExit?: boolean;
+  readonly reattach?: boolean;
   readonly shouldFinalizeRun: () => Effect.Effect<boolean, ProjectionStore.ProjectionStoreV2Error>;
   readonly rejectTerminalWrite?: boolean;
   readonly hasUnpairedRunInterruptRequest?: () => Effect.Effect<boolean, never>;
@@ -3997,6 +4066,7 @@ function captureRootRunTermination(input: {
     ProviderAdapter.ProviderAdapterV2Error
   >;
   readonly startTurn?: ProviderAdapter.ProviderAdapterV2SessionRuntime["startTurn"];
+  readonly resumeTurn?: ProviderAdapter.ProviderAdapterV2SessionRuntime["resumeTurn"];
   readonly interruptTurn?: ProviderAdapter.ProviderAdapterV2SessionRuntime["interruptTurn"];
   readonly messageText?: string;
   readonly initialProviderTurnId?: ProviderTurnId | null;
@@ -4155,6 +4225,11 @@ function captureRootRunTermination(input: {
         providerSessionId: ProviderSessionId.make(`session:${input.key}`),
         session: {
           driver,
+          providerSession: {
+            capabilities: {
+              sessions: { runtimeSurvivesServerExit: input.runtimeSurvivesServerExit },
+            },
+          },
           events: Stream.empty,
           subscribeEvents: Effect.succeed({
             events:
@@ -4188,6 +4263,7 @@ function captureRootRunTermination(input: {
             ),
           }),
           startTurn: input.startTurn ?? (() => Effect.void),
+          resumeTurn: input.resumeTurn,
           interruptTurn: input.interruptTurn ?? (() => Effect.void),
           hasPendingBackgroundWorkForThread: input.hasPendingBackgroundWorkForThread,
         } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
@@ -4217,6 +4293,7 @@ function captureRootRunTermination(input: {
         } as OrchestrationV2RunAttempt,
         attemptId: ids.attemptId,
         providerTurnOrdinal: 1,
+        ...(input.reattach === true ? { resume: true, reattach: true } : {}),
         shouldFinalizeRun: input.shouldFinalizeRun,
         loadUnsettledWork,
         ...(input.loadRunInterruptReason === undefined

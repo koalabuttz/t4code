@@ -610,6 +610,7 @@ export class RunExecutionStartError extends Schema.TaggedError<RunExecutionStart
 }
 
 const isProviderEventStreamError = Schema.is(ProviderAdapter.ProviderAdapterEventStreamError);
+const isProviderTurnStartError = Schema.is(ProviderAdapter.ProviderAdapterTurnStartError);
 
 export class RunExecutionIngestError extends Schema.TaggedError<RunExecutionIngestError>()(
   "RunExecutionIngestError",
@@ -646,6 +647,7 @@ export interface RunExecutionServiceV2StartRootRunInput {
   readonly providerTurnOrdinal: number;
   readonly nativeThreadHasTurns?: boolean;
   readonly resume?: boolean;
+  readonly reattach?: boolean;
   readonly loadInheritedBackgroundTurnItems?: () => Effect.Effect<
     ReadonlyArray<InheritedBackgroundTurnItemRoute>,
     unknown
@@ -1099,6 +1101,40 @@ export const layer: Layer.Layer<
             driver: input.providerThread.driver,
             nativeTurnId: `failed:${input.attempt.id}`,
           });
+        const externalRuntime =
+          input.session.providerSession?.capabilities.sessions.runtimeSurvivesServerExit === true;
+        const recordUnresolvedRuntime = Effect.fn("RunExecutionService.recordUnresolvedRuntime")(
+          function* (cause: Cause.Cause<unknown>) {
+            const now = yield* DateTime.now;
+            yield* eventSink.writeIfRunCurrent({
+              threadId: input.run.threadId,
+              runId: input.run.id,
+              activeAttemptId: input.attempt.id,
+              expectedStatus: "running",
+              events: [
+                {
+                  id: yield* idAllocator.allocate.event({ threadId: input.run.threadId }),
+                  type: "provider-session.updated",
+                  threadId: input.run.threadId,
+                  driver: input.session.driver,
+                  providerInstanceId: input.run.providerInstanceId,
+                  occurredAt: now,
+                  payload: {
+                    ...input.session.providerSession,
+                    status: "error",
+                    updatedAt: now,
+                    lastError:
+                      "T3 could not reconcile the external provider's outcome. Native work may still be running; reconnect to recover its state.",
+                  },
+                },
+              ],
+            });
+            yield* Effect.logWarning("External provider work awaits reconciliation", {
+              runId: input.run.id,
+              cause,
+            });
+          },
+        );
         const makeFailedTerminalEvent = (
           failure: OrchestrationV2ProviderFailure,
           failureItemOrdinal: number,
@@ -1133,6 +1169,10 @@ export const layer: Layer.Layer<
           Effect.catchCause((cause) =>
             Effect.gen(function* () {
               if (Cause.hasInterruptsOnly(cause)) {
+                return yield* Effect.failCause(cause);
+              }
+              if (externalRuntime && input.reattach === true) {
+                yield* recordUnresolvedRuntime(cause);
                 return yield* Effect.failCause(cause);
               }
               yield* Effect.logError("orchestration V2 run preparation failed", {
@@ -2011,8 +2051,7 @@ export const layer: Layer.Layer<
                 yield* finalizeRootRun(terminal);
               }),
             ),
-            // Server shutdown interrupts the subscription and leaves the run to
-            // restart recovery; every other failure fails the run.
+            // Connection loss cannot establish an external daemon's task outcome.
             Effect.catchCauseIf(
               (cause) => !Cause.hasInterruptsOnly(cause),
               (cause) =>
@@ -2021,6 +2060,10 @@ export const layer: Layer.Layer<
                   const routing = yield* Ref.get(eventRouting);
                   const rootProviderTurn = yield* Ref.get(latestRootProviderTurn);
                   const squashed = Cause.squash(cause);
+                  if (externalRuntime) {
+                    yield* recordUnresolvedRuntime(cause);
+                    return;
+                  }
                   // An exclusive session closes when its thread detaches, and no terminal
                   // follows. The process is gone, so a handoff settles here with no interrupt.
                   if (
@@ -2254,7 +2297,10 @@ export const layer: Layer.Layer<
         const { message: _message, ...resumeInput } = turnInput;
         const startTurn =
           input.resume === true
-            ? (input.session.resumeTurn?.({ ...resumeInput, messageId: input.message.messageId }) ??
+            ? (input.session.resumeTurn?.({
+                ...resumeInput,
+                messageId: input.message.messageId,
+              }) ??
               Effect.fail(
                 new ProviderAdapter.ProviderAdapterTurnStartError({
                   driver: input.session.driver,
@@ -2291,8 +2337,28 @@ export const layer: Layer.Layer<
               Effect.forkDetach,
             ),
           ),
-          Effect.catchCause((cause) =>
-            Effect.logError("orchestration V2 provider turn start failed", {
+          Effect.catchCause((cause) => {
+            const failure = Cause.squash(cause);
+            if (externalRuntime && Cause.hasInterruptsOnly(cause))
+              return Fiber.interrupt(providerEventFiber).pipe(Effect.asVoid);
+            if (
+              externalRuntime &&
+              (input.reattach === true ||
+                (isProviderTurnStartError(failure) && failure.outcomeUnresolved === true))
+            )
+              return Fiber.interrupt(providerEventFiber).pipe(
+                Effect.andThen(recordUnresolvedRuntime(cause)),
+                Effect.andThen(input.reattach === true ? Effect.fail(failure) : Effect.void),
+                Effect.mapError(
+                  (writeCause) =>
+                    new RunExecutionStartError({
+                      commandId: input.commandId,
+                      runId: input.run.id,
+                      cause: writeCause,
+                    }),
+                ),
+              );
+            return Effect.logError("orchestration V2 provider turn start failed", {
               runId: input.run.id,
               cause,
             }).pipe(
@@ -2337,8 +2403,8 @@ export const layer: Layer.Layer<
                     cause: { start: cause, write: writeCause },
                   }),
               ),
-            ),
-          ),
+            );
+          }),
         );
       }),
     } satisfies RunExecutionServiceV2Shape);

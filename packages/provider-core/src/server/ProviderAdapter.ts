@@ -83,6 +83,7 @@ export type ProviderAdapterV2SessionStatus = typeof ProviderAdapterV2SessionStat
 export const ProviderAdapterV2Event = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("app_thread.created"),
+    backgroundOwnerThreadId: Schema.optional(ThreadId),
     driver: ProviderDriverKind,
     appThread: OrchestrationV2AppThread,
     createOnly: Schema.optional(Schema.Boolean),
@@ -94,6 +95,7 @@ export const ProviderAdapterV2Event = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("provider_thread.updated"),
+    backgroundOwnerThreadId: Schema.optional(ThreadId),
     driver: ProviderDriverKind,
     providerThread: OrchestrationV2ProviderThread,
     /** Work remaining at this point in the event stream, including native continuations. */
@@ -104,6 +106,7 @@ export const ProviderAdapterV2Event = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("provider_turn.updated"),
+    backgroundOwnerThreadId: Schema.optional(ThreadId),
     driver: ProviderDriverKind,
     threadId: Schema.optional(ThreadId),
     providerTurn: OrchestrationV2ProviderTurn,
@@ -112,21 +115,25 @@ export const ProviderAdapterV2Event = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("node.updated"),
+    backgroundOwnerThreadId: Schema.optional(ThreadId),
     driver: ProviderDriverKind,
     node: OrchestrationV2ExecutionNode,
   }),
   Schema.Struct({
     type: Schema.Literal("subagent.updated"),
+    backgroundOwnerThreadId: Schema.optional(ThreadId),
     driver: ProviderDriverKind,
     subagent: OrchestrationV2Subagent,
   }),
   Schema.Struct({
     type: Schema.Literal("message.updated"),
+    backgroundOwnerThreadId: Schema.optional(ThreadId),
     driver: ProviderDriverKind,
     message: OrchestrationV2ConversationMessage,
   }),
   Schema.Struct({
     type: Schema.Literal("turn_item.updated"),
+    backgroundOwnerThreadId: Schema.optional(ThreadId),
     driver: ProviderDriverKind,
     turnItem: OrchestrationV2TurnItem,
     /** Persist recovered activity independently of a run subscription. */
@@ -362,6 +369,7 @@ export class ProviderAdapterTurnStartError extends Schema.TaggedError<ProviderAd
     threadId: ThreadId,
     providerThreadId: ProviderThreadId,
     runId: RunId,
+    outcomeUnresolved: Schema.optional(Schema.Literal(true)),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -521,6 +529,8 @@ export type ProviderAdapterV2Error = typeof ProviderAdapterV2Error.Type;
 
 export interface ProviderAdapterV2OpenSessionInput {
   readonly threadId: ThreadId;
+  /** Native helpers can appear while no app turn supplies its parent's thread record. */
+  readonly readAppThread?: Effect.Effect<OrchestrationV2AppThread | undefined>;
   readonly providerSessionId: ProviderSessionId;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
@@ -566,12 +576,14 @@ export type ProviderAdapterV2ResumeTurnInput = Omit<
   "message" | "resume"
 > & {
   readonly messageId: MessageId;
+  /** External runtimes may submit this only when their durable ledger proves no input was prepared. */
+  readonly unsubmittedMessage?: Effect.Effect<ProviderAdapterV2TurnMessage, ProviderAdapterV2Error>;
 };
 
 export function resumeTurnInput(
   input: ProviderAdapterV2ResumeTurnInput,
 ): ProviderAdapterV2TurnInput {
-  const { messageId, ...turn } = input;
+  const { messageId, unsubmittedMessage: _unsubmittedMessage, ...turn } = input;
   return {
     ...turn,
     resume: true,
@@ -777,6 +789,10 @@ export interface ProviderAdapterV2SessionRuntime {
   readonly interruptTurn: (
     input: ProviderAdapterV2InterruptInput,
   ) => Effect.Effect<void, ProviderAdapterV2Error>;
+  /** Confirms the thread's owned runtime work stopped, including work without an acknowledged turn. */
+  readonly stopThread?: (input: {
+    readonly providerThread: OrchestrationV2ProviderThread;
+  }) => Effect.Effect<void, ProviderAdapterV2Error>;
   readonly stopSubagent?: (input: {
     readonly providerThread: OrchestrationV2ProviderThread;
     readonly nativeTaskId: string;

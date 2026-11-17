@@ -39,10 +39,10 @@ export function extensionStatusBannerItem(
 ): ComposerBannerStackItem | null {
   if (statuses.length === 0) return null;
   return {
-    id: "pi-extension-status",
+    id: "provider-extension-status",
     variant: "default",
     icon: <span>▸</span>,
-    title: <output>{`Pi · ${statuses.map((status) => status.text).join(" · ")}`}</output>,
+    title: <output>{statuses.map((status) => status.text).join(" · ")}</output>,
   };
 }
 

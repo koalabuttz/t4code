@@ -9,6 +9,7 @@ import {
   type TeamworkAction,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -19,6 +20,7 @@ import * as Teamwork from "./TeamworkService.ts";
 import * as CrewContext from "./CrewContextService.ts";
 import { CrewArtifacts } from "./CrewArtifacts.ts";
 import { DispatchModeLimit } from "../orchestration-v2/DispatchModeLimit.ts";
+import { StopConfirmationError } from "../orchestration-v2/StopConfirmation.ts";
 
 const projectId = ProjectId.make("project-teamwork");
 const coordinator = ThreadId.make("coordinator");
@@ -57,7 +59,26 @@ const dependencies = (
               interactionMode: "default",
             } as never),
       sendToThread: (input) => deliver(input.commandId).pipe(Effect.as({} as never)),
-      dispatch: () => stop().pipe(Effect.as({} as never)),
+      dispatch: () => Effect.succeed({} as never),
+      confirmStop: ({ threadId }) =>
+        (deleted(threadId)
+          ? Effect.fail(
+              new Threads.ThreadManagementProviderInstanceDisabledError({
+                projectId,
+                instanceId: ProviderInstanceId.make("codex"),
+              }),
+            )
+          : stop()
+        ).pipe(
+          Effect.mapError(
+            (cause) =>
+              new StopConfirmationError({
+                threadId: coordinator,
+                reason: "fixture work still running",
+                cause,
+              }),
+          ),
+        ),
     }),
   );
 
@@ -242,6 +263,7 @@ it.effect(
     let stopFails = true;
     let stillRunning = false;
     let workerDeleted = false;
+    let confirmation = Effect.void;
     return Effect.gen(function* () {
       const teams = yield* Teamwork.TeamworkService;
       const sql = yield* SqlClient.SqlClient;
@@ -323,7 +345,32 @@ it.effect(
       );
       yield* sql`UPDATE project_teamwork_outbox SET status = 'failed' WHERE id = ${stop.id}`;
       stopFails = false;
+      const awaitingStop = yield* Deferred.make<void>();
+      const stopped = yield* Deferred.make<void>();
+      confirmation = Deferred.succeed(awaitingStop, undefined).pipe(
+        Effect.andThen(Deferred.await(stopped)),
+      );
       yield* update({ type: "delivery.retry", id: stop.id });
+      yield* Deferred.await(awaitingStop);
+      assert.equal(
+        (yield* teams.read(projectId)).deliveries.find((row) => row.id === stop.id)?.status,
+        "pending",
+      );
+      assert.isTrue(
+        Result.isFailure(
+          yield* Effect.result(
+            update({ type: "task.reserve", id: "task", delegationId: "too-early" }),
+          ),
+        ),
+      );
+      yield* update({
+        type: "knowledge.save",
+        id: "during-stop",
+        title: "Keep UI responsive",
+        text: "Unrelated changes are allowed while a provider stops.",
+        sourceTaskId: null,
+      });
+      yield* Deferred.succeed(stopped, undefined);
       yield* teams.drain;
       stillRunning = true;
       assert.isTrue(
@@ -400,7 +447,7 @@ it.effect(
                         instanceId: ProviderInstanceId.make("codex"),
                       }),
                     )
-                  : Effect.void,
+                  : confirmation,
               () => (stillRunning ? "running" : "completed"),
               (id) => id === "worker" && workerDeleted,
             ),
