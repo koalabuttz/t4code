@@ -1230,6 +1230,8 @@ describe("AcpAdapterV2", () => {
           driver: ACP_TEST_DRIVER,
           capabilities: AcpProviderCapabilitiesV2,
           reportsPerTurnPromptUsage: true,
+          // This fixture settles from prompt results; native ACP v2 idle is covered separately.
+          followAgentWorkState: false,
           enablePostSettleContinuation: true,
           makeRuntime: makeMockRuntime({
             childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
@@ -8156,6 +8158,7 @@ describe("AcpAdapterV2", () => {
               driver: ACP_TEST_DRIVER,
               capabilities: AcpProviderCapabilitiesV2,
               deferFinalizeForBackgroundWork: true,
+              followAgentWorkState: false,
               enablePostSettleContinuation: true,
               extractSubagentUpdate: (toolCall) => {
                 if (toolCall.toolCallId === "tool-call-generic-1") {
@@ -8341,6 +8344,7 @@ describe("AcpAdapterV2", () => {
         flavor: {
           driver: ACP_TEST_DRIVER,
           capabilities: AcpProviderCapabilitiesV2,
+          followAgentWorkState: false,
           enablePostSettleContinuation: true,
           normalizeToolCall: normalizeXAiAcpToolCallState,
           extractSubagentUpdate: (toolCall) =>
@@ -8586,6 +8590,7 @@ describe("AcpAdapterV2", () => {
             driver: ACP_TEST_DRIVER,
             capabilities: AcpProviderCapabilitiesV2,
             deferFinalizeForBackgroundWork: true,
+            followAgentWorkState: false,
             enablePostSettleContinuation: true,
             extractSubagentUpdate: (toolCall) =>
               toolCall.toolCallId !== "tool-call-generic-1"
@@ -9233,6 +9238,7 @@ describe("AcpAdapterV2", () => {
           flavor: {
             driver: ACP_TEST_DRIVER,
             capabilities: AcpProviderCapabilitiesV2,
+            followAgentWorkState: false,
             enablePostSettleContinuation: true,
             extractBackgroundTaskId: (toolCall) =>
               toolCall.toolCallId === "tool-call-monitor-1" ? "task-monitor-1" : undefined,
@@ -9375,6 +9381,7 @@ describe("AcpAdapterV2", () => {
           driver: ACP_TEST_DRIVER,
           capabilities: AcpProviderCapabilitiesV2,
           deferFinalizeForBackgroundWork: true,
+          followAgentWorkState: false,
           enablePostSettleContinuation: true,
           makeRuntime: makeMockRuntime({
             childProcessSpawner,
@@ -9582,6 +9589,7 @@ describe("AcpAdapterV2", () => {
           flavor: {
             driver: ACP_TEST_DRIVER,
             capabilities: AcpProviderCapabilitiesV2,
+            followAgentWorkState: false,
             enablePostSettleContinuation: true,
             extractBackgroundTaskId: (toolCall) => {
               if (toolCall.toolCallId === "tool-call-monitor-a") return "task-monitor-a";
@@ -9806,6 +9814,7 @@ describe("AcpAdapterV2", () => {
           flavor: {
             driver: ACP_TEST_DRIVER,
             capabilities: AcpProviderCapabilitiesV2,
+            followAgentWorkState: false,
             enablePostSettleContinuation: true,
             extractBackgroundTaskId: (toolCall) => {
               if (toolCall.toolCallId === "tool-call-monitor-1") return "task-monitor-1";
@@ -10155,6 +10164,7 @@ describe("AcpAdapterV2", () => {
         flavor: {
           driver: ACP_TEST_DRIVER,
           capabilities: AcpProviderCapabilitiesV2,
+          followAgentWorkState: false,
           enablePostSettleContinuation: true,
           deferFinalizeForBackgroundWork: true,
           registerExtensions: (context) =>
@@ -10318,6 +10328,7 @@ describe("AcpAdapterV2", () => {
           flavor: {
             driver: ACP_TEST_DRIVER,
             capabilities: AcpProviderCapabilitiesV2,
+            followAgentWorkState: false,
             enablePostSettleContinuation: true,
             deferFinalizeForBackgroundWork: true,
             normalizeToolCall: grokFlavor.normalizeToolCall!,
