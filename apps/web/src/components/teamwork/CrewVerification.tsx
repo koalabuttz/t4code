@@ -31,9 +31,11 @@ type Props = {
 function CrewArtifactDetails({
   artifact,
   onOpenContent,
+  onOpenCommit,
 }: {
   artifact: typeof TeamworkArtifact.Type;
   onOpenContent?: ((path: string) => void) | undefined;
+  onOpenCommit?: ((sha: string) => void) | undefined;
 }) {
   return (
     <div className="space-y-2 break-all text-sm">
@@ -54,6 +56,10 @@ function CrewArtifactDetails({
               : "Content preview is unavailable here. Inspect the recorded path in the project or worker workspace and verify its SHA-256."}
           </p>
         </>
+      ) : onOpenCommit ? (
+        <Button size="sm" variant="outline" onClick={() => onOpenCommit(artifact.ref)}>
+          Open exact commit changes
+        </Button>
       ) : (
         <>
           <p className="text-xs text-muted-foreground">
@@ -74,19 +80,25 @@ export function CrewTaskArtifact({
   projectId,
   artifactsEnabled = false,
   onOpenContent,
+  onOpenCommit,
 }: {
   task: TeamworkTask;
   environmentId: EnvironmentId;
   projectId: ProjectId;
   artifactsEnabled?: boolean;
   onOpenContent?: ((path: string) => void) | undefined;
+  onOpenCommit?: ((sha: string) => void) | undefined;
 }) {
   return (
     <div className="space-y-3">
       <p className="text-sm font-medium">{crewReviewLabel(task)}</p>
       {task.submission && (
         <>
-          <CrewArtifactDetails artifact={task.submission.artifact} onOpenContent={onOpenContent} />
+          <CrewArtifactDetails
+            artifact={task.submission.artifact}
+            onOpenContent={onOpenContent}
+            onOpenCommit={onOpenCommit}
+          />
           <p className="text-xs">
             Attempt: {task.submission.attemptId} · Submitted: {task.submission.createdAt}
           </p>
@@ -214,6 +226,7 @@ export function CrewMilestone({
   projectId,
   artifactsEnabled = false,
   onOpenContent,
+  onOpenCommit,
 }: Props & {
   milestone: TeamworkInitiative["milestones"][number];
   requiresVerification: boolean;
@@ -222,6 +235,7 @@ export function CrewMilestone({
   projectId?: ProjectId;
   artifactsEnabled?: boolean;
   onOpenContent?: ((path: string) => void) | undefined;
+  onOpenCommit?: ((sha: string) => void) | undefined;
 }) {
   const [kind, setKind] = useState<"commit" | "content">("commit");
   const [ref, setRef] = useState("");
@@ -251,6 +265,7 @@ export function CrewMilestone({
           <CrewArtifactDetails
             artifact={milestone.verification.artifact}
             onOpenContent={onOpenContent}
+            onOpenCommit={onOpenCommit}
           />
           <p className="text-xs">Verified: {milestone.verification.createdAt}</p>
           <p className="whitespace-pre-wrap text-sm">
