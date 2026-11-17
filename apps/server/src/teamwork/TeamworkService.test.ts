@@ -312,6 +312,32 @@ it.effect(
       assert.equal(stop.status, "failed");
       assert.equal(stop.initiativeId, "initiative");
       assert.equal(stop.taskId, "task");
+      yield* sql`INSERT INTO project_teamwork_outbox
+        SELECT 'window-older-failed', project_id, revision - 2, thread_id, kind, 'failed', payload_json
+        FROM project_teamwork_outbox WHERE id = ${stop.id}`;
+      yield* sql`INSERT INTO project_teamwork_outbox
+        SELECT 'window-older-delivered', project_id, revision - 1, thread_id, kind, 'delivered', payload_json
+        FROM project_teamwork_outbox WHERE id = ${stop.id}`;
+      yield* sql`INSERT INTO project_teamwork_outbox
+        SELECT 'window-older-message', project_id, revision - 1, thread_id, 'message', 'failed', payload_json
+        FROM project_teamwork_outbox WHERE id = ${stop.id}`;
+      yield* sql`WITH RECURSIVE newer(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM newer WHERE n < 61)
+        INSERT INTO project_teamwork_outbox
+        SELECT 'window-message-' || n, project_id, revision + 100 + n, thread_id, 'message', 'delivered', payload_json
+        FROM newer CROSS JOIN project_teamwork_outbox WHERE id = ${stop.id}`;
+      for (const status of ["failed", "pending", "delivered"] as const) {
+        yield* sql`UPDATE project_teamwork_outbox SET status = ${status} WHERE id = ${stop.id}`;
+        const { deliveries } = yield* teams.read(projectId);
+        assert.equal(deliveries.find((row) => row.id === stop.id)?.status, status);
+        assert.equal(deliveries.find((row) => row.id === stop.id)?.initiativeId, "initiative");
+        assert.equal(deliveries.find((row) => row.id === stop.id)?.taskId, "task");
+        assert.equal(deliveries.find((row) => row.id === "window-older-failed")?.status, "failed");
+        assert.equal(deliveries.find((row) => row.id === "window-older-message")?.status, "failed");
+        assert.isFalse(deliveries.some((row) => row.id === "window-older-delivered"));
+        assert.equal(deliveries.filter((row) => row.id.startsWith("window-message-")).length, 60);
+      }
+      yield* sql`DELETE FROM project_teamwork_outbox WHERE id LIKE 'window-%'`;
+      yield* sql`UPDATE project_teamwork_outbox SET status = 'failed' WHERE id = ${stop.id}`;
       yield* update({
         type: "task.create",
         id: "parallel",

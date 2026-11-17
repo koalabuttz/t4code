@@ -172,10 +172,24 @@ const make = Effect.gen(function* () {
   ) {
     yield* authorize(projectId, actor);
     const snapshot = yield* load(projectId);
-    const rows = yield* sql`SELECT id, thread_id AS "threadId", kind, status,
+    // Stop obligations survive assignment resets and the recent discussion window.
+    const rows = yield* sql`WITH recent AS (
+        SELECT id FROM project_teamwork_outbox WHERE project_id = ${projectId}
+        ORDER BY revision DESC, id DESC LIMIT 60
+      ), stops AS (
+        SELECT id, status, ROW_NUMBER() OVER (
+          PARTITION BY thread_id, json_extract(payload_json, '$.initiativeId'), json_extract(payload_json, '$.taskId')
+          ORDER BY revision DESC, id DESC
+        ) AS stop_rank FROM project_teamwork_outbox
+        WHERE project_id = ${projectId} AND kind = 'stop' AND status != 'cancelled'
+      ) SELECT id, thread_id AS "threadId", kind, status,
         json_extract(payload_json, '$.initiativeId') AS "initiativeId",
         json_extract(payload_json, '$.taskId') AS "taskId"
-        FROM project_teamwork_outbox WHERE project_id = ${projectId} ORDER BY revision DESC, id DESC LIMIT 60`;
+        FROM project_teamwork_outbox WHERE project_id = ${projectId}
+          AND (id IN (SELECT id FROM recent)
+            OR status IN ('pending', 'failed')
+            OR id IN (SELECT id FROM stops WHERE stop_rank = 1))
+        ORDER BY revision DESC, id DESC`;
     return yield* decodeRead({
       snapshot,
       deliveries: rows,
