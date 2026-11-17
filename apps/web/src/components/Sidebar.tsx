@@ -162,6 +162,7 @@ import { useThreadSearch } from "../state/queries";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { hasCrewProjectFootprint } from "./teamwork/crewChat.logic";
 import { environmentShell } from "../state/shell";
 import { serverEnvironment } from "../state/server";
 import { canShareWithGuestAtom } from "./chat/guestShareAvailability";
@@ -946,7 +947,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       if (
         projectSelection.current !== selection ||
         router.state.location.href !== href ||
-        !snapshot?.revision
+        !hasCrewProjectFootprint(snapshot)
       )
         return;
       if (isMobile) setOpenMobile(false);

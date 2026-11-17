@@ -2,14 +2,30 @@ import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { crewLiveFreshness } from "@t3tools/client-runtime/state/crew";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { CommandId, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
+import {
+  createEnvironmentRpcSubscriptionAtomFamily,
+  executeAtomQuery,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import { ThreadSnapshotLoader } from "@t3tools/client-runtime/state/threads";
+import {
+  CommandId,
+  WS_METHODS,
+  isProviderNativeSubagentThread,
+  type ScopedProjectRef,
+  type ThreadId,
+} from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import { AtomRegistry } from "effect/reactivity";
 import type {
   CrewConversationAction,
   CrewConversationCommand,
   CrewConversationQuery,
 } from "@t3tools/contracts/crewConversation";
 import { randomUUID } from "../../lib/utils";
+import { connectionAtomRuntime } from "../../connection/runtime";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { readPreparedConnection } from "../../state/session";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentShellStatus } from "../../state/shell";
@@ -24,6 +40,58 @@ declare module "@tanstack/react-router" {
     crewRequestId?: string;
     crewRequestRunId?: string;
   }
+}
+
+const crewSnapshot = createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
+  label: "web:crew:confirm-coordinator",
+  tag: WS_METHODS.teamworkSubscribe,
+  completeWhen: () => true,
+  idleTtlMs: 0,
+});
+
+export async function readCrewForConfirmation(scope: ScopedProjectRef) {
+  const atom = crewSnapshot({
+    environmentId: scope.environmentId,
+    input: { projectId: scope.projectId },
+  });
+  const result = await executeAtomQuery(appAtomRegistry, atom, {
+    refresh: true,
+    signal: AbortSignal.timeout(6_000),
+    reportFailure: false,
+  });
+  if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+  if (result.value?.snapshot.projectId !== scope.projectId)
+    throw new Error("Crew state is unavailable for this project.");
+  return result.value.snapshot;
+}
+
+export async function readCrewCoordinatorCandidate(scope: ScopedProjectRef, threadId: ThreadId) {
+  const prepared = readPreparedConnection(scope.environmentId);
+  if (prepared?.target.environmentId !== scope.environmentId)
+    throw new Error("Connect to the project environment to choose its coordinator.");
+  const result = await Effect.runPromise(
+    AtomRegistry.getResult(appAtomRegistry, connectionAtomRuntime).pipe(
+      Effect.flatMap((context) =>
+        Effect.flatMap(ThreadSnapshotLoader, (loader) => loader.load(prepared, threadId)).pipe(
+          Effect.provide(context),
+        ),
+      ),
+      Effect.timeout("7 seconds"),
+    ),
+  );
+  if (result._tag === "missing") return null;
+  if (result._tag === "unavailable")
+    throw new Error("The coordinator candidate could not be verified.");
+  const thread = result.snapshot.projection.thread;
+  return {
+    environmentId: prepared.target.environmentId,
+    projectId: thread.projectId,
+    threadId: thread.id,
+    eligible:
+      thread.deletedAt === null &&
+      thread.archivedAt === null &&
+      !isProviderNativeSubagentThread(thread),
+  };
 }
 
 export function useCrewProject(scope: ScopedProjectRef | null) {

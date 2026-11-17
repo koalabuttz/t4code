@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
-import { scopedProjectKey } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef, scopedProjectKey } from "@t3tools/client-runtime/environment";
 import { crewLiveFreshness } from "@t3tools/client-runtime/state/crew";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   CommandId,
+  type OrchestrationV2ThreadShell,
   type ScopedProjectRef,
   type TeamworkAction,
   type ThreadId,
@@ -13,6 +14,8 @@ import {
 import type { CrewAttention } from "@t3tools/contracts/crewConversation";
 import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
 import { randomUUID } from "../../lib/utils";
+import { useQuietThreadProjection } from "../../state/entities";
+import { currentCrewRuntimeRequests } from "./crewChat.logic";
 import { useEnvironmentShellStatus } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
@@ -97,13 +100,13 @@ export function CrewChatControls({
   const router = useRouter();
   const origin = useRouterState({ select: (state) => state.location.state.crewSource });
   const originHref = useRouterState({ select: (state) => state.location.href });
-  const attention = useCrewCollection(coordinator ? scope : null, "attention");
   const direct = useCrewCollection(coordinator ? null : scope, "attention", { threadId });
   const permission = useAtomValue(
     serverEnvironment.mutateTeamwork.permissionAtom(scope.environmentId),
   );
   const mutate = useAtomCommand(serverEnvironment.mutateTeamwork, { reportFailure: false });
   const [busy, setBusy] = useState(false);
+  const [workerLimit, setWorkerLimit] = useState(12);
   const [error, setError] = useState<string | null>(null);
   if (!snapshot) return null;
   const freshness = crewLiveFreshness(connected, query);
@@ -119,23 +122,13 @@ export function CrewChatControls({
     (task) =>
       task.ownerThreadId === threadId && ["running", "blocked", "review"].includes(task.status),
   );
-  const pendingRequests = new Map(
-    (attention.data?.attention ?? []).flatMap((entry) => {
-      const request = entry.pendingRequest;
-      const shell = shells.find((candidate) => candidate.id === entry.source.conversation.threadId);
-      return request &&
-        shell?.deletedAt === null &&
-        shell.pendingRuntimeRequest?.id === request.requestId &&
-        entry.coordinator.threadId === threadId
-        ? [
-            [
-              JSON.stringify([shell.id, request.runId, request.requestId]),
-              { request, entry, shell },
-            ] as const,
-          ]
-        : [];
-    }),
-  );
+  const pendingWorkers = coordinator
+    ? shells.filter(
+        (shell) =>
+          shell.id !== threadId && shell.deletedAt === null && shell.pendingRuntimeRequest !== null,
+      )
+    : [];
+  const assignedWorkerIds = new Set(snapshot.tasks.map((task) => task.ownerThreadId));
   const directAttention = (direct.data?.attention ?? [])
     .filter((entry) => entry.reason === "user-message")
     .reduce<CrewAttention | null>(
@@ -262,33 +255,27 @@ export function CrewChatControls({
               </div>
             ))}
           {!unavailable
-            ? [...pendingRequests]
-                .filter(([, { shell }]) => shell.id !== threadId)
-                .map(([key, { request, entry, shell }]) => (
-                  <Button
-                    key={key}
-                    size="sm"
-                    variant="outline"
-                    render={
-                      <Link
-                        {...crewThreadRoute(scope, shell.id)}
-                        state={{
-                          crewRequestId: request.requestId,
-                          crewRequestRunId: request.runId,
-                          crewSource: { projectKey, originHref },
-                        }}
-                      />
-                    }
-                  >
-                    {entry.reason === "approval"
-                      ? "Review approval"
-                      : entry.pendingRequest?.responder === "user-only"
-                        ? "Open user-only request"
-                        : "Open question"}{" "}
-                    · {shell.title}
-                  </Button>
+            ? pendingWorkers
+                .slice(0, workerLimit)
+                .map((worker) => (
+                  <CrewPendingWorkerActions
+                    key={worker.id}
+                    scope={scope}
+                    worker={worker}
+                    assigned={assignedWorkerIds.has(worker.id)}
+                    originHref={originHref}
+                  />
                 ))
             : null}
+          {!unavailable && pendingWorkers.length > workerLimit ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setWorkerLimit((limit) => limit + 12)}
+            >
+              Show more workers with requests
+            </Button>
+          ) : null}
         </div>
       ) : directAttention && directAttention.progress.state !== "considered" ? (
         <p className="text-xs text-muted-foreground">
@@ -299,4 +286,64 @@ export function CrewChatControls({
       ) : null}
     </section>
   );
+}
+
+function CrewPendingWorkerActions({
+  scope,
+  worker,
+  assigned,
+  originHref,
+}: {
+  scope: ScopedProjectRef;
+  worker: Pick<OrchestrationV2ThreadShell, "id" | "title" | "pendingRuntimeRequest">;
+  assigned: boolean;
+  originHref: string;
+}) {
+  const memberQuery = useCrewCollection(assigned ? null : scope, "workstreams", {
+    threadId: worker.id,
+  });
+  const member = memberQuery.data?.workstreams.find(
+    (entry) => entry.conversation.threadId === worker.id,
+  );
+  const participates = assigned || (member !== undefined && member.status !== "unlinked");
+  const ref = scopeThreadRef(scope.environmentId, worker.id);
+  const loaded = useQuietThreadProjection(participates ? ref : null);
+  const projection =
+    loaded?.environmentId === scope.environmentId &&
+    loaded.projection.thread.projectId === scope.projectId &&
+    loaded.projection.thread.id === worker.id
+      ? loaded.projection
+      : null;
+  if (
+    !projection?.runtimeRequests.some(
+      (request) => request.id === worker.pendingRuntimeRequest?.id && request.status === "pending",
+    )
+  )
+    return null;
+  const requests = currentCrewRuntimeRequests(projection);
+  const projectKey = scopedProjectKey(scope);
+  return requests.map((request) => (
+    <Button
+      key={JSON.stringify([request.requestId, request.runId])}
+      size="sm"
+      variant="outline"
+      render={
+        <Link
+          {...crewThreadRoute(scope, worker.id)}
+          state={{
+            crewRequestId: request.requestId,
+            crewRequestRunId: request.runId,
+            crewSource: { projectKey, originHref },
+          }}
+        />
+      }
+    >
+      {request.kind === "approval"
+        ? "Review approval"
+        : worker.pendingRuntimeRequest?.userOnly
+          ? "Open user-only request"
+          : "Open question"}{" "}
+      · {worker.title}
+    </Button>
+  ));
 }

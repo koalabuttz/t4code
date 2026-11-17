@@ -297,6 +297,7 @@ import { useCitedHistory } from "./chat/citationProcedure";
 import type { MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ThreadTimeline } from "./chat/ThreadTimeline";
 import { CrewChatControls } from "./teamwork/CrewChatControls";
+import { Button } from "./ui/button";
 import { useCrewChatIdentity } from "./teamwork/crewChatState";
 import { NativeChildWorkDialog } from "./chat/NativeChildWorkDialog";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
@@ -1397,6 +1398,7 @@ export default function ChatView(props: ChatViewProps) {
     setLocalDraftErrorsByDraftId,
   });
   const {
+    scopedRequestStatus,
     pendingApprovals,
     pendingUserInputs,
     activePendingApproval,
@@ -1423,6 +1425,8 @@ export default function ChatView(props: ChatViewProps) {
     composerRef,
     setThreadError,
   });
+  const canOperateScopedChat =
+    canOperateThread && scopedRequestStatus !== "loading" && scopedRequestStatus !== "unavailable";
   const [heldApprovalRequestIds, setHeldApprovalRequestIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -3411,6 +3415,38 @@ export default function ChatView(props: ChatViewProps) {
             workstreamTitle={workstreamTitle}
           />
         ) : null}
+        {scopedRequestStatus !== "unscoped" ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b px-(--workspace-gutter-start) py-2 pr-(--workspace-gutter-end) text-sm">
+            <p role="status">
+              {scopedRequestStatus === "loading"
+                ? "Loading the requested action…"
+                : scopedRequestStatus === "pending"
+                  ? "Viewing the requested action"
+                  : "The requested action is no longer available."}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                void navigate({
+                  to: "/$environmentId/$threadId",
+                  params: routeThreadRef,
+                  replace: true,
+                  search: true,
+                  hash: true,
+                  state: (previous) => {
+                    const next = { ...previous };
+                    delete next.crewRequestId;
+                    delete next.crewRequestRunId;
+                    return next;
+                  },
+                })
+              }
+            >
+              Show all conversation actions
+            </Button>
+          </div>
+        ) : null}
 
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <ThreadFindCanvas
@@ -3460,7 +3496,7 @@ export default function ChatView(props: ChatViewProps) {
                   heldApprovalRequestIds={heldApprovalRequestIds}
                   respondingRequestIds={respondingRequestIds}
                   onRespondToApproval={onRespondToApprovalStable}
-                  canOperateThread={canOperateThread}
+                  canOperateThread={canOperateScopedChat}
                   threadDetailRef={routeThreadDetailRef}
                   crewScope={crewConversation ? crewScope : null}
                   entriesInput={timelineEntriesInput}
@@ -3652,7 +3688,7 @@ export default function ChatView(props: ChatViewProps) {
                             {!composerMounted ? null : (
                               <ChatComposer
                                 crewCoordinator={isCoordinator}
-                                canOperateThread={canOperateThread}
+                                canOperateThread={canOperateScopedChat}
                                 reportedModelSelection={reportedModelSelection}
                                 multipleModelSelections={multipleModelSelections}
                                 supportsMultipleModels={

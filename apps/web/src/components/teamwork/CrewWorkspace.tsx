@@ -15,6 +15,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   crewDraftBrief,
+  crewCandidateThread,
   crewOriginThread,
   crewScrollOffset,
   isCrewCoordinatorCandidate,
@@ -29,7 +30,7 @@ import {
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Option from "effect/Option";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
-import { readThreadShell, useProject, useQuietThreadShell } from "../../state/entities";
+import { useProject, useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentShellStatus } from "../../state/shell";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -46,7 +47,14 @@ import { Button } from "../ui/button";
 import { CrewNavigation } from "./CrewChatControls";
 import { CrewThreads } from "./CrewThreads";
 import { TeamworkPanel } from "./TeamworkPanel";
-import { crewThreadRoute, useCrewCollection, useCrewProject } from "./crewChatState";
+import {
+  crewThreadRoute,
+  readCrewCoordinatorCandidate,
+  readCrewForConfirmation,
+  useCrewCollection,
+  useCrewProject,
+} from "./crewChatState";
+import { establishCrewCoordinator } from "./crewChat.logic";
 
 const route = "/_chat/projects/$projectKey/crew";
 
@@ -293,8 +301,9 @@ function CoordinatorSetup({ scope }: { scope: ScopedProjectRef }) {
   const { snapshot, config, query } = useCrewProject(scope);
   const connected = useEnvironmentShellStatus(scope.environmentId) === "live";
   const origin = useAtomValue(crewOriginThread(projectKey));
+  const chosen = useAtomValue(crewCandidateThread(projectKey)) ?? origin;
   const candidate = useQuietThreadShell(
-    origin ? scopeThreadRef(scope.environmentId, origin) : null,
+    chosen ? scopeThreadRef(scope.environmentId, chosen) : null,
   );
   const permission = useAtomValue(
     serverEnvironment.mutateTeamwork.permissionAtom(scope.environmentId),
@@ -323,7 +332,8 @@ function CoordinatorSetup({ scope }: { scope: ScopedProjectRef }) {
       !canOperate ||
       !connected ||
       !query.isSuccess ||
-      snapshot.coordinatorThreadId
+      snapshot.coordinatorThreadId ||
+      (useExisting && !existing)
     )
       return;
     setBusy(true);
@@ -331,7 +341,7 @@ function CoordinatorSetup({ scope }: { scope: ScopedProjectRef }) {
     const threadId =
       useExisting && existing ? existing.id : ThreadId.make(`crew-coordinator:${scope.projectId}`);
     try {
-      if (!useExisting && !readThreadShell(scopeThreadRef(scope.environmentId, threadId))) {
+      const createShell = async () => {
         if (!modelSelection)
           throw new Error("Choose a default provider and model for this project first.");
         const result = await create({
@@ -348,23 +358,32 @@ function CoordinatorSetup({ scope }: { scope: ScopedProjectRef }) {
           },
         });
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      }
-      const result = await mutate({
-        environmentId: scope.environmentId,
-        input: {
-          projectId: scope.projectId,
-          expectedRevision: snapshot.revision,
-          commandId: CommandId.make(randomUUID()),
-          action: { type: "coordinator.set", threadId },
+      };
+      await establishCrewCoordinator({
+        scope,
+        threadId,
+        readCrew: () => readCrewForConfirmation(scope),
+        readThread: () => readCrewCoordinatorCandidate(scope, threadId),
+        ...(useExisting ? {} : { create: createShell }),
+        setCoordinator: async (expectedRevision) => {
+          const result = await mutate({
+            environmentId: scope.environmentId,
+            input: {
+              projectId: scope.projectId,
+              expectedRevision,
+              commandId: CommandId.make(randomUUID()),
+              action: { type: "coordinator.set", threadId },
+            },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
         },
       });
-      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
     } catch (failure) {
       setError(
         failure instanceof Error ? failure.message : "Could not establish this coordinator.",
       );
-      query.refresh();
     } finally {
+      query.refresh();
       setBusy(false);
     }
   };

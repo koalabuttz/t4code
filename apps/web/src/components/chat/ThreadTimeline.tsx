@@ -58,7 +58,11 @@ export function ThreadTimeline({
     rememberReadyThreadTimeline({ threadKey: activeThreadKey, entries });
   }, [activeThreadKey, detailLoading, entries]);
   return (
-    <CrewTimeline scope={crewScope ?? null} threadId={threadDetailRef?.threadId ?? null}>
+    <CrewTimeline
+      scope={crewScope ?? null}
+      threadId={threadDetailRef?.threadId ?? null}
+      entries={displayedEntries}
+    >
       <MessagesTimeline {...timelineProps} timelineEntries={displayedEntries} />
     </CrewTimeline>
   );

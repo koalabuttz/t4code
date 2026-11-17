@@ -232,9 +232,13 @@ export function TeamworkPanel({
     const request = shells.find((shell) => shell.id === id)?.pendingRuntimeRequest;
     const exactRequest =
       context?.kind === "question" || context?.kind === "approval"
-        ? request && (!context.requestId || context.requestId === request.id)
-          ? request.id
-          : undefined
+        ? (context.requestId ??
+          (request &&
+          (context.kind === "question"
+            ? request.kind === "user_input"
+            : request.kind !== "user_input")
+            ? request.id
+            : undefined))
         : undefined;
     onOpenThread(id, exactRequest);
   };
@@ -441,10 +445,10 @@ export function TeamworkPanel({
                   variant="secondary"
                   disabled={disabled || candidateIsWorker || !!selection.reason}
                   onClick={() =>
-                    void act({ type: "coordinator.set", threadId: selection.threadId! })
+                    void navigate({ to: "/projects/$projectKey/crew", params: { projectKey } })
                   }
                 >
-                  Choose this coordinator
+                  Continue to coordinator setup
                 </Button>
               )}
               {state.coordinatorThreadId && query.data?.capabilities?.includes("context") && (

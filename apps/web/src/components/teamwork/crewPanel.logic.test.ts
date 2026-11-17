@@ -11,10 +11,19 @@ import {
 } from "@t3tools/contracts";
 import type { CrewConsultation } from "@t3tools/contracts/crewConversation";
 import * as DateTime from "effect/DateTime";
-import { expect, it } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
 import { crewMessageRecipients, crewSupervisionFacts } from "./crewPanel.logic";
-import { crewChatExchanges, crewReturnedAnswer } from "./crewChat.logic";
+import {
+  crewChatExchanges,
+  crewReturnLookupId,
+  crewReturnedAnswer,
+  crewUndeliveredAnswerSource,
+  currentCrewRuntimeRequests,
+  establishCrewCoordinator,
+  hasCrewProjectFootprint,
+  scopeCrewRuntimeRequests,
+} from "./crewChat.logic";
 
 const workerId = ThreadId.make("worker");
 const coordinatorId = ThreadId.make("coordinator");
@@ -98,6 +107,149 @@ it("attributes only the correlated server return at its origin across follow-ups
       consultation,
     ),
   ).toBeNull();
+  expect(crewUndeliveredAnswerSource(consultation, "failed", false)).toEqual(source);
+  expect(crewUndeliveredAnswerSource(consultation, "failed", true)).toBeNull();
+  expect(crewUndeliveredAnswerSource(consultation, "pending", false)).toEqual(source);
+  expect(crewUndeliveredAnswerSource(followUp, "failed", false)).toBeNull();
+  const historical = {
+    ...returned,
+    id: MessageId.make("crew:project:older-return-command:return"),
+  };
+  expect(crewReturnLookupId(historical, scope)).toBe("consult-1");
+  expect(crewReturnLookupId({ ...historical, creationSource: "web" }, scope)).toBeNull();
+  expect(
+    crewReturnLookupId(historical, { ...scope, projectId: ProjectId.make("another-project") }),
+  ).toBeNull();
+});
+
+it("never substitutes another pending action for an exact Crew request", () => {
+  const approvals = [{ requestId: "approval-a" }, { requestId: "approval-b" }];
+  const questions = [{ requestId: "question-a" }];
+  const projection = {
+    runtimeRequests: [
+      { id: "approval-a", kind: "command_execution", status: "pending" },
+      { id: "approval-b", kind: "command_execution", status: "pending" },
+      { id: "question-a", kind: "user_input", status: "pending" },
+    ],
+    turnItems: [
+      { type: "approval_request", requestId: "approval-a", runId: "run-a" },
+      { type: "approval_request", requestId: "approval-b", runId: "run-b" },
+      { type: "user_input_request", requestId: "question-a", runId: "run-a" },
+    ],
+  };
+  const request = { projection, approvals, questions, requestId: "approval-a", runId: "run-a" };
+  expect(scopeCrewRuntimeRequests(request)).toEqual({
+    approvals: [approvals[0]],
+    questions: [],
+    status: "pending",
+  });
+  expect(scopeCrewRuntimeRequests({ ...request, projection: null })).toEqual({
+    approvals: [],
+    questions: [],
+    status: "loading",
+  });
+  expect(scopeCrewRuntimeRequests({ ...request, runId: "run-b" })).toEqual({
+    approvals: [],
+    questions: [],
+    status: "unavailable",
+  });
+  const resolved = {
+    ...projection,
+    runtimeRequests: projection.runtimeRequests.map((entry) =>
+      entry.id === "approval-a" ? { ...entry, status: "resolved" } : entry,
+    ),
+  };
+  expect(currentCrewRuntimeRequests(resolved).map((entry) => entry.requestId)).toEqual([
+    "approval-b",
+    "question-a",
+  ]);
+  expect(
+    scopeCrewRuntimeRequests({ ...request, projection: resolved, approvals: [approvals[1]!] }),
+  ).toEqual({ approvals: [], questions: [], status: "unavailable" });
+  expect(scopeCrewRuntimeRequests({ ...request, requestId: undefined })).toEqual({
+    approvals,
+    questions,
+    status: "unscoped",
+  });
+});
+
+it("opens Crew automatically only for a coordinator or initiative footprint", () => {
+  const { snapshot } = fixture();
+  expect(hasCrewProjectFootprint({ ...snapshot, coordinatorThreadId: null })).toBe(true);
+  expect(hasCrewProjectFootprint({ ...snapshot, initiatives: [] })).toBe(true);
+  const footprintRemoved = { ...snapshot, coordinatorThreadId: null, initiatives: [] };
+  expect(footprintRemoved.revision).toBeGreaterThan(0);
+  expect(hasCrewProjectFootprint(footprintRemoved)).toBe(false);
+});
+
+it("adopts a concurrently created shell using the fresh Crew revision", async () => {
+  const { snapshot } = fixture();
+  const scope = { environmentId: EnvironmentId.make("machine"), projectId: snapshot.projectId };
+  const candidate = { ...scope, threadId: coordinatorId, eligible: true };
+  const readCrew = vi
+    .fn()
+    .mockResolvedValueOnce({ ...snapshot, coordinatorThreadId: null })
+    .mockResolvedValue({ ...snapshot, revision: 5, coordinatorThreadId: null });
+  const readThread = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(candidate);
+  const create = vi.fn().mockRejectedValue(new Error("Another client created the shell."));
+  const setCoordinator = vi.fn().mockResolvedValue(undefined);
+  await expect(
+    establishCrewCoordinator({
+      scope,
+      threadId: coordinatorId,
+      readCrew,
+      readThread,
+      create,
+      setCoordinator,
+    }),
+  ).resolves.toBe(coordinatorId);
+  expect(setCoordinator).toHaveBeenCalledExactlyOnceWith(5);
+});
+
+it("keeps the coordinator chosen by another client when adoption loses a revision race", async () => {
+  const { snapshot } = fixture();
+  const scope = { environmentId: EnvironmentId.make("machine"), projectId: snapshot.projectId };
+  const candidate = { ...scope, threadId: coordinatorId, eligible: true };
+  const winner = ThreadId.make("other-coordinator");
+  const empty = { ...snapshot, coordinatorThreadId: null };
+  const readCrew = vi
+    .fn()
+    .mockResolvedValueOnce(empty)
+    .mockResolvedValueOnce({ ...empty, revision: 2 })
+    .mockResolvedValueOnce({ ...snapshot, coordinatorThreadId: winner, revision: 3 });
+  const setCoordinator = vi.fn().mockRejectedValue(new Error("Revision conflict."));
+  await expect(
+    establishCrewCoordinator({
+      scope,
+      threadId: coordinatorId,
+      readCrew,
+      readThread: () => Promise.resolve(candidate),
+      setCoordinator,
+    }),
+  ).resolves.toBe(winner);
+  expect(setCoordinator).toHaveBeenCalledExactlyOnceWith(2);
+});
+
+it("rejects a pre-existing shell outside the exact project before adopting it", async () => {
+  const { snapshot } = fixture();
+  const scope = { environmentId: EnvironmentId.make("machine"), projectId: snapshot.projectId };
+  const candidate = {
+    ...scope,
+    projectId: ProjectId.make("other-project"),
+    threadId: coordinatorId,
+    eligible: true,
+  };
+  const setCoordinator = vi.fn();
+  await expect(
+    establishCrewCoordinator({
+      scope,
+      threadId: coordinatorId,
+      readCrew: () => Promise.resolve({ ...snapshot, coordinatorThreadId: null }),
+      readThread: () => Promise.resolve(candidate),
+      setCoordinator,
+    }),
+  ).rejects.toThrow("cannot coordinate the selected project");
+  expect(setCoordinator).not.toHaveBeenCalled();
 });
 
 function fixture() {
