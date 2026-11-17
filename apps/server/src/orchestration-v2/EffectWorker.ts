@@ -158,6 +158,47 @@ export const layerExecutor: Layer.Layer<
       execute: Effect.fn("OrchestrationEffectExecutorV2.execute")(function (effect, options) {
         const willRetry = options?.willRetry ?? false;
         switch (effect.request.type) {
+          case "provider-runtime.stop": {
+            const request = effect.request;
+            return providerTurnStart.stopExternal({ ...request, threadId: effect.threadId }).pipe(
+              Effect.andThen(() =>
+                threads.dispatch({
+                  type: "thread.background-work.settle",
+                  commandId: CommandId.make(`${effect.id}:background-work-settled`),
+                  threadId: effect.threadId,
+                  providerThreadId: request.providerThreadId,
+                  providerTurnId: request.providerTurnId,
+                  externalRuntime: {
+                    providerSessionId: request.providerSessionId,
+                    runId: request.runId,
+                    attemptId: request.attemptId,
+                  },
+                }),
+              ),
+              Effect.asVoid,
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: request.type,
+                    cause,
+                  }),
+              ),
+            );
+          }
+          case "provider-runtime.reattach":
+            return providerTurnStart
+              .reattach({ ...effect.request, threadId: effect.threadId })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationEffectExecutionError({
+                      effectId: effect.id,
+                      effectType: effect.request.type,
+                      cause,
+                    }),
+                ),
+              );
           case "provider-runtime.continue": {
             const sourceRunId = effect.request.sourceRunId;
             return continueRestartedRun({
@@ -327,130 +368,134 @@ export const layerExecutor: Layer.Layer<
               );
           }
           case "provider-turn.steer":
-            return providerTurnControl
-              .steer({
+          case "provider-runtime.steer": {
+            const request = effect.request;
+            return Effect.gen(function* () {
+              if (request.type === "provider-runtime.steer")
+                yield* providerTurnStart.reattach({ ...request, threadId: effect.threadId });
+              yield* providerTurnControl.steer({
                 threadId: effect.threadId,
-                providerSessionId: effect.request.providerSessionId,
-                providerThreadId: effect.request.providerThreadId,
-                providerTurnId: effect.request.providerTurnId,
-                messageId: effect.request.messageId,
-                ...(effect.request.modelSelection === undefined
+                providerSessionId: request.providerSessionId,
+                providerThreadId: request.providerThreadId,
+                providerTurnId: request.providerTurnId,
+                messageId: request.messageId,
+                ...(request.type === "provider-runtime.steer"
+                  ? { recoveryTarget: { runId: request.runId, attemptId: request.attemptId } }
+                  : {}),
+                ...(request.modelSelection === undefined
                   ? {}
-                  : { modelSelection: effect.request.modelSelection }),
-              })
-              .pipe(
-                Effect.tap(() =>
-                  Effect.gen(function* () {
-                    if (effect.request.type !== "provider-turn.steer") return;
-                    const messageId = effect.request.messageId;
-                    const projection = yield* threads.getThreadRecords(
-                      effect.threadId,
-                      ["messages", "runs"],
-                      { messageIds: [effect.request.messageId] },
-                    );
-                    const message = projection.messages.find((row) => row.id === messageId);
-                    if (message?.delegatedCompletion === undefined) return;
-                    yield* threads.dispatch({
-                      type: "notification.delivery.accept",
-                      commandId: CommandId.make(`command:mailbox-accepted:${effect.id}`),
+                  : { modelSelection: request.modelSelection }),
+              });
+            }).pipe(
+              Effect.tap(() =>
+                Effect.gen(function* () {
+                  const messageId = request.messageId;
+                  const projection = yield* threads.getThreadRecords(
+                    effect.threadId,
+                    ["messages", "runs"],
+                    { messageIds: [request.messageId] },
+                  );
+                  const message = projection.messages.find((row) => row.id === messageId);
+                  if (message?.delegatedCompletion === undefined) return;
+                  yield* threads.dispatch({
+                    type: "notification.delivery.accept",
+                    commandId: CommandId.make(`command:mailbox-accepted:${effect.id}`),
+                    threadId: effect.threadId,
+                    messageId: message.id,
+                  });
+                }),
+              ),
+              Effect.catch((error) =>
+                Effect.gen(function* () {
+                  if (
+                    !isProviderTurnControlError(error) ||
+                    (!error.turnCompleted && !error.steerDeclined)
+                  ) {
+                    return yield* error;
+                  }
+                  const projection = yield* threads.getThreadRecords(
+                    effect.threadId,
+                    ["messages", "runs"],
+                    { messageIds: [request.messageId] },
+                  );
+                  const messageId = request.messageId;
+                  const message = projection.messages.find((item) => item.id === messageId);
+                  const run = projection.runs.find((item) => item.id === message?.runId);
+                  if (message === undefined || run === undefined) return yield* error;
+                  // Notifications must be queued messages.
+                  const queued =
+                    message.delegatedCompletion !== undefined ||
+                    message.notification !== undefined ||
+                    error.steerDeclined === true;
+                  // Reuse message ids and receipts so retries cannot duplicate messages or follow-ups.
+                  yield* threads
+                    .dispatch({
+                      type: "message.dispatch",
+                      commandId: CommandId.make(`command:steer-follow-up:${effect.id}`),
                       threadId: effect.threadId,
                       messageId: message.id,
-                    });
-                  }),
-                ),
-                Effect.catch((error) =>
-                  Effect.gen(function* () {
-                    if (
-                      !isProviderTurnControlError(error) ||
-                      (!error.turnCompleted && !error.steerDeclined) ||
-                      effect.request.type !== "provider-turn.steer"
-                    ) {
-                      return yield* error;
-                    }
-                    const projection = yield* threads.getThreadRecords(
-                      effect.threadId,
-                      ["messages", "runs"],
-                      { messageIds: [effect.request.messageId] },
+                      ...(error.steerDeclined ? { steerFollowUpOfRunId: run.id } : {}),
+                      ...(error.steerDeclined && request.steerFollowUpAfterRunOrdinal !== undefined
+                        ? {
+                            steerFollowUpAfterRunOrdinal: request.steerFollowUpAfterRunOrdinal,
+                          }
+                        : {}),
+                      text: message.text,
+                      ...(message.context ? { context: message.context } : {}),
+                      attachments: message.attachments,
+                      ...(error.steerDeclined && request.modelSelection !== undefined
+                        ? { modelSelection: request.modelSelection }
+                        : message.delegatedCompletion === undefined
+                          ? {}
+                          : { modelSelection: run.modelSelection }),
+                      dispatchMode: {
+                        type: queued ? "queue_after_active" : "start_immediately",
+                      },
+                      createdBy: message.createdBy,
+                      creationSource: message.creationSource,
+                      ...(message.delegatedCompletion === undefined
+                        ? {}
+                        : { delegatedCompletion: message.delegatedCompletion }),
+                      ...(message.notification === undefined
+                        ? {}
+                        : { notification: message.notification }),
+                      ...(message.scheduledTaskId === undefined
+                        ? {}
+                        : { scheduledTaskId: message.scheduledTaskId }),
+                      ...(message.senderThreadId === undefined
+                        ? {}
+                        : { senderThreadId: message.senderThreadId }),
+                      ...(message.linkedSender === undefined
+                        ? {}
+                        : { linkedSender: message.linkedSender }),
+                    })
+                    .pipe(
+                      // A disabled instance cannot retry this completed turn; its result stands.
+                      Effect.catchTags({
+                        ThreadManagementProviderInstanceDisabledError: (disabledError) =>
+                          Effect.logInfo(
+                            "orchestration-v2.effect-worker.steer-follow-up-disabled",
+                            {
+                              threadId: effect.threadId,
+                              messageId: message.id,
+                              projectId: disabledError.projectId,
+                              instanceId: disabledError.instanceId,
+                            },
+                          ),
+                      }),
                     );
-                    const messageId = effect.request.messageId;
-                    const message = projection.messages.find((item) => item.id === messageId);
-                    const run = projection.runs.find((item) => item.id === message?.runId);
-                    if (message === undefined || run === undefined) return yield* error;
-                    // Notifications must be queued messages.
-                    const queued =
-                      message.delegatedCompletion !== undefined ||
-                      message.notification !== undefined ||
-                      error.steerDeclined === true;
-                    // Reuse message ids and receipts so retries cannot duplicate messages or follow-ups.
-                    yield* threads
-                      .dispatch({
-                        type: "message.dispatch",
-                        commandId: CommandId.make(`command:steer-follow-up:${effect.id}`),
-                        threadId: effect.threadId,
-                        messageId: message.id,
-                        ...(error.steerDeclined ? { steerFollowUpOfRunId: run.id } : {}),
-                        ...(error.steerDeclined &&
-                        effect.request.steerFollowUpAfterRunOrdinal !== undefined
-                          ? {
-                              steerFollowUpAfterRunOrdinal:
-                                effect.request.steerFollowUpAfterRunOrdinal,
-                            }
-                          : {}),
-                        text: message.text,
-                        ...(message.context ? { context: message.context } : {}),
-                        attachments: message.attachments,
-                        ...(error.steerDeclined && effect.request.modelSelection !== undefined
-                          ? { modelSelection: effect.request.modelSelection }
-                          : message.delegatedCompletion === undefined
-                            ? {}
-                            : { modelSelection: run.modelSelection }),
-                        dispatchMode: {
-                          type: queued ? "queue_after_active" : "start_immediately",
-                        },
-                        createdBy: message.createdBy,
-                        creationSource: message.creationSource,
-                        ...(message.delegatedCompletion === undefined
-                          ? {}
-                          : { delegatedCompletion: message.delegatedCompletion }),
-                        ...(message.notification === undefined
-                          ? {}
-                          : { notification: message.notification }),
-                        ...(message.scheduledTaskId === undefined
-                          ? {}
-                          : { scheduledTaskId: message.scheduledTaskId }),
-                        ...(message.senderThreadId === undefined
-                          ? {}
-                          : { senderThreadId: message.senderThreadId }),
-                        ...(message.linkedSender === undefined
-                          ? {}
-                          : { linkedSender: message.linkedSender }),
-                      })
-                      .pipe(
-                        // A disabled instance cannot retry this completed turn; its result stands.
-                        Effect.catchTags({
-                          ThreadManagementProviderInstanceDisabledError: (disabledError) =>
-                            Effect.logInfo(
-                              "orchestration-v2.effect-worker.steer-follow-up-disabled",
-                              {
-                                threadId: effect.threadId,
-                                messageId: message.id,
-                                projectId: disabledError.projectId,
-                                instanceId: disabledError.instanceId,
-                              },
-                            ),
-                        }),
-                      );
+                }),
+              ),
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: request.type,
+                    cause,
                   }),
-                ),
-                Effect.mapError(
-                  (cause) =>
-                    new OrchestrationEffectExecutionError({
-                      effectId: effect.id,
-                      effectType: effect.request.type,
-                      cause,
-                    }),
-                ),
-              );
+              ),
+            );
+          }
           case "provider-turn.restart":
             return providerTurnControl
               .interruptAndAwaitTerminal({

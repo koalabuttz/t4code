@@ -190,6 +190,79 @@ function latestStartedRun(
   );
 }
 
+function processBoundProjection(projection: ProjectionStore.ProjectionRuntimeRecoveryState) {
+  const externalSessions = new Set(
+    projection.providerSessions
+      .filter((session) => session.capabilities?.sessions.runtimeSurvivesServerExit === true)
+      .map((session) => session.id),
+  );
+  const externalThreads = new Set(
+    projection.providerThreads
+      .filter(
+        (thread) =>
+          thread.providerSessionId != null && externalSessions.has(thread.providerSessionId),
+      )
+      .map((thread) => thread.id),
+  );
+  if (externalThreads.size === 0) return projection;
+  const externalRuns = new Set(
+    projection.runs
+      .filter((run) => run.providerThreadId !== null && externalThreads.has(run.providerThreadId))
+      .map((run) => run.id),
+  );
+  const externalAttempts = new Set(
+    projection.attempts
+      .filter((attempt) => externalRuns.has(attempt.runId))
+      .map((attempt) => attempt.id),
+  );
+  const belongsToExternalRuntime = (row: {
+    readonly providerThreadId?: ProviderThreadId | null | undefined;
+    readonly runId?: OrchestrationV2ThreadProjection["runs"][number]["id"] | null;
+  }) =>
+    (row.providerThreadId != null && externalThreads.has(row.providerThreadId)) ||
+    (row.runId != null && externalRuns.has(row.runId));
+  const externalNodes = new Set(
+    projection.nodes.filter(belongsToExternalRuntime).map((node) => node.id),
+  );
+  for (const thread of projection.providerThreads) {
+    if (externalThreads.has(thread.id) && thread.ownerNodeId != null)
+      externalNodes.add(thread.ownerNodeId);
+  }
+  for (const item of projection.turnItems) {
+    if (!belongsToExternalRuntime(item)) continue;
+    if (item.nodeId !== null) externalNodes.add(item.nodeId);
+    if (item.type === "subagent") externalNodes.add(item.subagentId);
+  }
+  for (const node of projection.nodes) {
+    if (externalNodes.has(node.rootNodeId)) externalNodes.add(node.id);
+  }
+  // Preserve native identities and work; only the T3 connection stopped with this process.
+  return {
+    ...projection,
+    runs: projection.runs.filter((run) => !externalRuns.has(run.id)),
+    attempts: projection.attempts.filter((attempt) => !externalAttempts.has(attempt.id)),
+    nodes: projection.nodes.filter((node) => !externalNodes.has(node.id)),
+    subagents: projection.subagents.filter(
+      (agent) => !externalNodes.has(agent.id) && !belongsToExternalRuntime(agent),
+    ),
+    providerThreads: projection.providerThreads.filter((thread) => !externalThreads.has(thread.id)),
+    providerTurns: projection.providerTurns.filter(
+      (turn) =>
+        !belongsToExternalRuntime(turn) &&
+        (turn.runAttemptId === null || !externalAttempts.has(turn.runAttemptId)),
+    ),
+    turnItems: projection.turnItems.filter(
+      (item) =>
+        !belongsToExternalRuntime(item) &&
+        (item.nodeId === null || !externalNodes.has(item.nodeId)),
+    ),
+    messages: projection.messages.filter((message) => !belongsToExternalRuntime(message)),
+    runtimeRequests: projection.runtimeRequests.filter(
+      (request) => !externalNodes.has(request.nodeId),
+    ),
+  };
+}
+
 export const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
@@ -218,7 +291,8 @@ export const make = Effect.gen(function* () {
    * one of its attempts proves the prompt arrived. Recovery treats the others as never started.
    */
   const rewindUnacceptedRuns = Effect.fn("ProviderRuntimeRecoveryService.rewindUnacceptedRuns")(
-    function* (projection: ProjectionStore.ProjectionRuntimeRecoveryState) {
+    function* (stored: ProjectionStore.ProjectionRuntimeRecoveryState) {
+      const projection = processBoundProjection(stored);
       const runIdByAttempt = new Map(
         projection.runs.flatMap((run) =>
           (run.status === "running" || (run.status === "starting" && run.startedAt !== null)) &&
@@ -895,7 +969,7 @@ export const make = Effect.gen(function* () {
           }
         }
       }
-      // No provider process survives the server; open native subagents can never report completion.
+      // Process-bound helpers cannot report completion after their owning runtime exits.
       for (const subagent of projection.subagents ?? []) {
         events.push(
           ...(yield* endOrphanedNativeSubagent({
@@ -1145,6 +1219,57 @@ export const make = Effect.gen(function* () {
           }
           cancelledEffectIds.push(...result.cancelledEffectIds);
           resends.push(...result.resends);
+          if (
+            trigger === "startup" &&
+            projection.thread.deletedAt == null &&
+            projection.thread.archivedAt == null
+          ) {
+            for (const providerThread of projection.providerThreads) {
+              if (
+                providerThread.ownerNodeId !== null ||
+                providerThread.appThreadId !== threadId ||
+                providerThread.providerSessionId === null ||
+                isProviderNativeSubagentThread(projection.thread)
+              )
+                continue;
+              const session = projection.providerSessions.find(
+                (candidate) => candidate.id === providerThread.providerSessionId,
+              );
+              if (session?.capabilities?.sessions.runtimeSurvivesServerExit !== true) continue;
+              const run = projection.runs
+                .filter(
+                  (candidate) =>
+                    candidate.providerThreadId === providerThread.id &&
+                    candidate.status !== "queued" &&
+                    candidate.status !== "rolled_back",
+                )
+                .reduce<OrchestrationV2ThreadProjection["runs"][number] | undefined>(
+                  (latest, candidate) =>
+                    latest === undefined || candidate.ordinal > latest.ordinal ? candidate : latest,
+                  undefined,
+                );
+              if (run?.activeAttemptId == null) continue;
+              if (yield* projections.hasRunInterruptRequest(threadId, run.id)) continue;
+              const commandId = CommandId.make(
+                `command:external-reattach:${threadId}:${DateTime.formatIso(yield* DateTime.now)}`,
+              );
+              resends.push({
+                id: `effect:external-reattach:${providerThread.id}:${commandId}`,
+                commandId,
+                threadId,
+                request:
+                  run.status === "starting"
+                    ? { type: "provider-turn.start", runId: run.id }
+                    : {
+                        type: "provider-runtime.reattach",
+                        providerSessionId: session.id,
+                        providerThreadId: providerThread.id,
+                        runId: run.id,
+                        attemptId: run.activeAttemptId,
+                      },
+              });
+            }
+          }
           terminalizedRuns += result.terminalizedRuns;
           stoppedSessions += result.stoppedSessions;
           closedRequests += result.closedRequests;

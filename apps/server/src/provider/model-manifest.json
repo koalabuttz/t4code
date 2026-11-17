@@ -1,7 +1,12 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-14T15:58:47Z",
+  "updatedAt": "2026-11-16T19:30:00Z",
   "compatibility": [
+    {
+      "driver": "albedo",
+      "t3CodeRange": ">=0.0.46",
+      "ranges": []
+    },
     {
       "driver": "codex",
       "t3CodeRange": ">=0.0.44",

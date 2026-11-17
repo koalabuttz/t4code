@@ -91,6 +91,7 @@ function layerExecutorFor(input: {
   readonly threads?: Partial<ThreadManagementService.ThreadManagementService["Service"]>;
   readonly continueAfterRestart?: boolean;
   readonly interrupt?: ProviderTurnControlService.ProviderTurnControlServiceV2Shape["interrupt"];
+  readonly stopExternal?: ProviderTurnStartService.ProviderTurnStartServiceV2["Service"]["stopExternal"];
   readonly rollback?: CheckpointRollbackService.CheckpointRollbackServiceV2Shape["execute"];
   readonly respond?: RuntimeRequestService.RuntimeRequestServiceV2["Service"]["respond"];
 }) {
@@ -130,6 +131,8 @@ function layerExecutorFor(input: {
     Layer.succeed(
       ProviderTurnStartService.ProviderTurnStartServiceV2,
       ProviderTurnStartService.ProviderTurnStartServiceV2.of({
+        reattach: () => record("reattach"),
+        stopExternal: input.stopExternal ?? (() => record("stop-external")),
         failStartingRun: () => Effect.void,
         start: () =>
           Effect.gen(function* () {
@@ -229,6 +232,67 @@ it.effect.each([
     }).pipe(Effect.provide(layer));
     assert.deepEqual(yield* Ref.get(events), dispatched);
   }),
+);
+
+it.effect.each([false, true])(
+  "only settles an external Stop after confirmation (failure: %s)",
+  (fails) =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const events = yield* Ref.make<ReadonlyArray<string>>([]);
+      const entered = yield* Deferred.make<void>();
+      const stopped = yield* Deferred.make<void>();
+      const effect = {
+        ...restartEffect(now, { type: "detach" }),
+        request: {
+          type: "provider-runtime.stop" as const,
+          providerSessionId: oldSessionId,
+          providerThreadId,
+          providerTurnId: null,
+          runId,
+          attemptId,
+        },
+      };
+      const layer = layerExecutorFor({
+        events,
+        stopExternal: () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(entered, undefined);
+            yield* Deferred.await(stopped);
+            if (fails)
+              return yield* new ProviderTurnStartService.ProviderTurnStartError({
+                runId,
+                cause: "Native work remains unresolved.",
+              });
+          }),
+        threads: {
+          dispatch: (command) =>
+            Effect.gen(function* () {
+              assert.deepEqual(command, {
+                type: "thread.background-work.settle",
+                commandId: CommandId.make(`${effect.id}:background-work-settled`),
+                threadId,
+                providerThreadId,
+                providerTurnId: null,
+                externalRuntime: { providerSessionId: oldSessionId, runId, attemptId },
+              });
+              yield* Ref.update(events, (current) => [...current, command.type]);
+              return { sequence: 1, storedEvents: [] };
+            }),
+        },
+      });
+      yield* Effect.gen(function* () {
+        const executor = yield* EffectWorker.OrchestrationEffectExecutorV2;
+        const running = yield* executor.execute(effect).pipe(Effect.forkChild);
+        yield* Deferred.await(entered);
+        assert.deepEqual(yield* Ref.get(events), []);
+        assert.isUndefined(running.pollUnsafe());
+        yield* Deferred.succeed(stopped, undefined);
+        const result = yield* Fiber.await(running);
+        assert.equal(Exit.isFailure(result), fails);
+        assert.deepEqual(yield* Ref.get(events), fails ? [] : ["thread.background-work.settle"]);
+      }).pipe(Effect.provide(layer));
+    }),
 );
 
 const lockedIndexMessage =

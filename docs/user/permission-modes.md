@@ -34,6 +34,8 @@ to you for approval. On fx, prompts it still sends also come to you.
 Muse Code offers only **Supervised** and **Full access**. A Muse thread already set to another mode
 runs in **Supervised**.
 
+Albedo requires **Full access**. It cannot run a turn under another mode; choose Full access explicitly before starting it.
+
 T3 Code offers no **Auto-accept edits** or **Full access** for fx. An fx thread already set to either runs in
 **Supervised**.
 

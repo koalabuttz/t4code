@@ -44,6 +44,7 @@ import type {
   OrchestrationV2ThreadProjection,
   OrchestrationV2TurnItem,
   GuestShareId,
+  ProviderSessionId,
   ProviderThreadId,
   ProviderTurnId,
   RunAttemptId,
@@ -735,6 +736,13 @@ export interface ProjectionStoreV2Shape {
     threadId: ThreadId,
     target: ProjectionProviderControlTarget,
   ) => Effect.Effect<ProjectionProviderControlContext, ProjectionStoreV2Error>;
+  readonly getProviderSession: (
+    threadId: ThreadId,
+    providerSessionId: ProviderSessionId,
+  ) => Effect.Effect<
+    OrchestrationV2ThreadProjection["providerSessions"][number] | undefined,
+    ProjectionStoreV2Error
+  >;
   readonly getRunningTurnContext: (
     threadId: ThreadId,
   ) => Effect.Effect<
@@ -5428,6 +5436,13 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                     WHERE binding.provider_session_id = session.provider_session_id
                   )
                 )
+                OR (
+                  session.provider_session_id IN (
+                    SELECT json_extract(payload_json, '$.providerSessionId')
+                    FROM recovery_provider_threads
+                  )
+                  AND json_extract(session.payload_json, '$.capabilities.sessions.runtimeSurvivesServerExit') = 1
+                )
               ORDER BY session.updated_at ASC, session.provider_session_id ASC
             `,
             providerThreads: sql<PayloadRow>`
@@ -5555,10 +5570,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           const sections = Object.entries(queries).map(
             ([section, query]) => sql`
               SELECT ${section} AS section, payload_json, row_number() OVER () AS position
-              FROM (${query})
+              FROM (${section === "providerThreads" ? sql`SELECT payload_json FROM recovery_provider_threads` : query})
             `,
           );
           const rows = yield* sql<PayloadRow & { readonly section: string }>`
+            WITH recovery_provider_threads AS (${queries.providerThreads})
             ${sql.join(" UNION ALL ", false)(sections)}
             ORDER BY section, position
           `;
@@ -5761,6 +5777,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           }),
         )
         .pipe(Effect.mapError(controlReadError(threadId)));
+
+    const getProviderSession = Effect.fn("ProjectionStore.getProviderSession")(
+      function* (_threadId: ThreadId, providerSessionId: ProviderSessionId) {
+        const rows = yield* sql<PayloadRow>`
+          SELECT payload_json FROM orchestration_v2_projection_provider_sessions
+          WHERE provider_session_id = ${providerSessionId}
+        `;
+        return rows[0] === undefined
+          ? undefined
+          : yield* decodeProviderSessionPayload(rows[0].payload_json);
+      },
+      (effect, threadId) => effect.pipe(Effect.mapError(controlReadError(threadId))),
+    );
 
     const getProviderControlContext: ProjectionStoreV2Shape["getProviderControlContext"] = (
       threadId,
@@ -9330,6 +9359,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getRuntimeRequest: readOnReader(getRuntimeRequest),
       getPlan: readOnReader(getPlan),
       getProviderControlContext: readOnReader(getProviderControlContext),
+      getProviderSession: readOnReader(getProviderSession),
       getLimitRecoveryCandidates: readOnReader(getLimitRecoveryCandidates),
       getLimitRecoveryWakeAt: readOnReader(getLimitRecoveryWakeAt),
       getRecoveryThreadIds: readOnReader(getRecoveryThreadIds),

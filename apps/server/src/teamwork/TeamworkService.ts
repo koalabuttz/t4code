@@ -37,6 +37,7 @@ const DeliveryPayload = Schema.Struct({
   text: Schema.String,
   planning: Schema.Boolean,
   taskId: Schema.optional(Schema.String),
+  stopCommandId: Schema.optional(CommandId),
   initiativeId: Schema.NullOr(Schema.String),
   actor: Schema.NullOr(ThreadId),
   limit: Schema.NullOr(
@@ -214,17 +215,29 @@ const make = Effect.gen(function* () {
   }, Effect.mapError(storageError));
 
   const deliver = Effect.fn("TeamworkService.deliver")(function* (projectId: ProjectId) {
-    yield* locks.withLock(
-      projectId,
-      Effect.gen(function* () {
-        const pending = yield* sql<{
-          id: string;
-          thread_id: string;
-          kind: string;
-          payload_json: string;
-        }>`SELECT id, thread_id, kind, payload_json FROM project_teamwork_outbox WHERE project_id = ${projectId} AND status = 'pending' ORDER BY revision, id`;
-        for (const row of pending) {
-          const payload = yield* decodeDelivery(row.payload_json);
+    const acceptedStops: Array<{
+      readonly id: string;
+      readonly threadId: ThreadId;
+      readonly commandId: CommandId;
+    }> = [];
+    const pending = yield* sql<{
+      id: string;
+      thread_id: string;
+      kind: string;
+      payload_json: string;
+    }>`SELECT id, thread_id, kind, payload_json FROM project_teamwork_outbox WHERE project_id = ${projectId} AND status = 'pending' ORDER BY revision, id`;
+    for (const row of pending) {
+      const payload = yield* decodeDelivery(row.payload_json);
+      const commandId = CommandId.make(
+        `teamwork:${row.id}${payload.stopCommandId === undefined ? "" : `:retry:${payload.stopCommandId}`}`,
+      );
+      const acceptedStop = yield* locks.withLock(
+        projectId,
+        Effect.gen(function* () {
+          const current = yield* sql<{
+            status: string;
+          }>`SELECT status FROM project_teamwork_outbox WHERE id = ${row.id}`;
+          if (current[0]?.status !== "pending") return false;
           const state = yield* load(projectId);
           if (
             row.kind === "message" &&
@@ -237,9 +250,8 @@ const make = Effect.gen(function* () {
             )
           ) {
             yield* sql`UPDATE project_teamwork_outbox SET status = 'cancelled' WHERE id = ${row.id}`;
-            continue;
+            return false;
           }
-          const commandId = CommandId.make(`teamwork:${row.id}`);
           const threadId = ThreadId.make(row.thread_id);
           const execution = Effect.gen(function* () {
             yield* requireThread(projectId, threadId);
@@ -298,11 +310,28 @@ const make = Effect.gen(function* () {
             }
           });
           const outcome = yield* Effect.result(execution);
+          if (row.kind === "stop" && Result.isSuccess(outcome)) return true;
           yield* sql`UPDATE project_teamwork_outbox SET status = ${Result.isSuccess(outcome) ? "delivered" : "failed"} WHERE id = ${row.id}`;
-        }
-        if (pending.length) yield* PubSub.publish(changes, projectId);
+          return false;
+        }),
+      );
+      if (acceptedStop) {
+        acceptedStops.push({ id: row.id, threadId: ThreadId.make(row.thread_id), commandId });
+      }
+    }
+    yield* Effect.forEach(
+      acceptedStops,
+      Effect.fn("TeamworkService.confirmStop")(function* (stop) {
+        const outcome = yield* Effect.result(threads.confirmStop(stop));
+        yield* locks.withLock(
+          projectId,
+          sql`UPDATE project_teamwork_outbox SET status = ${Result.isSuccess(outcome) ? "delivered" : "failed"} WHERE id = ${stop.id} AND status = 'pending'`,
+        );
+        yield* PubSub.publish(changes, projectId);
       }),
+      { concurrency: 4, discard: true },
     );
+    if (pending.length) yield* PubSub.publish(changes, projectId);
   }, Effect.mapError(storageError));
   const worker = yield* makeDrainableWorker(deliver);
 
@@ -350,7 +379,7 @@ const make = Effect.gen(function* () {
                 : undefined;
             const stops = yield* sql`SELECT id FROM project_teamwork_outbox
               WHERE project_id = ${input.projectId} AND kind = 'stop' AND status IN ('pending', 'failed')
-              AND (${input.action.type === "coordinator.set"}
+              AND (${input.action.type === "coordinator.set" ? 1 : 0}
                 OR json_extract(payload_json, '$.taskId') = ${task?.id ?? null}
                 OR (json_extract(payload_json, '$.taskId') IS NULL
                   AND json_extract(payload_json, '$.initiativeId') = ${task?.initiativeId ?? null}))
@@ -416,7 +445,7 @@ const make = Effect.gen(function* () {
               yield* sql`UPDATE project_teamwork_outbox SET status = 'cancelled' WHERE project_id = ${input.projectId} AND thread_id = ${previousOwner} AND kind = 'message' AND status IN ('pending', 'failed')`;
           }
           if (input.action.type === "delivery.retry")
-            yield* sql`UPDATE project_teamwork_outbox SET status = 'pending' WHERE id = ${input.action.id} AND project_id = ${input.projectId} AND status = 'failed'`;
+            yield* sql`UPDATE project_teamwork_outbox SET status = 'pending', payload_json = CASE WHEN kind = 'stop' THEN json_set(payload_json, '$.stopCommandId', ${input.commandId}) ELSE payload_json END WHERE id = ${input.action.id} AND project_id = ${input.projectId} AND status = 'failed'`;
           for (const [index, intent] of intents.entries()) {
             const id = `${input.projectId}:${snapshot.revision}:${index}`;
             const payload = yield* encodeDelivery({

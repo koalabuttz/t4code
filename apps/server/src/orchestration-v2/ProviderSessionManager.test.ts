@@ -4487,8 +4487,75 @@ it.effect(
         );
         const adapterEvents = (yield* Ref.get(state)).eventQueues.get(String(providerSessionId));
         assert.isDefined(adapterEvents);
+        const nativeMessage = {
+          id: idAllocator.derive.messageFromProviderItem({
+            driver: CODEX_DRIVER,
+            nativeItemId: "native-idle-message",
+          }),
+          threadId,
+          runId: null,
+          nodeId: null,
+          role: "assistant" as const,
+          createdBy: "agent" as const,
+          creationSource: "provider" as const,
+          text: "Native helper outcome arrived while the app was idle.",
+          attachments: [],
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const childThreadId = idAllocator.derive.subagentThread({
+          driver: CODEX_DRIVER,
+          providerInstanceId: modelSelection.instanceId,
+          nativeThreadId: "background-native-helper",
+        });
+        const parentThread = yield* projectionStore.getThread(threadId);
+        const childThread = {
+          ...parentThread,
+          id: childThreadId,
+          title: "Native helper",
+          createdBy: "agent" as const,
+          creationSource: "provider" as const,
+          lineage: {
+            parentThreadId: threadId,
+            relationshipToParent: "subagent" as const,
+            rootThreadId: threadId,
+          },
+        };
         yield* Queue.offerAll(adapterEvents!, [
           ...commandEvents,
+          {
+            type: "message.updated",
+            driver: CODEX_DRIVER,
+            backgroundOwnerThreadId: threadId,
+            message: nativeMessage,
+          },
+          {
+            type: "app_thread.created",
+            driver: CODEX_DRIVER,
+            backgroundOwnerThreadId: threadId,
+            appThread: childThread,
+            createOnly: true,
+          },
+          {
+            type: "message.updated",
+            driver: CODEX_DRIVER,
+            backgroundOwnerThreadId: threadId,
+            message: {
+              ...nativeMessage,
+              id: idAllocator.derive.messageFromProviderItem({
+                driver: CODEX_DRIVER,
+                nativeItemId: "child-outcome",
+              }),
+              threadId: childThreadId,
+            },
+          },
+          {
+            type: "message.updated",
+            driver: CODEX_DRIVER,
+            backgroundOwnerThreadId: otherThreadId,
+            message: { ...nativeMessage, threadId: otherThreadId },
+          },
           {
             type: "turn_item.updated",
             driver: CODEX_DRIVER,
@@ -4535,7 +4602,16 @@ it.effect(
           { runId: anchored.runId, output: "retained" },
         );
         assert.isEmpty(projection.runs);
+        const childProjection = yield* projectionStore.getThreadProjection(childThreadId);
+        assert.deepEqual(childProjection.thread.lineage, childThread.lineage);
+        assert.equal(childProjection.messages[0]?.text, nativeMessage.text);
+        assert.isEmpty(childProjection.runs);
         const unrelated = yield* projectionStore.getThreadProjection(otherThreadId);
+        assert.equal(
+          projection.messages.find((message) => message.id === nativeMessage.id)?.text,
+          nativeMessage.text,
+        );
+        assert.isEmpty(unrelated.messages);
         assert.isEmpty(unrelated.turnItems);
         assert.isEmpty(unrelated.providerThreads);
         assert.equal(request?.status, "pending");

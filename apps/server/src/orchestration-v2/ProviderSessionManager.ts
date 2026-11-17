@@ -351,6 +351,8 @@ function sessionKey(providerSessionId: ProviderSessionId): string {
 function sessionScopedArtifactThreadId(
   event: ProviderAdapter.ProviderAdapterV2Event,
 ): ThreadId | undefined {
+  if ("backgroundOwnerThreadId" in event && event.backgroundOwnerThreadId !== undefined)
+    return event.backgroundOwnerThreadId;
   switch (event.type) {
     case "provider_thread.updated":
       return event.sessionScoped === true
@@ -2839,7 +2841,9 @@ export const layerWithOptions = (
                       );
                       if (
                         current?.runtime !== entry.runtime ||
-                        ((event.type === "provider_thread.updated" ||
+                        ((("backgroundOwnerThreadId" in event &&
+                          event.backgroundOwnerThreadId !== undefined) ||
+                          event.type === "provider_thread.updated" ||
                           (event.type === "turn_item.updated" &&
                             event.turnItem.type === "command_execution")) &&
                           !current.attachedThreadIds.has(threadId))
@@ -3020,6 +3024,9 @@ export const layerWithOptions = (
                   input.modelSelection.instanceId,
                   adapter.openSession({
                     threadId: input.threadId,
+                    readAppThread: projectionStore
+                      .getThread(input.threadId)
+                      .pipe(Effect.orElseSucceed(() => undefined)),
                     providerSessionId: input.providerSessionId,
                     modelSelection: input.modelSelection,
                     runtimePolicy: input.runtimePolicy,

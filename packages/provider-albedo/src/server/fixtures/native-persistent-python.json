@@ -1,0 +1,3182 @@
+{
+  "source": {
+    "revision": "fb84ee05f9284c8820e1ae5eb3fceed464aafc23",
+    "scenario": "Three native Python turns: client detach, then daemon restart preserving the kernel. Workspace paths anonymized."
+  },
+  "batches": [
+    {
+      "snapshot": {
+        "id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+        "name": "T3 persistent Python proof",
+        "automatic_name": "new session",
+        "workspace": "/albedo-proof",
+        "location": {
+          "host": null,
+          "user": null,
+          "path": "/albedo-proof",
+          "label": null
+        },
+        "root_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+        "parent_id": null,
+        "role": "",
+        "started_by": null,
+        "address": null,
+        "depth": 0,
+        "closed": false,
+        "preferences": {
+          "opens": 0,
+          "pinned": false,
+          "pin_order": null,
+          "archived": false
+        },
+        "created_at": "2026-11-16T19:07:44.017Z",
+        "activity_at": "2026-11-16T19:07:44.017Z",
+        "provider_profile": "t3-proof",
+        "model": "fixture-model",
+        "effort": "inherit",
+        "fast": false,
+        "cyber_access": null,
+        "status": {
+          "phase": "idle",
+          "run_id": null,
+          "interrupt_requested": false,
+          "blocking_reason": null,
+          "compaction": null
+        },
+        "current_progress": [],
+        "activity": {
+          "lines": [],
+          "output_scalars": 0,
+          "output_utf8_bytes": 0,
+          "observed_at": "2026-11-16T19:07:44.063Z",
+          "current_request": null,
+          "latest_progress": null,
+          "latest_input": null,
+          "latest_answer": null
+        },
+        "cursor": {
+          "generation": "4hrsNDtinuI52GPNHXtU-A",
+          "sequence": 0
+        },
+        "preview": {
+          "text": "",
+          "transcript_count": 0,
+          "truncated": false
+        },
+        "moved": null,
+        "move_pending": null,
+        "active_output": [],
+        "creation": {
+          "submitted": {
+            "effort": null,
+            "kind": "new",
+            "model": "fixture-model",
+            "name": "T3 persistent Python proof",
+            "provider_profile": "t3-proof",
+            "workspace": "/albedo-proof"
+          },
+          "resolved": {
+            "effort": "inherit",
+            "model": "fixture-model",
+            "provider_profile": "t3-proof",
+            "workspace": "/albedo-proof"
+          }
+        },
+        "revision": "config-01a1e5c2-13e1-7335-97a7-1d529e00de6e-1",
+        "family_revision": "family-01a1e5c2-13e1-7335-97a7-1d529e00de6e-0",
+        "configuration_resource": {
+          "url": "/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e?view=configuration",
+          "etag": "\"f58d3929e6822cf1b5d4d596d9740ea8c7e5747fcfa888d514087fad524d409f\"",
+          "value": {
+            "id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+            "name": "T3 persistent Python proof",
+            "workspace": "/albedo-proof",
+            "provider_profile": "t3-proof",
+            "model": "fixture-model",
+            "effort": "inherit",
+            "fast": false,
+            "cyber_access": null,
+            "context_window": null,
+            "preferences": {
+              "pinned": false,
+              "pin_order": null,
+              "archived": false
+            },
+            "selection": {
+              "extensions": {},
+              "skills": {},
+              "instructions": {},
+              "mcp": {}
+            },
+            "revision": "config-01a1e5c2-13e1-7335-97a7-1d529e00de6e-1"
+          }
+        },
+        "workspace_change": null,
+        "selection": {
+          "overrides": {
+            "extensions": {},
+            "skills": {},
+            "instructions": {},
+            "mcp": {}
+          },
+          "effective": {
+            "extensions": {
+              "run": true,
+              "work": true,
+              "mail": true,
+              "jj": true,
+              "git": true,
+              "worktrees": true,
+              "agents": true,
+              "schedule": true,
+              "paperclips": true,
+              "checklist": false,
+              "artifacts": true,
+              "files": true,
+              "memory": true,
+              "links": true,
+              "instructions": true,
+              "commands": true,
+              "skills": true,
+              "antigravity": true,
+              "opencode-go": true,
+              "opencode-zen": true,
+              "github-copilot": true,
+              "bedrock": true,
+              "anthropic-api": true,
+              "claude": true,
+              "vertex": true,
+              "perplexity": true,
+              "mistral": true,
+              "codex": true,
+              "openai": true,
+              "models": true,
+              "snapcompact": false,
+              "rolling": true,
+              "lcm-memory": true,
+              "snapcompact-memory": true,
+              "coding-lcm": false,
+              "persistent-agent": false,
+              "notes": true,
+              "mcp": false,
+              "editor-mcp": true,
+              "remote": true,
+              "colab": false,
+              "browser": true,
+              "cua": false,
+              "view": false,
+              "proxy": false,
+              "webhooks": false,
+              "discord": false,
+              "hooks": false,
+              "warm": true,
+              "exa": true,
+              "web-search": true,
+              "imagegen": false
+            },
+            "skills": {
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/complexity-review/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/customize-albedo/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/design-preflight/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/imagegen/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/orchestrating-agents/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/research/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/running-experiments/SKILL.md": true
+            },
+            "instructions": {
+              "instructions:global:albedo/python-cells.md:/home/david/.cache/t3-albedo-proof-20261116/source/priv/instructions/python-cells.md": true
+            },
+            "mcp": {}
+          }
+        },
+        "composition": {
+          "desired_revision": "fb8c1841c2aad9786d21839934fa2cca1e1505fd5aaf3456636c7c187d541ead",
+          "loaded_revision": null,
+          "needs_reload": false,
+          "dependencies": {
+            "schedule": [],
+            "mail": [],
+            "checklist": [],
+            "jj": [],
+            "memory": [],
+            "hooks": [],
+            "antigravity": [],
+            "snapcompact-memory": [],
+            "openai": ["models"],
+            "exa": [],
+            "coding-lcm": ["lcm-memory"],
+            "paperclips": [],
+            "web-search": [],
+            "links": [],
+            "work": [],
+            "discord": [],
+            "persistent-agent": ["lcm-memory"],
+            "editor-mcp": [],
+            "artifacts": [],
+            "remote": [],
+            "mcp": [],
+            "warm": [],
+            "mistral": ["models"],
+            "opencode-go": ["models"],
+            "claude": ["models"],
+            "imagegen": [],
+            "agents": ["mail"],
+            "git": [],
+            "skills": ["commands"],
+            "codex": ["openai"],
+            "models": [],
+            "snapcompact": ["snapcompact-memory"],
+            "opencode-zen": ["models"],
+            "browser": [],
+            "bedrock": ["models"],
+            "proxy": [],
+            "view": ["run", "files"],
+            "instructions": [],
+            "webhooks": [],
+            "colab": ["remote"],
+            "run": [],
+            "cua": [],
+            "files": ["run"],
+            "lcm-memory": [],
+            "rolling": [],
+            "vertex": ["models"],
+            "worktrees": [],
+            "github-copilot": ["models"],
+            "commands": [],
+            "anthropic-api": ["models"],
+            "perplexity": ["models"],
+            "notes": []
+          },
+          "quarantine": [],
+          "availability": {
+            "schedule": false,
+            "mail": false,
+            "checklist": false,
+            "jj": false,
+            "memory": false,
+            "hooks": false,
+            "antigravity": false,
+            "snapcompact-memory": false,
+            "openai": false,
+            "exa": false,
+            "coding-lcm": false,
+            "paperclips": false,
+            "web-search": false,
+            "links": false,
+            "work": false,
+            "discord": false,
+            "persistent-agent": false,
+            "editor-mcp": false,
+            "artifacts": false,
+            "remote": false,
+            "mcp": false,
+            "warm": false,
+            "mistral": false,
+            "opencode-go": false,
+            "claude": false,
+            "imagegen": false,
+            "agents": false,
+            "git": false,
+            "skills": false,
+            "codex": false,
+            "models": false,
+            "snapcompact": false,
+            "opencode-zen": false,
+            "browser": false,
+            "bedrock": false,
+            "proxy": false,
+            "view": false,
+            "instructions": false,
+            "webhooks": false,
+            "colab": false,
+            "run": false,
+            "cua": false,
+            "files": false,
+            "lcm-memory": false,
+            "rolling": false,
+            "vertex": false,
+            "worktrees": false,
+            "github-copilot": false,
+            "commands": false,
+            "anthropic-api": false,
+            "perplexity": false,
+            "notes": false
+          }
+        },
+        "kernel": {
+          "instance_id": null,
+          "build": null,
+          "state": "none",
+          "stage": null,
+          "stale": false,
+          "staleness_reasons": [],
+          "live_job_count": 0,
+          "running_jobs": []
+        },
+        "side_question": null,
+        "shell_commands": [],
+        "pending_inputs": [],
+        "input_order": 0,
+        "usage": {
+          "model": null,
+          "observed_at": null,
+          "prompt_tokens": null,
+          "cached_prompt_tokens": null,
+          "cache_write_tokens": null,
+          "completion_tokens": null,
+          "total_tokens": null,
+          "elapsed_ms": null,
+          "tokens_per_second": null,
+          "size": null,
+          "cache_miss_tokens": null,
+          "cache_drift_tokens": null,
+          "spent": null,
+          "context_window_tokens": null,
+          "cache_ttl_seconds": null,
+          "cache_fade": []
+        },
+        "history": {
+          "items": [],
+          "older": null,
+          "newer": null,
+          "high_water": 0
+        },
+        "glances": []
+      },
+      "events": [
+        {
+          "type": "reset",
+          "data": {
+            "reason": "initial"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 0
+    },
+    {
+      "events": [],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 0
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 1,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 2,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-1531-7258-8193-686edb42d1d7",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:07:44.345Z",
+              "acceptance_order": 1,
+              "delivery": "pending",
+              "blocking_reason": null,
+              "transcript_position": null,
+              "turn": null,
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 3,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 4,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        },
+        {
+          "type": "status",
+          "sequence": 5,
+          "data": {
+            "phase": "preparing",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 5
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 6,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 7,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-1531-7258-8193-686edb42d1d7",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:07:44.345Z",
+              "acceptance_order": 1,
+              "delivery": "pending",
+              "blocking_reason": null,
+              "transcript_position": null,
+              "turn": null,
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "status",
+          "sequence": 8,
+          "data": {
+            "phase": "preparing",
+            "run_id": "a590602541876eac8d8e418bf28e4573",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 8
+    },
+    {
+      "events": [
+        {
+          "type": "message",
+          "sequence": 9,
+          "data": {
+            "entry": {
+              "id": "3",
+              "position": 3,
+              "kind": "user",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": "01a1e5c2-1531-7258-8193-686edb42d1d7",
+              "created_at": "2026-11-16T19:07:44.563Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "STATE_SAVE"
+                }
+              ],
+              "checkpoint_id": "3",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            "replaces_live_ids": []
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 10,
+          "data": {
+            "high_water": 3,
+            "replaces_live_ids": [],
+            "replaces_all_live": false
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 11,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-1531-7258-8193-686edb42d1d7",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:07:44.345Z",
+              "acceptance_order": 1,
+              "delivery": "committed",
+              "blocking_reason": null,
+              "transcript_position": 3,
+              "turn": {
+                "id": "a590602541876eac8d8e418bf28e4573",
+                "state": "running",
+                "started_at": "2026-11-16T19:07:44.563Z",
+                "ended_at": null,
+                "outcome": null
+              },
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 12,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 12
+    },
+    {
+      "events": [
+        {
+          "type": "invalidate",
+          "sequence": 13,
+          "data": {
+            "kind": "context",
+            "url": "/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/context?view=summary"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 13
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 14,
+          "data": {
+            "phase": "generating",
+            "run_id": "a590602541876eac8d8e418bf28e4573",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 14
+    },
+    {
+      "events": [
+        {
+          "type": "tool_progress",
+          "sequence": 15,
+          "data": {
+            "progress": {
+              "preview": {
+                "offset_scalars": 0,
+                "text": "t3_persist"
+              },
+              "call_id": "4hrsNDtinuI52GPNHXtU-A:a590602541876eac8d8e418bf28e4573:0:1:0",
+              "tool_call_id": null,
+              "name": "python",
+              "phase": "generating",
+              "intent": "unknown",
+              "title": "t3_persist"
+            }
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 15
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 16,
+          "data": {
+            "phase": "running",
+            "run_id": "a590602541876eac8d8e418bf28e4573",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 17,
+          "data": {
+            "high_water": 4,
+            "replaces_live_ids": [],
+            "replaces_all_live": true
+          }
+        },
+        {
+          "type": "usage",
+          "sequence": 18,
+          "data": {
+            "model": "fixture-model",
+            "observed_at": "2026-11-16T19:07:44.755Z",
+            "prompt_tokens": null,
+            "cached_prompt_tokens": null,
+            "cache_write_tokens": null,
+            "completion_tokens": null,
+            "total_tokens": null,
+            "elapsed_ms": 94,
+            "tokens_per_second": null,
+            "size": null,
+            "cache_miss_tokens": null,
+            "cache_drift_tokens": null,
+            "spent": null,
+            "context_window_tokens": null,
+            "cache_ttl_seconds": null,
+            "cache_fade": []
+          }
+        },
+        {
+          "type": "tool_progress",
+          "sequence": 19,
+          "data": {
+            "progress": {
+              "preview": {
+                "offset_scalars": 0,
+                "text": "t3_persistent_value = 41\nprint(t3_persistent_value)"
+              },
+              "call_id": "4hrsNDtinuI52GPNHXtU-A:a590602541876eac8d8e418bf28e4573:0:1:0",
+              "tool_call_id": "fixture-call-1",
+              "name": "python",
+              "phase": "running",
+              "intent": "unknown",
+              "title": "t3_persistent_value = 41"
+            }
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 19
+    },
+    {
+      "events": [
+        {
+          "type": "kernel",
+          "sequence": 20,
+          "data": {
+            "kernel": {
+              "instance_id": "d97000bebc001ebc",
+              "build": "40c22100ca71fdb6628be0c44a913bf98d0768921977a08a29931ba00538f641",
+              "state": "attached",
+              "stage": null,
+              "stale": false,
+              "staleness_reasons": [],
+              "live_job_count": 0,
+              "running_jobs": []
+            }
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 20
+    },
+    {
+      "events": [
+        {
+          "type": "committed",
+          "sequence": 21,
+          "data": {
+            "high_water": 5,
+            "replaces_live_ids": [],
+            "replaces_all_live": false
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 21
+    },
+    {
+      "events": [
+        {
+          "type": "tool",
+          "sequence": 22,
+          "data": {
+            "tool_call_id": "fixture-call-1",
+            "progress_call_id": "4hrsNDtinuI52GPNHXtU-A:a590602541876eac8d8e418bf28e4573:0:1:0",
+            "name": "python",
+            "title": "t3_persistent_value = 41",
+            "arguments": {
+              "code": "t3_persistent_value = 41\nprint(t3_persistent_value)",
+              "timeout_ms": 60000
+            },
+            "result": "{\"cell_id\":\"01a1e5c2-13e1-7335-97a7-1d529e00de6e/fixture-call-1\",\"status\":\"ok\",\"duration\":0.009,\"output\":\"41\\n\",\"value\":\"\",\"truncated\":false}",
+            "trace": {
+              "activities": [],
+              "calls": [],
+              "changes": [],
+              "truncated": false
+            },
+            "content_complete": true,
+            "status": "completed",
+            "reference": null
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 22
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 23,
+          "data": {
+            "phase": "generating",
+            "run_id": "a590602541876eac8d8e418bf28e4573",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 24,
+          "data": {
+            "kind": "context",
+            "url": "/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/context?view=summary"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 24
+    },
+    {
+      "events": [
+        {
+          "type": "text",
+          "sequence": 25,
+          "data": {
+            "run_id": "a590602541876eac8d8e418bf28e4573",
+            "message_id": "4hrsNDtinuI52GPNHXtU-A:1:a590602541876eac8d8e418bf28e4573:1:0:0",
+            "text": "State operation fini"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 25
+    },
+    {
+      "events": [
+        {
+          "type": "text",
+          "sequence": 26,
+          "data": {
+            "run_id": "a590602541876eac8d8e418bf28e4573",
+            "message_id": "4hrsNDtinuI52GPNHXtU-A:1:a590602541876eac8d8e418bf28e4573:1:0:0",
+            "text": "shed."
+          }
+        },
+        {
+          "type": "message",
+          "sequence": 27,
+          "data": {
+            "entry": {
+              "id": "6",
+              "position": 6,
+              "kind": "assistant",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:45.329Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "State operation finished."
+                }
+              ],
+              "checkpoint_id": "6",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": "final"
+            },
+            "replaces_live_ids": ["4hrsNDtinuI52GPNHXtU-A:1:a590602541876eac8d8e418bf28e4573:1:0:0"]
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 28,
+          "data": {
+            "high_water": 6,
+            "replaces_live_ids": [
+              "4hrsNDtinuI52GPNHXtU-A:1:a590602541876eac8d8e418bf28e4573:1:0:0"
+            ],
+            "replaces_all_live": true
+          }
+        },
+        {
+          "type": "usage",
+          "sequence": 29,
+          "data": {
+            "model": "fixture-model",
+            "observed_at": "2026-11-16T19:07:45.329Z",
+            "prompt_tokens": null,
+            "cached_prompt_tokens": null,
+            "cache_write_tokens": null,
+            "completion_tokens": null,
+            "total_tokens": null,
+            "elapsed_ms": 10,
+            "tokens_per_second": null,
+            "size": null,
+            "cache_miss_tokens": null,
+            "cache_drift_tokens": null,
+            "spent": null,
+            "context_window_tokens": null,
+            "cache_ttl_seconds": null,
+            "cache_fade": []
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 29
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 30,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 31,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-1531-7258-8193-686edb42d1d7",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:07:44.345Z",
+              "acceptance_order": 1,
+              "delivery": "committed",
+              "blocking_reason": null,
+              "transcript_position": 3,
+              "turn": {
+                "id": "a590602541876eac8d8e418bf28e4573",
+                "state": "completed",
+                "started_at": "2026-11-16T19:07:44.563Z",
+                "ended_at": "2026-11-16T19:07:45.341Z",
+                "outcome": null
+              },
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "turn_completed",
+          "sequence": 32,
+          "data": {
+            "run_id": "a590602541876eac8d8e418bf28e4573",
+            "state": "completed",
+            "input_ids": ["01a1e5c2-1531-7258-8193-686edb42d1d7"],
+            "input_count": 1,
+            "truncated": false
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 32
+    },
+    {
+      "snapshot": {
+        "id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+        "name": "T3 persistent Python proof",
+        "automatic_name": "STATE_SAVE",
+        "workspace": "/albedo-proof",
+        "location": {
+          "host": null,
+          "user": null,
+          "path": "/albedo-proof",
+          "label": null
+        },
+        "root_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+        "parent_id": null,
+        "role": "",
+        "started_by": null,
+        "address": null,
+        "depth": 0,
+        "closed": false,
+        "preferences": {
+          "opens": 0,
+          "pinned": false,
+          "pin_order": null,
+          "archived": false
+        },
+        "created_at": "2026-11-16T19:07:44.017Z",
+        "activity_at": "2026-11-16T19:07:45.341Z",
+        "provider_profile": "t3-proof",
+        "model": "fixture-model",
+        "effort": "inherit",
+        "fast": false,
+        "cyber_access": null,
+        "status": {
+          "phase": "idle",
+          "run_id": null,
+          "interrupt_requested": false,
+          "blocking_reason": null,
+          "compaction": null
+        },
+        "current_progress": [],
+        "activity": {
+          "lines": [
+            {
+              "kind": "input",
+              "text": "STATE_SAVE"
+            },
+            {
+              "kind": "tool",
+              "text": "41"
+            },
+            {
+              "kind": "tool",
+              "text": ""
+            },
+            {
+              "kind": "assistant",
+              "text": "State operation finished."
+            }
+          ],
+          "output_scalars": 25,
+          "output_utf8_bytes": 25,
+          "observed_at": "2026-11-16T19:07:45.349Z",
+          "current_request": null,
+          "latest_progress": null,
+          "latest_input": {
+            "input_id": "01a1e5c2-1531-7258-8193-686edb42d1d7",
+            "source": "chat",
+            "bytes": 10
+          },
+          "latest_answer": {
+            "message_id": "6",
+            "bytes": 25
+          }
+        },
+        "cursor": {
+          "generation": "4hrsNDtinuI52GPNHXtU-A",
+          "sequence": 32
+        },
+        "preview": {
+          "text": "STATE_SAVE",
+          "transcript_count": 4,
+          "truncated": false
+        },
+        "moved": null,
+        "move_pending": null,
+        "active_output": [],
+        "creation": {
+          "submitted": {
+            "effort": null,
+            "kind": "new",
+            "model": "fixture-model",
+            "name": "T3 persistent Python proof",
+            "provider_profile": "t3-proof",
+            "workspace": "/albedo-proof"
+          },
+          "resolved": {
+            "effort": "inherit",
+            "model": "fixture-model",
+            "provider_profile": "t3-proof",
+            "workspace": "/albedo-proof"
+          }
+        },
+        "revision": "config-01a1e5c2-13e1-7335-97a7-1d529e00de6e-1",
+        "family_revision": "family-01a1e5c2-13e1-7335-97a7-1d529e00de6e-0",
+        "configuration_resource": {
+          "url": "/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e?view=configuration",
+          "etag": "\"f58d3929e6822cf1b5d4d596d9740ea8c7e5747fcfa888d514087fad524d409f\"",
+          "value": {
+            "id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+            "name": "T3 persistent Python proof",
+            "workspace": "/albedo-proof",
+            "provider_profile": "t3-proof",
+            "model": "fixture-model",
+            "effort": "inherit",
+            "fast": false,
+            "cyber_access": null,
+            "context_window": null,
+            "preferences": {
+              "pinned": false,
+              "pin_order": null,
+              "archived": false
+            },
+            "selection": {
+              "extensions": {},
+              "skills": {},
+              "instructions": {},
+              "mcp": {}
+            },
+            "revision": "config-01a1e5c2-13e1-7335-97a7-1d529e00de6e-1"
+          }
+        },
+        "workspace_change": null,
+        "selection": {
+          "overrides": {
+            "extensions": {},
+            "skills": {},
+            "instructions": {},
+            "mcp": {}
+          },
+          "effective": {
+            "extensions": {
+              "run": true,
+              "work": true,
+              "mail": true,
+              "jj": true,
+              "git": true,
+              "worktrees": true,
+              "agents": true,
+              "schedule": true,
+              "paperclips": true,
+              "checklist": false,
+              "artifacts": true,
+              "files": true,
+              "memory": true,
+              "links": true,
+              "instructions": true,
+              "commands": true,
+              "skills": true,
+              "antigravity": true,
+              "opencode-go": true,
+              "opencode-zen": true,
+              "github-copilot": true,
+              "bedrock": true,
+              "anthropic-api": true,
+              "claude": true,
+              "vertex": true,
+              "perplexity": true,
+              "mistral": true,
+              "codex": true,
+              "openai": true,
+              "models": true,
+              "snapcompact": false,
+              "rolling": true,
+              "lcm-memory": true,
+              "snapcompact-memory": true,
+              "coding-lcm": false,
+              "persistent-agent": false,
+              "notes": true,
+              "mcp": false,
+              "editor-mcp": true,
+              "remote": true,
+              "colab": false,
+              "browser": true,
+              "cua": false,
+              "view": false,
+              "proxy": false,
+              "webhooks": false,
+              "discord": false,
+              "hooks": false,
+              "warm": true,
+              "exa": true,
+              "web-search": true,
+              "imagegen": false
+            },
+            "skills": {
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/complexity-review/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/customize-albedo/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/design-preflight/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/imagegen/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/orchestrating-agents/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/research/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/running-experiments/SKILL.md": true
+            },
+            "instructions": {
+              "instructions:global:albedo/python-cells.md:/home/david/.cache/t3-albedo-proof-20261116/source/priv/instructions/python-cells.md": true
+            },
+            "mcp": {}
+          }
+        },
+        "composition": {
+          "desired_revision": "fb8c1841c2aad9786d21839934fa2cca1e1505fd5aaf3456636c7c187d541ead",
+          "loaded_revision": "fb8c1841c2aad9786d21839934fa2cca1e1505fd5aaf3456636c7c187d541ead",
+          "needs_reload": false,
+          "dependencies": {
+            "schedule": [],
+            "mail": [],
+            "checklist": [],
+            "jj": [],
+            "memory": [],
+            "hooks": [],
+            "antigravity": [],
+            "snapcompact-memory": [],
+            "openai": ["models"],
+            "exa": [],
+            "coding-lcm": ["lcm-memory"],
+            "paperclips": [],
+            "web-search": [],
+            "links": [],
+            "work": [],
+            "discord": [],
+            "persistent-agent": ["lcm-memory"],
+            "editor-mcp": [],
+            "artifacts": [],
+            "remote": [],
+            "mcp": [],
+            "warm": [],
+            "mistral": ["models"],
+            "opencode-go": ["models"],
+            "claude": ["models"],
+            "imagegen": [],
+            "agents": ["mail"],
+            "git": [],
+            "skills": ["commands"],
+            "codex": ["openai"],
+            "models": [],
+            "snapcompact": ["snapcompact-memory"],
+            "opencode-zen": ["models"],
+            "browser": [],
+            "bedrock": ["models"],
+            "proxy": [],
+            "view": ["run", "files"],
+            "instructions": [],
+            "webhooks": [],
+            "colab": ["remote"],
+            "run": [],
+            "cua": [],
+            "files": ["run"],
+            "lcm-memory": [],
+            "rolling": [],
+            "vertex": ["models"],
+            "worktrees": [],
+            "github-copilot": ["models"],
+            "commands": [],
+            "anthropic-api": ["models"],
+            "perplexity": ["models"],
+            "notes": []
+          },
+          "quarantine": [],
+          "availability": {
+            "schedule": true,
+            "mail": true,
+            "checklist": false,
+            "jj": true,
+            "memory": true,
+            "hooks": false,
+            "antigravity": true,
+            "snapcompact-memory": true,
+            "openai": true,
+            "exa": true,
+            "coding-lcm": false,
+            "paperclips": true,
+            "web-search": true,
+            "links": true,
+            "work": true,
+            "discord": false,
+            "persistent-agent": false,
+            "editor-mcp": true,
+            "artifacts": true,
+            "remote": true,
+            "mcp": false,
+            "warm": true,
+            "mistral": true,
+            "opencode-go": true,
+            "claude": true,
+            "imagegen": false,
+            "agents": true,
+            "git": true,
+            "skills": true,
+            "codex": true,
+            "models": true,
+            "snapcompact": false,
+            "opencode-zen": true,
+            "browser": true,
+            "bedrock": true,
+            "proxy": false,
+            "view": false,
+            "instructions": true,
+            "webhooks": false,
+            "colab": false,
+            "run": true,
+            "cua": false,
+            "files": true,
+            "lcm-memory": true,
+            "rolling": true,
+            "vertex": true,
+            "worktrees": true,
+            "github-copilot": true,
+            "commands": true,
+            "anthropic-api": true,
+            "perplexity": true,
+            "notes": true
+          }
+        },
+        "kernel": {
+          "instance_id": "d97000bebc001ebc",
+          "build": "40c22100ca71fdb6628be0c44a913bf98d0768921977a08a29931ba00538f641",
+          "state": "attached",
+          "stage": null,
+          "stale": false,
+          "staleness_reasons": [],
+          "live_job_count": 0,
+          "running_jobs": []
+        },
+        "side_question": null,
+        "shell_commands": [],
+        "pending_inputs": [],
+        "input_order": 1,
+        "usage": {
+          "model": "fixture-model",
+          "observed_at": "2026-11-16T19:07:45.329Z",
+          "prompt_tokens": null,
+          "cached_prompt_tokens": null,
+          "cache_write_tokens": null,
+          "completion_tokens": null,
+          "total_tokens": null,
+          "elapsed_ms": 10,
+          "tokens_per_second": null,
+          "size": null,
+          "cache_miss_tokens": null,
+          "cache_drift_tokens": null,
+          "spent": null,
+          "context_window_tokens": null,
+          "cache_ttl_seconds": null,
+          "cache_fade": []
+        },
+        "history": {
+          "items": [
+            {
+              "id": "3",
+              "position": 3,
+              "kind": "user",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": "01a1e5c2-1531-7258-8193-686edb42d1d7",
+              "created_at": "2026-11-16T19:07:44.563Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "STATE_SAVE"
+                }
+              ],
+              "checkpoint_id": "3",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            {
+              "id": "4-call-0",
+              "position": 4,
+              "kind": "tool_call",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:44.756Z",
+              "content": [
+                {
+                  "kind": "json",
+                  "field": "arguments",
+                  "value": {
+                    "code": "t3_persistent_value = 41\nprint(t3_persistent_value)",
+                    "timeout_ms": 60000
+                  }
+                }
+              ],
+              "checkpoint_id": "4",
+              "content_complete": true,
+              "tool": {
+                "name": "python",
+                "status": "completed",
+                "tool_call_id": "fixture-call-1",
+                "progress_call_id": null,
+                "title": "t3_persistent_value = 41"
+              },
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            {
+              "id": "5",
+              "position": 5,
+              "kind": "tool_result",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:45.275Z",
+              "content": [
+                {
+                  "kind": "json",
+                  "field": "result",
+                  "value": "{\"cell_id\":\"01a1e5c2-13e1-7335-97a7-1d529e00de6e/fixture-call-1\",\"status\":\"ok\",\"duration\":0.009,\"output\":\"41\\n\",\"value\":\"\",\"truncated\":false}"
+                },
+                {
+                  "kind": "json",
+                  "field": "arguments",
+                  "value": {
+                    "code": "t3_persistent_value = 41\nprint(t3_persistent_value)",
+                    "timeout_ms": 60000
+                  }
+                },
+                {
+                  "kind": "trace",
+                  "trace": {
+                    "activities": [],
+                    "calls": [],
+                    "changes": [],
+                    "truncated": false
+                  }
+                }
+              ],
+              "checkpoint_id": null,
+              "content_complete": true,
+              "tool": {
+                "name": "python",
+                "status": "completed",
+                "tool_call_id": "fixture-call-1",
+                "progress_call_id": "4hrsNDtinuI52GPNHXtU-A:a590602541876eac8d8e418bf28e4573:0:1:0",
+                "title": "t3_persistent_value = 41"
+              },
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            {
+              "id": "6",
+              "position": 6,
+              "kind": "assistant",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:45.329Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "State operation finished."
+                }
+              ],
+              "checkpoint_id": "6",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": "final"
+            }
+          ],
+          "older": null,
+          "newer": null,
+          "high_water": 6
+        },
+        "glances": [
+          {
+            "extension": "work",
+            "title": "active work",
+            "rows": [],
+            "url": "/extensions/work/items?workspace=%2Fhome%2Fdavid%2F.cache%2Ft3-albedo-proof-20261116"
+          },
+          {
+            "extension": "schedule",
+            "title": "scheduled",
+            "rows": [],
+            "url": "/extensions/schedule/jobs?session_id=01a1e5c2-13e1-7335-97a7-1d529e00de6e"
+          },
+          {
+            "extension": "skills",
+            "title": "skills",
+            "rows": [],
+            "url": "/extensions/skills/loads?session_id=01a1e5c2-13e1-7335-97a7-1d529e00de6e"
+          }
+        ]
+      },
+      "events": [
+        {
+          "type": "reset",
+          "data": {
+            "reason": "initial"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 32
+    },
+    {
+      "events": [],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 32
+    },
+    {
+      "events": [
+        {
+          "type": "input",
+          "sequence": 33,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-196a-7136-b0a6-62909ab6e028",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:07:45.407Z",
+              "acceptance_order": 2,
+              "delivery": "pending",
+              "blocking_reason": null,
+              "transcript_position": null,
+              "turn": null,
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 34,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 35,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 36,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-196a-7136-b0a6-62909ab6e028",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:07:45.407Z",
+              "acceptance_order": 2,
+              "delivery": "pending",
+              "blocking_reason": null,
+              "transcript_position": null,
+              "turn": null,
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "status",
+          "sequence": 37,
+          "data": {
+            "phase": "preparing",
+            "run_id": "4a3055553faac5449a574d60d969954c",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 37
+    },
+    {
+      "events": [
+        {
+          "type": "message",
+          "sequence": 38,
+          "data": {
+            "entry": {
+              "id": "7",
+              "position": 7,
+              "kind": "user",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "4a3055553faac5449a574d60d969954c",
+              "input_id": "01a1e5c2-196a-7136-b0a6-62909ab6e028",
+              "created_at": "2026-11-16T19:07:45.435Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "STATE_CHECK"
+                }
+              ],
+              "checkpoint_id": "7",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            "replaces_live_ids": []
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 39,
+          "data": {
+            "high_water": 7,
+            "replaces_live_ids": [],
+            "replaces_all_live": false
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 40,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-196a-7136-b0a6-62909ab6e028",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:07:45.407Z",
+              "acceptance_order": 2,
+              "delivery": "committed",
+              "blocking_reason": null,
+              "transcript_position": 7,
+              "turn": {
+                "id": "4a3055553faac5449a574d60d969954c",
+                "state": "running",
+                "started_at": "2026-11-16T19:07:45.435Z",
+                "ended_at": null,
+                "outcome": null
+              },
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 41,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 41
+    },
+    {
+      "events": [
+        {
+          "type": "invalidate",
+          "sequence": 42,
+          "data": {
+            "kind": "context",
+            "url": "/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/context?view=summary"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 42
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 43,
+          "data": {
+            "phase": "generating",
+            "run_id": "4a3055553faac5449a574d60d969954c",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 43
+    },
+    {
+      "events": [
+        {
+          "type": "tool_progress",
+          "sequence": 44,
+          "data": {
+            "progress": {
+              "preview": {
+                "offset_scalars": 0,
+                "text": "assert t3_"
+              },
+              "call_id": "4hrsNDtinuI52GPNHXtU-A:4a3055553faac5449a574d60d969954c:0:1:0",
+              "tool_call_id": null,
+              "name": "python",
+              "phase": "generating",
+              "intent": "unknown",
+              "title": "assert t3_"
+            }
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 44
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 45,
+          "data": {
+            "phase": "running",
+            "run_id": "4a3055553faac5449a574d60d969954c",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 46,
+          "data": {
+            "high_water": 8,
+            "replaces_live_ids": [],
+            "replaces_all_live": true
+          }
+        },
+        {
+          "type": "usage",
+          "sequence": 47,
+          "data": {
+            "model": "fixture-model",
+            "observed_at": "2026-11-16T19:07:45.464Z",
+            "prompt_tokens": null,
+            "cached_prompt_tokens": null,
+            "cache_write_tokens": null,
+            "completion_tokens": null,
+            "total_tokens": null,
+            "elapsed_ms": 6,
+            "tokens_per_second": null,
+            "size": null,
+            "cache_miss_tokens": null,
+            "cache_drift_tokens": null,
+            "spent": null,
+            "context_window_tokens": null,
+            "cache_ttl_seconds": null,
+            "cache_fade": []
+          }
+        },
+        {
+          "type": "tool_progress",
+          "sequence": 48,
+          "data": {
+            "progress": {
+              "preview": {
+                "offset_scalars": 0,
+                "text": "assert t3_persistent_value == 41\nt3_persistent_value += 1\nprint(t3_persistent_value)"
+              },
+              "call_id": "4hrsNDtinuI52GPNHXtU-A:4a3055553faac5449a574d60d969954c:0:1:0",
+              "tool_call_id": "fixture-call-3",
+              "name": "python",
+              "phase": "running",
+              "intent": "unknown",
+              "title": "assert t3_persistent_value == 41"
+            }
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 48
+    },
+    {
+      "events": [
+        {
+          "type": "committed",
+          "sequence": 49,
+          "data": {
+            "high_water": 9,
+            "replaces_live_ids": [],
+            "replaces_all_live": false
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 49
+    },
+    {
+      "events": [
+        {
+          "type": "tool",
+          "sequence": 50,
+          "data": {
+            "tool_call_id": "fixture-call-3",
+            "progress_call_id": "4hrsNDtinuI52GPNHXtU-A:4a3055553faac5449a574d60d969954c:0:1:0",
+            "name": "python",
+            "title": "assert t3_persistent_value == 41",
+            "arguments": {
+              "code": "assert t3_persistent_value == 41\nt3_persistent_value += 1\nprint(t3_persistent_value)",
+              "timeout_ms": 60000
+            },
+            "result": "{\"cell_id\":\"01a1e5c2-13e1-7335-97a7-1d529e00de6e/fixture-call-3\",\"status\":\"ok\",\"duration\":0.005,\"output\":\"42\\n\",\"value\":\"\",\"truncated\":false}",
+            "trace": {
+              "activities": [],
+              "calls": [],
+              "changes": [],
+              "truncated": false
+            },
+            "content_complete": true,
+            "status": "completed",
+            "reference": null
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 50
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 51,
+          "data": {
+            "phase": "generating",
+            "run_id": "4a3055553faac5449a574d60d969954c",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 52,
+          "data": {
+            "kind": "context",
+            "url": "/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/context?view=summary"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 52
+    },
+    {
+      "events": [
+        {
+          "type": "text",
+          "sequence": 53,
+          "data": {
+            "run_id": "4a3055553faac5449a574d60d969954c",
+            "message_id": "4hrsNDtinuI52GPNHXtU-A:1:4a3055553faac5449a574d60d969954c:1:0:0",
+            "text": "State operation fini"
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 53
+    },
+    {
+      "events": [
+        {
+          "type": "text",
+          "sequence": 54,
+          "data": {
+            "run_id": "4a3055553faac5449a574d60d969954c",
+            "message_id": "4hrsNDtinuI52GPNHXtU-A:1:4a3055553faac5449a574d60d969954c:1:0:0",
+            "text": "shed."
+          }
+        },
+        {
+          "type": "message",
+          "sequence": 55,
+          "data": {
+            "entry": {
+              "id": "10",
+              "position": 10,
+              "kind": "assistant",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "4a3055553faac5449a574d60d969954c",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:45.510Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "State operation finished."
+                }
+              ],
+              "checkpoint_id": "10",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": "final"
+            },
+            "replaces_live_ids": ["4hrsNDtinuI52GPNHXtU-A:1:4a3055553faac5449a574d60d969954c:1:0:0"]
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 56,
+          "data": {
+            "high_water": 10,
+            "replaces_live_ids": [
+              "4hrsNDtinuI52GPNHXtU-A:1:4a3055553faac5449a574d60d969954c:1:0:0"
+            ],
+            "replaces_all_live": true
+          }
+        },
+        {
+          "type": "usage",
+          "sequence": 57,
+          "data": {
+            "model": "fixture-model",
+            "observed_at": "2026-11-16T19:07:45.510Z",
+            "prompt_tokens": null,
+            "cached_prompt_tokens": null,
+            "cache_write_tokens": null,
+            "completion_tokens": null,
+            "total_tokens": null,
+            "elapsed_ms": 5,
+            "tokens_per_second": null,
+            "size": null,
+            "cache_miss_tokens": null,
+            "cache_drift_tokens": null,
+            "spent": null,
+            "context_window_tokens": null,
+            "cache_ttl_seconds": null,
+            "cache_fade": []
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 57
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 58,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 59,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-196a-7136-b0a6-62909ab6e028",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:07:45.407Z",
+              "acceptance_order": 2,
+              "delivery": "committed",
+              "blocking_reason": null,
+              "transcript_position": 7,
+              "turn": {
+                "id": "4a3055553faac5449a574d60d969954c",
+                "state": "completed",
+                "started_at": "2026-11-16T19:07:45.435Z",
+                "ended_at": "2026-11-16T19:07:45.519Z",
+                "outcome": null
+              },
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "turn_completed",
+          "sequence": 60,
+          "data": {
+            "run_id": "4a3055553faac5449a574d60d969954c",
+            "state": "completed",
+            "input_ids": ["01a1e5c2-196a-7136-b0a6-62909ab6e028"],
+            "input_count": 1,
+            "truncated": false
+          }
+        }
+      ],
+      "generation": "4hrsNDtinuI52GPNHXtU-A",
+      "cursor": 60
+    },
+    {
+      "snapshot": {
+        "id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+        "name": "T3 persistent Python proof",
+        "automatic_name": "STATE_CHECK",
+        "workspace": "/albedo-proof",
+        "location": {
+          "host": null,
+          "user": null,
+          "path": "/albedo-proof",
+          "label": null
+        },
+        "root_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+        "parent_id": null,
+        "role": "",
+        "started_by": null,
+        "address": null,
+        "depth": 0,
+        "closed": false,
+        "preferences": {
+          "opens": 0,
+          "pinned": false,
+          "pin_order": null,
+          "archived": false
+        },
+        "created_at": "2026-11-16T19:07:44.017Z",
+        "activity_at": "2026-11-16T19:07:45.519Z",
+        "provider_profile": "t3-proof",
+        "model": "fixture-model",
+        "effort": "inherit",
+        "fast": false,
+        "cyber_access": null,
+        "status": {
+          "phase": "idle",
+          "run_id": null,
+          "interrupt_requested": false,
+          "blocking_reason": null,
+          "compaction": null
+        },
+        "current_progress": [],
+        "activity": {
+          "lines": [],
+          "output_scalars": 0,
+          "output_utf8_bytes": 0,
+          "observed_at": "2026-11-16T19:08:43.558Z",
+          "current_request": null,
+          "latest_progress": null,
+          "latest_input": null,
+          "latest_answer": null
+        },
+        "cursor": {
+          "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+          "sequence": 0
+        },
+        "preview": {
+          "text": "STATE_CHECK",
+          "transcript_count": 8,
+          "truncated": false
+        },
+        "moved": null,
+        "move_pending": null,
+        "active_output": [],
+        "creation": {
+          "submitted": {
+            "effort": null,
+            "kind": "new",
+            "model": "fixture-model",
+            "name": "T3 persistent Python proof",
+            "provider_profile": "t3-proof",
+            "workspace": "/albedo-proof"
+          },
+          "resolved": {
+            "effort": "inherit",
+            "model": "fixture-model",
+            "provider_profile": "t3-proof",
+            "workspace": "/albedo-proof"
+          }
+        },
+        "revision": "config-01a1e5c2-13e1-7335-97a7-1d529e00de6e-1",
+        "family_revision": "family-01a1e5c2-13e1-7335-97a7-1d529e00de6e-0",
+        "configuration_resource": {
+          "url": "/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e?view=configuration",
+          "etag": "\"f58d3929e6822cf1b5d4d596d9740ea8c7e5747fcfa888d514087fad524d409f\"",
+          "value": {
+            "id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+            "name": "T3 persistent Python proof",
+            "workspace": "/albedo-proof",
+            "provider_profile": "t3-proof",
+            "model": "fixture-model",
+            "effort": "inherit",
+            "fast": false,
+            "cyber_access": null,
+            "context_window": null,
+            "preferences": {
+              "pinned": false,
+              "pin_order": null,
+              "archived": false
+            },
+            "selection": {
+              "extensions": {},
+              "skills": {},
+              "instructions": {},
+              "mcp": {}
+            },
+            "revision": "config-01a1e5c2-13e1-7335-97a7-1d529e00de6e-1"
+          }
+        },
+        "workspace_change": null,
+        "selection": {
+          "overrides": {
+            "extensions": {},
+            "skills": {},
+            "instructions": {},
+            "mcp": {}
+          },
+          "effective": {
+            "extensions": {
+              "run": true,
+              "work": true,
+              "mail": true,
+              "jj": true,
+              "git": true,
+              "worktrees": true,
+              "agents": true,
+              "schedule": true,
+              "paperclips": true,
+              "checklist": false,
+              "artifacts": true,
+              "files": true,
+              "memory": true,
+              "links": true,
+              "instructions": true,
+              "commands": true,
+              "skills": true,
+              "antigravity": true,
+              "opencode-go": true,
+              "opencode-zen": true,
+              "github-copilot": true,
+              "bedrock": true,
+              "anthropic-api": true,
+              "claude": true,
+              "vertex": true,
+              "perplexity": true,
+              "mistral": true,
+              "codex": true,
+              "openai": true,
+              "models": true,
+              "snapcompact": false,
+              "rolling": true,
+              "lcm-memory": true,
+              "snapcompact-memory": true,
+              "coding-lcm": false,
+              "persistent-agent": false,
+              "notes": true,
+              "mcp": false,
+              "editor-mcp": true,
+              "remote": true,
+              "colab": false,
+              "browser": true,
+              "cua": false,
+              "view": false,
+              "proxy": false,
+              "webhooks": false,
+              "discord": false,
+              "hooks": false,
+              "warm": true,
+              "exa": true,
+              "web-search": true,
+              "imagegen": false
+            },
+            "skills": {
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/complexity-review/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/customize-albedo/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/design-preflight/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/imagegen/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/orchestrating-agents/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/research/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/running-experiments/SKILL.md": true
+            },
+            "instructions": {
+              "instructions:global:albedo/python-cells.md:/home/david/.cache/t3-albedo-proof-20261116/source/priv/instructions/python-cells.md": true
+            },
+            "mcp": {}
+          }
+        },
+        "composition": {
+          "desired_revision": "fb8c1841c2aad9786d21839934fa2cca1e1505fd5aaf3456636c7c187d541ead",
+          "loaded_revision": "fb8c1841c2aad9786d21839934fa2cca1e1505fd5aaf3456636c7c187d541ead",
+          "needs_reload": false,
+          "dependencies": {
+            "schedule": [],
+            "mail": [],
+            "checklist": [],
+            "jj": [],
+            "memory": [],
+            "hooks": [],
+            "antigravity": [],
+            "snapcompact-memory": [],
+            "openai": ["models"],
+            "exa": [],
+            "coding-lcm": ["lcm-memory"],
+            "paperclips": [],
+            "web-search": [],
+            "links": [],
+            "work": [],
+            "discord": [],
+            "persistent-agent": ["lcm-memory"],
+            "editor-mcp": [],
+            "artifacts": [],
+            "remote": [],
+            "mcp": [],
+            "warm": [],
+            "mistral": ["models"],
+            "opencode-go": ["models"],
+            "claude": ["models"],
+            "imagegen": [],
+            "agents": ["mail"],
+            "git": [],
+            "skills": ["commands"],
+            "codex": ["openai"],
+            "models": [],
+            "snapcompact": ["snapcompact-memory"],
+            "opencode-zen": ["models"],
+            "browser": [],
+            "bedrock": ["models"],
+            "proxy": [],
+            "view": ["run", "files"],
+            "instructions": [],
+            "webhooks": [],
+            "colab": ["remote"],
+            "run": [],
+            "cua": [],
+            "files": ["run"],
+            "lcm-memory": [],
+            "rolling": [],
+            "vertex": ["models"],
+            "worktrees": [],
+            "github-copilot": ["models"],
+            "commands": [],
+            "anthropic-api": ["models"],
+            "perplexity": ["models"],
+            "notes": []
+          },
+          "quarantine": [],
+          "availability": {
+            "schedule": true,
+            "mail": true,
+            "checklist": false,
+            "jj": true,
+            "memory": true,
+            "hooks": false,
+            "antigravity": true,
+            "snapcompact-memory": true,
+            "openai": true,
+            "exa": true,
+            "coding-lcm": false,
+            "paperclips": true,
+            "web-search": true,
+            "links": true,
+            "work": true,
+            "discord": false,
+            "persistent-agent": false,
+            "editor-mcp": true,
+            "artifacts": true,
+            "remote": true,
+            "mcp": false,
+            "warm": true,
+            "mistral": true,
+            "opencode-go": true,
+            "claude": true,
+            "imagegen": false,
+            "agents": true,
+            "git": true,
+            "skills": true,
+            "codex": true,
+            "models": true,
+            "snapcompact": false,
+            "opencode-zen": true,
+            "browser": true,
+            "bedrock": true,
+            "proxy": false,
+            "view": false,
+            "instructions": true,
+            "webhooks": false,
+            "colab": false,
+            "run": true,
+            "cua": false,
+            "files": true,
+            "lcm-memory": true,
+            "rolling": true,
+            "vertex": true,
+            "worktrees": true,
+            "github-copilot": true,
+            "commands": true,
+            "anthropic-api": true,
+            "perplexity": true,
+            "notes": true
+          }
+        },
+        "kernel": {
+          "instance_id": "d97000bebc001ebc",
+          "build": "40c22100ca71fdb6628be0c44a913bf98d0768921977a08a29931ba00538f641",
+          "state": "attached",
+          "stage": null,
+          "stale": false,
+          "staleness_reasons": [],
+          "live_job_count": 0,
+          "running_jobs": []
+        },
+        "side_question": null,
+        "shell_commands": [],
+        "pending_inputs": [],
+        "input_order": 2,
+        "usage": {
+          "model": "fixture-model",
+          "observed_at": "2026-11-16T19:07:45.510Z",
+          "prompt_tokens": null,
+          "cached_prompt_tokens": null,
+          "cache_write_tokens": null,
+          "completion_tokens": null,
+          "total_tokens": null,
+          "elapsed_ms": null,
+          "tokens_per_second": null,
+          "size": null,
+          "cache_miss_tokens": null,
+          "cache_drift_tokens": null,
+          "spent": null,
+          "context_window_tokens": null,
+          "cache_ttl_seconds": null,
+          "cache_fade": []
+        },
+        "history": {
+          "items": [
+            {
+              "id": "3",
+              "position": 3,
+              "kind": "user",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": "01a1e5c2-1531-7258-8193-686edb42d1d7",
+              "created_at": "2026-11-16T19:07:44.563Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "STATE_SAVE"
+                }
+              ],
+              "checkpoint_id": "3",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            {
+              "id": "4-call-0",
+              "position": 4,
+              "kind": "tool_call",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:44.756Z",
+              "content": [
+                {
+                  "kind": "json",
+                  "field": "arguments",
+                  "value": {
+                    "code": "t3_persistent_value = 41\nprint(t3_persistent_value)",
+                    "timeout_ms": 60000
+                  }
+                }
+              ],
+              "checkpoint_id": "4",
+              "content_complete": true,
+              "tool": {
+                "name": "python",
+                "status": "completed",
+                "tool_call_id": "fixture-call-1",
+                "progress_call_id": null,
+                "title": "t3_persistent_value = 41"
+              },
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            {
+              "id": "5",
+              "position": 5,
+              "kind": "tool_result",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:45.275Z",
+              "content": [
+                {
+                  "kind": "json",
+                  "field": "result",
+                  "value": "{\"cell_id\":\"01a1e5c2-13e1-7335-97a7-1d529e00de6e/fixture-call-1\",\"status\":\"ok\",\"duration\":0.009,\"output\":\"41\\n\",\"value\":\"\",\"truncated\":false}"
+                },
+                {
+                  "kind": "json",
+                  "field": "arguments",
+                  "value": {
+                    "code": "t3_persistent_value = 41\nprint(t3_persistent_value)",
+                    "timeout_ms": 60000
+                  }
+                },
+                {
+                  "kind": "trace",
+                  "trace": {
+                    "activities": [],
+                    "calls": [],
+                    "changes": [],
+                    "truncated": false
+                  }
+                }
+              ],
+              "checkpoint_id": null,
+              "content_complete": true,
+              "tool": {
+                "name": "python",
+                "status": "completed",
+                "tool_call_id": "fixture-call-1",
+                "progress_call_id": "4hrsNDtinuI52GPNHXtU-A:a590602541876eac8d8e418bf28e4573:0:1:0",
+                "title": "t3_persistent_value = 41"
+              },
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            {
+              "id": "6",
+              "position": 6,
+              "kind": "assistant",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "a590602541876eac8d8e418bf28e4573",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:45.329Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "State operation finished."
+                }
+              ],
+              "checkpoint_id": "6",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": "final"
+            },
+            {
+              "id": "7",
+              "position": 7,
+              "kind": "user",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "4a3055553faac5449a574d60d969954c",
+              "input_id": "01a1e5c2-196a-7136-b0a6-62909ab6e028",
+              "created_at": "2026-11-16T19:07:45.435Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "STATE_CHECK"
+                }
+              ],
+              "checkpoint_id": "7",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            {
+              "id": "8-call-0",
+              "position": 8,
+              "kind": "tool_call",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "4a3055553faac5449a574d60d969954c",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:45.464Z",
+              "content": [
+                {
+                  "kind": "json",
+                  "field": "arguments",
+                  "value": {
+                    "code": "assert t3_persistent_value == 41\nt3_persistent_value += 1\nprint(t3_persistent_value)",
+                    "timeout_ms": 60000
+                  }
+                }
+              ],
+              "checkpoint_id": "8",
+              "content_complete": true,
+              "tool": {
+                "name": "python",
+                "status": "completed",
+                "tool_call_id": "fixture-call-3",
+                "progress_call_id": null,
+                "title": "assert t3_persistent_value == 41"
+              },
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            {
+              "id": "9",
+              "position": 9,
+              "kind": "tool_result",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "4a3055553faac5449a574d60d969954c",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:45.486Z",
+              "content": [
+                {
+                  "kind": "json",
+                  "field": "result",
+                  "value": "{\"cell_id\":\"01a1e5c2-13e1-7335-97a7-1d529e00de6e/fixture-call-3\",\"status\":\"ok\",\"duration\":0.005,\"output\":\"42\\n\",\"value\":\"\",\"truncated\":false}"
+                },
+                {
+                  "kind": "json",
+                  "field": "arguments",
+                  "value": {
+                    "code": "assert t3_persistent_value == 41\nt3_persistent_value += 1\nprint(t3_persistent_value)",
+                    "timeout_ms": 60000
+                  }
+                },
+                {
+                  "kind": "trace",
+                  "trace": {
+                    "activities": [],
+                    "calls": [],
+                    "changes": [],
+                    "truncated": false
+                  }
+                }
+              ],
+              "checkpoint_id": null,
+              "content_complete": true,
+              "tool": {
+                "name": "python",
+                "status": "completed",
+                "tool_call_id": "fixture-call-3",
+                "progress_call_id": "4hrsNDtinuI52GPNHXtU-A:4a3055553faac5449a574d60d969954c:0:1:0",
+                "title": "assert t3_persistent_value == 41"
+              },
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            {
+              "id": "10",
+              "position": 10,
+              "kind": "assistant",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "4a3055553faac5449a574d60d969954c",
+              "input_id": null,
+              "created_at": "2026-11-16T19:07:45.510Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "State operation finished."
+                }
+              ],
+              "checkpoint_id": "10",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": "final"
+            }
+          ],
+          "older": null,
+          "newer": null,
+          "high_water": 10
+        },
+        "glances": [
+          {
+            "extension": "work",
+            "title": "active work",
+            "rows": [],
+            "url": "/extensions/work/items?workspace=%2Fhome%2Fdavid%2F.cache%2Ft3-albedo-proof-20261116"
+          },
+          {
+            "extension": "schedule",
+            "title": "scheduled",
+            "rows": [],
+            "url": "/extensions/schedule/jobs?session_id=01a1e5c2-13e1-7335-97a7-1d529e00de6e"
+          },
+          {
+            "extension": "skills",
+            "title": "skills",
+            "rows": [],
+            "url": "/extensions/skills/loads?session_id=01a1e5c2-13e1-7335-97a7-1d529e00de6e"
+          }
+        ]
+      },
+      "events": [
+        {
+          "type": "reset",
+          "data": {
+            "reason": "initial"
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 0
+    },
+    {
+      "events": [],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 0
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 1,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 2,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-fc6c-74b1-b979-2cacbf422017",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:08:43.688Z",
+              "acceptance_order": 3,
+              "delivery": "pending",
+              "blocking_reason": null,
+              "transcript_position": null,
+              "turn": null,
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 3,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 4,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        },
+        {
+          "type": "status",
+          "sequence": 5,
+          "data": {
+            "phase": "preparing",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 5
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 6,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 7,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-fc6c-74b1-b979-2cacbf422017",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:08:43.688Z",
+              "acceptance_order": 3,
+              "delivery": "pending",
+              "blocking_reason": null,
+              "transcript_position": null,
+              "turn": null,
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "status",
+          "sequence": 8,
+          "data": {
+            "phase": "preparing",
+            "run_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 8
+    },
+    {
+      "events": [
+        {
+          "type": "message",
+          "sequence": 9,
+          "data": {
+            "entry": {
+              "id": "11",
+              "position": 11,
+              "kind": "user",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+              "input_id": "01a1e5c2-fc6c-74b1-b979-2cacbf422017",
+              "created_at": "2026-11-16T19:08:43.785Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "STATE_RESUME"
+                }
+              ],
+              "checkpoint_id": "11",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            "replaces_live_ids": []
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 10,
+          "data": {
+            "high_water": 11,
+            "replaces_live_ids": [],
+            "replaces_all_live": false
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 11,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-fc6c-74b1-b979-2cacbf422017",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:08:43.688Z",
+              "acceptance_order": 3,
+              "delivery": "committed",
+              "blocking_reason": null,
+              "transcript_position": 11,
+              "turn": {
+                "id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+                "state": "running",
+                "started_at": "2026-11-16T19:08:43.785Z",
+                "ended_at": null,
+                "outcome": null
+              },
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 12,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 12
+    },
+    {
+      "events": [
+        {
+          "type": "invalidate",
+          "sequence": 13,
+          "data": {
+            "kind": "context",
+            "url": "/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/context?view=summary"
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 13
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 14,
+          "data": {
+            "phase": "generating",
+            "run_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 14
+    },
+    {
+      "events": [
+        {
+          "type": "tool_progress",
+          "sequence": 15,
+          "data": {
+            "progress": {
+              "preview": {
+                "offset_scalars": 0,
+                "text": "assert t3_"
+              },
+              "call_id": "4TzMsTtKNsZSv_gq3mkwsg:0ace1fd0130a2e1d8bf2ed0db2f8d26e:0:1:0",
+              "tool_call_id": null,
+              "name": "python",
+              "phase": "generating",
+              "intent": "unknown",
+              "title": "assert t3_"
+            }
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 15
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 16,
+          "data": {
+            "phase": "running",
+            "run_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 17,
+          "data": {
+            "high_water": 12,
+            "replaces_live_ids": [],
+            "replaces_all_live": true
+          }
+        },
+        {
+          "type": "usage",
+          "sequence": 18,
+          "data": {
+            "model": "fixture-model",
+            "observed_at": "2026-11-16T19:08:43.945Z",
+            "prompt_tokens": null,
+            "cached_prompt_tokens": null,
+            "cache_write_tokens": null,
+            "completion_tokens": null,
+            "total_tokens": null,
+            "elapsed_ms": 67,
+            "tokens_per_second": null,
+            "size": null,
+            "cache_miss_tokens": null,
+            "cache_drift_tokens": null,
+            "spent": null,
+            "context_window_tokens": null,
+            "cache_ttl_seconds": null,
+            "cache_fade": []
+          }
+        },
+        {
+          "type": "tool_progress",
+          "sequence": 19,
+          "data": {
+            "progress": {
+              "preview": {
+                "offset_scalars": 0,
+                "text": "assert t3_persistent_value == 42\nt3_persistent_value += 1\nprint(t3_persistent_value)"
+              },
+              "call_id": "4TzMsTtKNsZSv_gq3mkwsg:0ace1fd0130a2e1d8bf2ed0db2f8d26e:0:1:0",
+              "tool_call_id": "fixture-call-1",
+              "name": "python",
+              "phase": "running",
+              "intent": "unknown",
+              "title": "assert t3_persistent_value == 42"
+            }
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 19
+    },
+    {
+      "events": [
+        {
+          "type": "note",
+          "sequence": 20,
+          "data": {
+            "entry_id": "f2daf0986eb9a6f1f2564d216df54828",
+            "origin": "daemon",
+            "text": "python kernel reattached; its variables and jobs carried on",
+            "mail": null
+          }
+        },
+        {
+          "type": "kernel",
+          "sequence": 21,
+          "data": {
+            "kernel": {
+              "instance_id": "d97000bebc001ebc",
+              "build": "40c22100ca71fdb6628be0c44a913bf98d0768921977a08a29931ba00538f641",
+              "state": "attached",
+              "stage": null,
+              "stale": false,
+              "staleness_reasons": [],
+              "live_job_count": 0,
+              "running_jobs": []
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 22,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 22
+    },
+    {
+      "events": [
+        {
+          "type": "committed",
+          "sequence": 23,
+          "data": {
+            "high_water": 13,
+            "replaces_live_ids": [],
+            "replaces_all_live": false
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 23
+    },
+    {
+      "events": [
+        {
+          "type": "tool",
+          "sequence": 24,
+          "data": {
+            "tool_call_id": "fixture-call-1",
+            "progress_call_id": "4TzMsTtKNsZSv_gq3mkwsg:0ace1fd0130a2e1d8bf2ed0db2f8d26e:0:1:0",
+            "name": "python",
+            "title": "assert t3_persistent_value == 42",
+            "arguments": {
+              "code": "assert t3_persistent_value == 42\nt3_persistent_value += 1\nprint(t3_persistent_value)",
+              "timeout_ms": 60000
+            },
+            "result": "{\"cell_id\":\"01a1e5c2-13e1-7335-97a7-1d529e00de6e/fixture-call-1-97fc563dd3dbf2cffaad0958ce0cc611\",\"status\":\"ok\",\"duration\":0.011,\"output\":\"43\\n\",\"value\":\"\",\"truncated\":false}",
+            "trace": {
+              "activities": [],
+              "calls": [],
+              "changes": [],
+              "truncated": false
+            },
+            "content_complete": true,
+            "status": "completed",
+            "reference": null
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 24
+    },
+    {
+      "events": [
+        {
+          "type": "committed",
+          "sequence": 25,
+          "data": {
+            "high_water": 14,
+            "replaces_live_ids": [],
+            "replaces_all_live": false
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 26,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-fc6c-74b1-b979-2cacbf422017",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:08:43.688Z",
+              "acceptance_order": 3,
+              "delivery": "committed",
+              "blocking_reason": null,
+              "transcript_position": 11,
+              "turn": {
+                "id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+                "state": "running",
+                "started_at": "2026-11-16T19:08:43.785Z",
+                "ended_at": null,
+                "outcome": null
+              },
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 27,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/queue"
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 27
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 28,
+          "data": {
+            "phase": "generating",
+            "run_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 29,
+          "data": {
+            "kind": "context",
+            "url": "/sessions/01a1e5c2-13e1-7335-97a7-1d529e00de6e/context?view=summary"
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 29
+    },
+    {
+      "events": [
+        {
+          "type": "thinking",
+          "sequence": 30,
+          "data": {
+            "run_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+            "message_id": "4TzMsTtKNsZSv_gq3mkwsg:1:0ace1fd0130a2e1d8bf2ed0db2f8d26e:1:thinking",
+            "text": "Checking the native stream."
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 30
+    },
+    {
+      "events": [
+        {
+          "type": "text",
+          "sequence": 31,
+          "data": {
+            "run_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+            "message_id": "4TzMsTtKNsZSv_gq3mkwsg:1:0ace1fd0130a2e1d8bf2ed0db2f8d26e:1:0:0",
+            "text": "T3 native Albedo proof: café 🌍"
+          }
+        },
+        {
+          "type": "message",
+          "sequence": 32,
+          "data": {
+            "entry": {
+              "id": "15-thinking",
+              "position": 15,
+              "kind": "thinking",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+              "input_id": null,
+              "created_at": "2026-11-16T19:08:44.020Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "Checking the native stream."
+                }
+              ],
+              "checkpoint_id": null,
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            "replaces_live_ids": [
+              "4TzMsTtKNsZSv_gq3mkwsg:1:0ace1fd0130a2e1d8bf2ed0db2f8d26e:1:thinking"
+            ]
+          }
+        },
+        {
+          "type": "message",
+          "sequence": 33,
+          "data": {
+            "entry": {
+              "id": "15",
+              "position": 15,
+              "kind": "assistant",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+              "input_id": null,
+              "created_at": "2026-11-16T19:08:44.020Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "T3 native Albedo proof: café 🌍"
+                }
+              ],
+              "checkpoint_id": "15",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": "final"
+            },
+            "replaces_live_ids": ["4TzMsTtKNsZSv_gq3mkwsg:1:0ace1fd0130a2e1d8bf2ed0db2f8d26e:1:0:0"]
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 34,
+          "data": {
+            "high_water": 15,
+            "replaces_live_ids": [
+              "4TzMsTtKNsZSv_gq3mkwsg:1:0ace1fd0130a2e1d8bf2ed0db2f8d26e:1:thinking",
+              "4TzMsTtKNsZSv_gq3mkwsg:1:0ace1fd0130a2e1d8bf2ed0db2f8d26e:1:0:0"
+            ],
+            "replaces_all_live": true
+          }
+        },
+        {
+          "type": "usage",
+          "sequence": 35,
+          "data": {
+            "model": "fixture-model",
+            "observed_at": "2026-11-16T19:08:44.019Z",
+            "prompt_tokens": null,
+            "cached_prompt_tokens": null,
+            "cache_write_tokens": null,
+            "completion_tokens": null,
+            "total_tokens": null,
+            "elapsed_ms": 5,
+            "tokens_per_second": null,
+            "size": null,
+            "cache_miss_tokens": null,
+            "cache_drift_tokens": null,
+            "spent": null,
+            "context_window_tokens": null,
+            "cache_ttl_seconds": null,
+            "cache_fade": []
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 35
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 36,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 37,
+          "data": {
+            "input": {
+              "id": "01a1e5c2-fc6c-74b1-b979-2cacbf422017",
+              "session_id": "01a1e5c2-13e1-7335-97a7-1d529e00de6e",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:08:43.688Z",
+              "acceptance_order": 3,
+              "delivery": "committed",
+              "blocking_reason": null,
+              "transcript_position": 11,
+              "turn": {
+                "id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+                "state": "completed",
+                "started_at": "2026-11-16T19:08:43.785Z",
+                "ended_at": "2026-11-16T19:08:44.028Z",
+                "outcome": null
+              },
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "turn_completed",
+          "sequence": 38,
+          "data": {
+            "run_id": "0ace1fd0130a2e1d8bf2ed0db2f8d26e",
+            "state": "completed",
+            "input_ids": ["01a1e5c2-fc6c-74b1-b979-2cacbf422017"],
+            "input_count": 1,
+            "truncated": false
+          }
+        }
+      ],
+      "generation": "4TzMsTtKNsZSv_gq3mkwsg",
+      "cursor": 38
+    }
+  ]
+}
