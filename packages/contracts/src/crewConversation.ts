@@ -288,7 +288,7 @@ export const CrewConversationPage = Schema.Struct({
 });
 export type CrewConversationPage = typeof CrewConversationPage.Type;
 
-// Separate from Plan mode: coordination retains Crew management but blocks implementation and bypass tools.
+// Hard enforcement evidence is separate from the coordinator's behavioral role and provider availability.
 export const CrewCoordinationCapability = Schema.Union([
   Schema.Struct({
     state: Schema.Literal("enforced"),
@@ -306,6 +306,7 @@ export const CrewCoordinationCapability = Schema.Union([
   }),
 ]);
 export type CrewCoordinationCapability = typeof CrewCoordinationCapability.Type;
+// Selecting this role does not claim that the adapter enforces an inability to implement.
 export const CrewCoordinatorPolicy = Schema.Struct({
   role: Schema.Literal("coordination-only"),
   capability: CrewCoordinationCapability,

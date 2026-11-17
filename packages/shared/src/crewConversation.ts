@@ -330,7 +330,7 @@ export function canAgentAnswerCrewAttention(
   );
 }
 
-// Capability evidence comes from the selected adapter, never from model text or a client assertion.
+// Diagnoses hard enforcement claims, not role availability; evidence must come from the selected adapter.
 export function crewCoordinationCapabilityProblem(
   driver: ProviderDriverKind,
   capability: CrewCoordinationCapability | null,
