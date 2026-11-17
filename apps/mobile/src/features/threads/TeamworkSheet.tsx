@@ -11,6 +11,7 @@ import {
   crewOriginThread,
   crewReturnContext,
   crewScrollOffset,
+  crewLiveFreshness,
   crewSelectedInitiative,
   crewSelectedTask,
   crewSelectedView,
@@ -123,11 +124,7 @@ export function TeamworkSheet({
   const scrollPosition = useRef(appAtomRegistry.get(crewScrollOffset(projectKey)));
   const restoredScroll = useRef(false);
   const state = query.data?.snapshot;
-  const freshness = !connected
-    ? "disconnected"
-    : query.error || query.isPending
-      ? "stale"
-      : "current";
+  const freshness = crewLiveFreshness(connected, query);
   const supervision = query.data ? mobileCrewSupervision(query.data, threads, freshness) : null;
   const initiative =
     state?.initiatives.find((item) => item.id === selected) ?? state?.initiatives.at(-1);

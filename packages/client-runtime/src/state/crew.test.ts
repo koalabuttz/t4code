@@ -11,6 +11,7 @@ import {
   crewDraftTitle,
   crewFilters,
   crewMessageDraft,
+  crewLiveFreshness,
   crewOriginThread,
   crewReturnContext,
   crewScrollOffset,
@@ -25,6 +26,15 @@ import {
 const project = { environmentId: EnvironmentId.make("env-a"), projectId: v2ThreadShell.projectId };
 const origin = scopeThreadShell(project.environmentId, v2ThreadShell);
 const other = { ...origin, id: ThreadId.make("other") };
+
+it("uses received live subscription data while waiting for the next update", () => {
+  const live = { data: { revision: 7 }, error: null, isSuccess: true, isPending: true };
+  expect(crewLiveFreshness(true, live)).toBe("current");
+  expect(crewLiveFreshness(false, live)).toBe("disconnected");
+  expect(crewLiveFreshness(true, { ...live, error: "Subscription failed" })).toBe("stale");
+  expect(crewLiveFreshness(true, { ...live, data: null, isSuccess: false })).toBe("unknown");
+  expect(crewLiveFreshness(true, { ...live, data: { revision: 8 } })).toBe("current");
+});
 
 describe("Crew coordinator selection", () => {
   it("reuses the project coordinator ahead of both origin and a chosen candidate", () => {
@@ -139,6 +149,18 @@ describe("Crew local continuity", () => {
     expect(registry.get(crewDraftTitle(key))).toBe("Release recovery");
     registry.set(crewDraftTitle(key), null);
     expect(registry.get(crewDraftTitle(key))).toBe("A revised goal");
+    prepareCrewEntry(registry, project, { threadId: other.id });
+    expect(registry.get(crewOriginThread(key))).toBe(other.id);
+    expect(
+      resolveCrewCoordinator({
+        project,
+        threads: [origin, other],
+        coordinatorThreadId: null,
+        originThreadId: registry.get(crewOriginThread(key)),
+        candidateThreadId: registry.get(crewCandidateThread(key)),
+      }),
+    ).toMatchObject({ threadId: other.id, source: "origin" });
+    expect(registry.get(crewDraftBrief(key))).toBe("A revised goal");
     registry.dispose();
   });
 

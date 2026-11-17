@@ -12,6 +12,7 @@ import {
   crewFilters,
   crewReturnContext,
   crewScrollOffset,
+  crewLiveFreshness,
   resolveCrewCoordinator,
   isCrewCoordinatorCandidate,
   crewSelectedInitiative,
@@ -264,7 +265,7 @@ export function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread
     snapshot: state,
     ...facts,
     deliveries: query.data?.deliveries ?? [],
-    freshness: !connected ? "disconnected" : query.error || query.isPending ? "stale" : "current",
+    freshness: crewLiveFreshness(connected, query),
   });
   const summary = supervision.initiatives.find((entry) => entry.initiativeId === initiative?.id);
   const openConversation = (

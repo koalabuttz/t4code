@@ -1,5 +1,7 @@
 import { AppBar } from "../../components/ui/AppBar";
 import { useState } from "react";
+import { prepareCrewEntry } from "@t3tools/client-runtime/state/crew";
+import { appAtomRegistry } from "../../state/atom-registry";
 import { TeamworkSheet, type TeamworkTarget } from "./TeamworkSheet";
 import type { AppBarAction, AppBarMenu } from "../../components/ui/AppBar.types";
 import {
@@ -49,7 +51,10 @@ export function ThreadHeader(props: {
     actions.push({
       accessibilityLabel: "Project crew",
       icon: "person.2",
-      onPress: () => setTeamworkOpen(true),
+      onPress: () => {
+        if (props.teamwork) prepareCrewEntry(appAtomRegistry, props.teamwork, props.teamwork);
+        setTeamworkOpen(true);
+      },
     });
 
   return (

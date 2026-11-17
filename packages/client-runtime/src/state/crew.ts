@@ -7,6 +7,16 @@ import { Atom, type AtomRegistry } from "effect/reactivity";
 import { scopedProjectKey } from "../environment/scoped.ts";
 import type { EnvironmentThreadShell } from "./models.ts";
 
+export function crewLiveFreshness(
+  connected: boolean,
+  query: { data: unknown | null; error: string | null; isSuccess: boolean },
+) {
+  if (!connected) return "disconnected" as const;
+  if (query.error) return "stale" as const;
+  // Stream waiting means waiting for its next value, even after a successful emission.
+  return query.data !== null && query.isSuccess ? ("current" as const) : ("unknown" as const);
+}
+
 export const crewDraftBrief = Atom.family((_projectKey: string) =>
   Atom.make("").pipe(Atom.keepAlive),
 );
