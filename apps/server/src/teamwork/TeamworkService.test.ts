@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  EnvironmentId,
   NodeId,
   ProjectId,
   ProviderInstanceId,
@@ -11,6 +12,8 @@ import {
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
+import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Sqlite from "../persistence/Sqlite.ts";
@@ -33,6 +36,9 @@ const dependencies = (
   deleted: (id: ThreadId) => boolean = () => false,
 ) =>
   Layer.mergeAll(
+    Layer.succeed(ServerEnvironmentIdentity, {
+      getEnvironmentId: Effect.succeed(EnvironmentId.make("test-environment")),
+    }),
     Layer.mock(CrewArtifacts)({
       inspect: () => Effect.succeed({ status: "available", detail: "Fixture artifact" }),
     }),
@@ -40,6 +46,8 @@ const dependencies = (
       get: () => Effect.succeedSome({ projectId } as never),
     }),
     Layer.mock(Threads.ThreadManagementService)({
+      streamStoredEvents: Stream.empty,
+      streamStoredEventsFrom: () => Stream.empty,
       getShellSnapshot: () => Effect.succeed({ threads: [] } as never),
       getThreadShell: (id) =>
         deleted(id)
@@ -231,6 +239,16 @@ it.effect("recovers pending work on service restart with the same dispatch id", 
         });
         yield* teams.drain;
         assert.equal(delivered.length, 1);
+        yield* teams.conversationCommand({
+          scope: { projectId, environmentId: EnvironmentId.make("test-environment") },
+          expectedRevision: 2,
+          commandId: CommandId.make("retain-workstream"),
+          action: {
+            type: "workstream.link",
+            threadId: ThreadId.make("retained-worker"),
+            title: "Persistent Android work",
+          },
+        });
       }).pipe(Effect.provide(first)),
     );
     // Simulate a crash after dispatch committed but before the outbox acknowledgement.
@@ -248,6 +266,13 @@ it.effect("recovers pending work on service restart with the same dispatch id", 
       Effect.gen(function* () {
         const teams = yield* Teamwork.TeamworkService;
         yield* teams.drain;
+        assert.equal(
+          (yield* teams.conversationQuery({
+            scope: { projectId, environmentId: EnvironmentId.make("test-environment") },
+            collection: "workstreams",
+          })).workstreams[0]?.conversation.threadId,
+          "retained-worker",
+        );
         assert.equal((yield* teams.read(projectId)).snapshot.initiatives[0]?.title, "Invite");
         assert.equal(delivered.length, 2);
         assert.equal(delivered[0], delivered[1]);

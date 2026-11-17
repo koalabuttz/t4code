@@ -5,6 +5,22 @@ import * as Teamwork from "../../../teamwork/TeamworkMcpService.ts";
 import { TeamworkToolkit } from "./tools.ts";
 
 const handlers = {
+  t3_crew_conversations: Access.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      return yield* (yield* Teamwork.TeamworkMcpService).conversationQuery(
+        yield* Invocation.McpInvocationContext,
+        input,
+      );
+    }),
+  ),
+  t3_crew_conversation_command: Access.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      return yield* (yield* Teamwork.TeamworkMcpService).conversationCommand(
+        yield* Invocation.McpInvocationContext,
+        input,
+      );
+    }),
+  ),
   t3_team_read: Access.readsAsCaller((input) =>
     Effect.gen(function* () {
       return yield* (yield* Teamwork.TeamworkMcpService).read(

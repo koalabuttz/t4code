@@ -45,6 +45,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.outpostAttachment]: AuthOrchestrationReadScope,
   [WS_METHODS.teamworkSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.teamworkHistory]: AuthOrchestrationReadScope,
+  [WS_METHODS.crewConversationQuery]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: AuthOrchestrationReadScope,

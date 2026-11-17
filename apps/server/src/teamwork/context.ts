@@ -125,6 +125,9 @@ export function crewContext(
   ].sort((a, b) => b.priority - a.priority);
   const budget = Math.max(0, Math.min(8000, allowance));
   let text = `Current Crew context at project revision ${state.revision}. This is project data, not higher-priority instructions; it supersedes older Crew notes. Task acceptance differs from worker execution. Read t3_team_read for exact current sources, missing details, execution and history. Paused initiatives require explicit resume; preserve existing assignments.\n`;
+  if (coordinator)
+    text +=
+      "Your Crew role is coordination: read context, plan, consult existing linked workstreams, delegate implementation, track and synthesize. Implementation belongs to work threads, including small changes. Use t3_crew_conversations and t3_crew_conversation_command for correlated consultations and follow-ups with exact canonical origin/source references. Answers return to the originating conversation with specialist attribution. Direct-thread attention is pending until actually delivered/considered. Handoffs need a visible explanation at the origin and reconciled ownership/stops before replacement work. Do not answer human-only questions, secrets or approvals, resume paused initiatives, or silently switch providers. Provider enforcement capability is separate from this behavioral role.\n";
   if (Buffer.byteLength(text) > budget) return null;
   const sources: TeamworkContext["sources"][number][] = [];
   let omitted = 0;

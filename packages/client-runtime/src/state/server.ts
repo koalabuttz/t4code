@@ -1363,6 +1363,10 @@ export function createServerEnvironmentAtoms<R, E>(
     scheduler: configScheduler,
     concurrency: configConcurrency,
   });
+  const teamworkLive = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "environment-data:server:teamwork:live",
+    tag: WS_METHODS.teamworkSubscribe,
+  });
 
   return {
     configValueAtom,
@@ -1503,13 +1507,21 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,
     }),
-    teamworkLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
-      label: "environment-data:server:teamwork:live",
-      tag: WS_METHODS.teamworkSubscribe,
-    }),
+    teamworkLive,
     teamworkHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:teamwork:history",
       tag: WS_METHODS.teamworkHistory,
+    }),
+    crewConversations: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:crew:conversations",
+      tag: WS_METHODS.crewConversationQuery,
+      refreshTrigger: ({ environmentId, input }) =>
+        Atom.make((get) => {
+          const crew = get(
+            teamworkLive({ environmentId, input: { projectId: input.scope.projectId } }),
+          );
+          return crew._tag === "Success" ? crew.value?.snapshot.revision : null;
+        }),
     }),
     // A cold transcript scan is measured in seconds, so keep the result around
     // long enough that switching windows or re-rendering does not rescan. With
@@ -1782,6 +1794,10 @@ export function createServerEnvironmentAtoms<R, E>(
     mutateTeamwork: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:teamwork:mutate",
       tag: WS_METHODS.teamworkMutate,
+    }),
+    mutateCrewConversation: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:crew:conversation:mutate",
+      tag: WS_METHODS.crewConversationCommand,
     }),
     setScheduledTaskEnabled: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:scheduled-task:set-enabled",

@@ -205,6 +205,7 @@ describe("command permissions", () => {
     WS_METHODS.scheduledTasksDelete,
     ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
     WS_METHODS.teamworkMutate,
+    WS_METHODS.crewConversationCommand,
     WS_METHODS.outpostAction,
     WS_METHODS.outpostSurfaceDocument,
     WS_METHODS.outpostSurfaceRequest,

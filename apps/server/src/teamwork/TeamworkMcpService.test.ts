@@ -10,6 +10,8 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
+import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import * as Result from "effect/Result";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as Projects from "../orchestration-v2/ProjectStore.ts";
@@ -29,6 +31,7 @@ it.effect(
     const worker = ThreadId.make("worker");
     const taskId = NodeId.make("native-task");
     const calls: string[] = [];
+    const reused: string[] = [];
     let workerStatus: "running" | "completed" = "running";
     const scope: McpInvocationScope = {
       environmentId: EnvironmentId.make("environment"),
@@ -43,6 +46,8 @@ it.effect(
       client: undefined,
     };
     const threadLayer = Layer.mock(Threads.ThreadManagementService)({
+      streamStoredEvents: Stream.empty,
+      streamStoredEventsFrom: () => Stream.empty,
       getShellSnapshot: () =>
         Effect.succeed({
           threads: [{ id: worker, status: workerStatus, deletedAt: null }],
@@ -53,6 +58,9 @@ it.effect(
           projectId,
           deletedAt: null,
           status: workerStatus,
+          creationSource: "mcp",
+          worktreePath: null,
+          forkedFrom: { type: "node", nodeId: taskId },
           pendingRuntimeRequest: null,
           lineage: {
             parentThreadId: id === coordinator ? null : coordinator,
@@ -62,8 +70,17 @@ it.effect(
           runtimeMode: "full-access",
           interactionMode: "default",
         } as never),
-      sendToThread: () => Effect.succeed({} as never),
+      hasReceipt: () => Effect.succeed(false),
+      getThreadRecords: () =>
+        Effect.succeed({
+          subagents: [{ origin: "app_owned", childThreadId: worker, result: "Finished" }],
+        } as never),
+      sendToThread: (input) => {
+        if (input.creationSource === "mcp") reused.push(input.commandId);
+        return Effect.succeed({ run: { delegatedTaskId: NodeId.make("real-follow-up") } } as never);
+      },
       dispatch: () => Effect.succeed({} as never),
+      confirmStop: () => Effect.void,
     });
     const result = { taskId, childThreadId: worker } as never;
     const orchestrationLayer = Layer.mock(Orchestration.OrchestratorMcpService)({
@@ -72,9 +89,14 @@ it.effect(
           calls.push(input.task);
           return result;
         }),
-      taskStatus: () => Effect.succeed(result),
+      taskStatus: (_scope, id) => Effect.succeed({ taskId: id, childThreadId: worker } as never),
     });
     const teamLayer = Teamwork.layer.pipe(
+      Layer.provide(
+        Layer.succeed(ServerEnvironmentIdentity, {
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("environment")),
+        }),
+      ),
       Layer.provide(
         Layer.mock(CrewArtifacts)({
           inspect: () => Effect.succeed({ status: "available", detail: "Fixture artifact" }),
@@ -212,9 +234,45 @@ it.effect(
       );
       workerStatus = "completed";
       yield* update({ type: "task.reserve", id: "next-task", delegationId: "next" });
+      yield* teams.bindImplementationDestination(
+        projectId,
+        "next-task",
+        "next",
+        worker,
+        coordinator,
+      );
+      assert.isTrue(
+        Result.isFailure(
+          yield* Effect.result(
+            teams.bindImplementationDestination(projectId, "next-task", "next", null, coordinator),
+          ),
+        ),
+      );
+      const reusedWorker = yield* mcp.delegate(scope, {
+        taskId: "next-task",
+        requestId: "next",
+        workstreamThreadId: worker,
+      });
+      assert.equal(reusedWorker.taskId, "real-follow-up");
+      assert.equal(reusedWorker.childThreadId, worker);
+      assert.equal(
+        (yield* teams.read(projectId)).snapshot.tasks.find((t) => t.id === "next-task")
+          ?.delegatedTaskId,
+        "real-follow-up",
+      );
+      yield* mcp.delegate(
+        { ...scope, requestNamespace: "later-turn" },
+        { taskId: "next-task", requestId: "next", workstreamThreadId: worker },
+      );
+      assert.equal(reused.length, 1);
+      assert.equal(calls.length, 1);
+      yield* update({ type: "initiative.status", id: "initiative", status: "paused" });
+      yield* teams.drain;
       yield* update({ type: "task.reset", id: "next-task", status: "cancelled" });
       assert.isTrue(yield* crewRetainsArtifacts([worker]));
       assert.isFalse(yield* crewRetainsArtifacts([coordinator]));
+      yield* teams.drain;
+      yield* update({ type: "initiative.status", id: "initiative", status: "active" });
       yield* teams.drain;
       yield* update({ type: "initiative.status", id: "initiative", status: "completed" });
       assert.isFalse(yield* crewRetainsArtifacts([worker]));

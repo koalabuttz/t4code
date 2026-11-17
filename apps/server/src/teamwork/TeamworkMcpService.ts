@@ -7,6 +7,8 @@ import {
   TeamworkTaskExecution,
   TeamworkHistoryResult,
   ThreadId,
+  MessageId,
+  isProviderNativeSubagentThread,
   type TeamworkSnapshot,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -20,11 +22,19 @@ import * as Invocation from "../mcp/McpInvocationContext.ts";
 import * as Orchestration from "../mcp/OrchestratorMcpService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Teamwork from "./TeamworkService.ts";
+import { DispatchModeLimit } from "../orchestration-v2/DispatchModeLimit.ts";
+import type {
+  CrewConversationCommand,
+  CrewConversationQuery,
+  CrewConversationReceipt,
+  CrewConversationPage,
+} from "@t3tools/contracts/crewConversation";
 
 export const TeamworkDelegateInput = Schema.Struct({
   taskId: Schema.String,
   requestId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(80)),
   isolation: Schema.optional(Schema.Literals(["worktree", "shared"])),
+  workstreamThreadId: Schema.optional(ThreadId),
 });
 export const TeamworkAgentReadInput = Schema.Struct({
   initiativeId: Schema.optional(Schema.String),
@@ -81,6 +91,14 @@ export class TeamworkMcpService extends Context.Service<
       scope: Invocation.McpInvocationScope,
       input: typeof TeamworkDelegateInput.Type,
     ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
+    readonly conversationCommand: (
+      scope: Invocation.McpInvocationScope,
+      input: CrewConversationCommand,
+    ) => Effect.Effect<CrewConversationReceipt, OrchestratorMcpFailure>;
+    readonly conversationQuery: (
+      scope: Invocation.McpInvocationScope,
+      input: CrewConversationQuery,
+    ) => Effect.Effect<CrewConversationPage, OrchestratorMcpFailure>;
   }
 >()("t3/teamwork/TeamworkMcpService") {}
 
@@ -258,7 +276,7 @@ const make = Effect.gen(function* () {
   ) {
     const { thread } = yield* caller(scope);
     return yield* locks.withLock(
-      `${thread.projectId}:${input.taskId}`,
+      thread.projectId,
       Effect.gen(function* () {
         let state = (yield* teams
           .read(thread.projectId, thread.id)
@@ -268,6 +286,13 @@ const make = Effect.gen(function* () {
         let task = state.tasks.find((t) => t.id === input.taskId);
         if (!task) return yield* failure("Create the task on the team board first.");
         if (task.delegatedTaskId !== null) {
+          if (
+            input.workstreamThreadId !== undefined &&
+            task.ownerThreadId !== input.workstreamThreadId
+          )
+            return yield* failure(
+              "This attempt already belongs to another workstream. Preserve its assignment.",
+            );
           const owner = task.ownerThreadId
             ? yield* threads
                 .getThreadShell(task.ownerThreadId)
@@ -303,29 +328,178 @@ const make = Effect.gen(function* () {
             "This assignment is not active. Resume the initiative or reset the task first.",
           );
         const profile = state.roles.find((r) => r.id === task.roleId);
+        yield* teams
+          .bindImplementationDestination(
+            thread.projectId,
+            task.id,
+            input.requestId,
+            input.workstreamThreadId ?? null,
+            thread.id,
+          )
+          .pipe(Effect.mapError((e) => failure(e.message)));
         const brief = workerBrief(state, task.id);
         const stableScope = {
           ...scope,
           requestNamespace: `teamwork:${thread.projectId}:${task.id}:${input.requestId}`,
         };
-        const result = yield* orchestration.delegateTask(stableScope, {
-          task: brief,
-          title: profile ? `${profile.name}: ${task.title}` : task.title,
-          clientRequestId: input.requestId,
-          isolation: input.isolation ?? "worktree",
-          mode: "async",
-          ...(profile?.modelSelection == null
-            ? {}
-            : {
-                target: {
-                  providerInstanceId: profile.modelSelection.instanceId,
-                  model: profile.modelSelection.model,
-                  ...(profile.modelSelection.options === undefined
-                    ? {}
-                    : { options: profile.modelSelection.options }),
-                },
-              }),
-        });
+        const result =
+          input.workstreamThreadId === undefined
+            ? yield* orchestration.delegateTask(stableScope, {
+                task: brief,
+                title: profile ? `${profile.name}: ${task.title}` : task.title,
+                clientRequestId: input.requestId,
+                isolation: input.isolation ?? "worktree",
+                mode: "async",
+                ...(profile?.modelSelection == null
+                  ? {}
+                  : {
+                      target: {
+                        providerInstanceId: profile.modelSelection.instanceId,
+                        model: profile.modelSelection.model,
+                        ...(profile.modelSelection.options === undefined
+                          ? {}
+                          : { options: profile.modelSelection.options }),
+                      },
+                    }),
+              })
+            : yield* Effect.gen(function* () {
+                const threadId = input.workstreamThreadId!;
+                const page = yield* teams
+                  .conversationQuery(
+                    {
+                      scope: { environmentId: scope.environmentId, projectId: thread.projectId },
+                      collection: "workstreams",
+                      id: threadId,
+                    },
+                    thread.id,
+                  )
+                  .pipe(Effect.mapError((e) => failure(e.message)));
+                if (page.workstreams[0]?.status !== "open")
+                  return yield* failure(
+                    "Explicitly link and reopen this workstream before assigning implementation.",
+                  );
+                const child = yield* threads
+                  .getThreadShell(threadId)
+                  .pipe(Effect.mapError(() => failure("Workstream unavailable.")));
+                if (
+                  !child ||
+                  child.deletedAt !== null ||
+                  child.projectId !== thread.projectId ||
+                  isProviderNativeSubagentThread(child) ||
+                  child.linkOrigin != null ||
+                  child.lineage.parentThreadId !== thread.id ||
+                  child.lineage.relationshipToParent !== "subagent" ||
+                  child.forkedFrom?.type !== "node"
+                )
+                  return yield* failure(
+                    "Reuse requires this coordinator's existing app-owned delegated child. Root conversations and previous-coordinator children need explicit recovery; lineage is never rewritten.",
+                  );
+                if (profile?.modelSelection != null)
+                  return yield* failure(
+                    "An explicit role provider/model override needs a new reviewed selection; reuse preserves the workstream's provider and model.",
+                  );
+                if (
+                  input.isolation !== undefined &&
+                  (input.isolation === "worktree") !== (child.worktreePath !== null)
+                )
+                  return yield* failure(
+                    "Reuse preserves the workstream's existing workspace isolation.",
+                  );
+                if (
+                  state.tasks.some(
+                    (t) =>
+                      t.id !== task.id &&
+                      t.ownerThreadId === threadId &&
+                      !["done", "cancelled"].includes(t.status),
+                  )
+                )
+                  return yield* failure(
+                    "This workstream already owns active implementation. Reconcile ownership before assigning another task.",
+                  );
+                const board = yield* teams
+                  .read(thread.projectId, thread.id)
+                  .pipe(Effect.mapError((e) => failure(e.message)));
+                if (
+                  board.deliveries.some(
+                    (d) =>
+                      d.threadId === threadId &&
+                      d.kind === "stop" &&
+                      ["pending", "failed"].includes(d.status),
+                  )
+                )
+                  return yield* failure("Resolve the workstream's outstanding stop before reuse.");
+                const commandId = CommandId.make(
+                  `crew-implementation:${thread.projectId}:${task.id}:${input.requestId}`,
+                );
+                const replay = yield* threads
+                  .hasReceipt(commandId)
+                  .pipe(
+                    Effect.mapError(() =>
+                      failure("Could not check implementation delivery receipt."),
+                    ),
+                  );
+                if (
+                  !replay &&
+                  (!(
+                    [
+                      "idle",
+                      "completed",
+                      "failed",
+                      "interrupted",
+                      "cancelled",
+                      "rolled_back",
+                    ] as ReadonlyArray<string>
+                  ).includes(child.activityRunStatus ?? child.status ?? "") ||
+                    child.pendingRuntimeRequest != null ||
+                    (child.pendingBackgroundTasks?.length ?? 0) > 0)
+                )
+                  return yield* failure(
+                    "The workstream is busy or its execution is uncertain. Wait for it to stop before reusing it; no replacement was started.",
+                  );
+                const original = yield* threads
+                  .getThreadRecords(thread.id, ["subagents"], {
+                    subagentIds: [child.forkedFrom.nodeId],
+                  })
+                  .pipe(
+                    Effect.mapError(() =>
+                      failure("Could not verify the workstream's original delegation."),
+                    ),
+                  );
+                if (
+                  !original.subagents.some(
+                    (t) =>
+                      t.origin === "app_owned" && t.childThreadId === threadId && t.result !== null,
+                  )
+                )
+                  return yield* failure(
+                    "The original delegated work must finish before a new implementation attempt can reuse its conversation.",
+                  );
+                const sent = yield* threads
+                  .sendToThread({
+                    projectId: thread.projectId,
+                    threadId,
+                    commandId,
+                    messageId: MessageId.make(commandId),
+                    senderThreadId: thread.id,
+                    text: brief,
+                    attachments: [],
+                    mode: "queue",
+                    createdBy: "agent",
+                    creationSource: "mcp",
+                  })
+                  .pipe(
+                    Effect.provideService(DispatchModeLimit, {
+                      runtimeMode: thread.runtimeMode,
+                      interactionMode: thread.interactionMode,
+                    }),
+                    Effect.mapError((e) => failure(e.message)),
+                  );
+                if (sent.run.delegatedTaskId === undefined)
+                  return yield* failure(
+                    "The implementation send did not produce a tracked follow-up assignment. Inspect and stop that exact run before retrying; no synthetic task id was created.",
+                  );
+                return yield* orchestration.taskStatus(scope, sent.run.delegatedTaskId);
+              });
         if (result.childThreadId === null)
           return yield* failure("Team tasks require an environment-local worker thread.");
         for (let attempt = 0; attempt < 4; attempt++) {
@@ -362,7 +536,35 @@ const make = Effect.gen(function* () {
       }),
     );
   });
-  return TeamworkMcpService.of({ read, update, delegate });
+  return TeamworkMcpService.of({
+    read,
+    update,
+    delegate,
+    conversationCommand: Effect.fn("TeamworkMcpService.conversationCommand")(
+      function* (scope, input) {
+        const { thread } = yield* caller(scope);
+        if (
+          input.scope.projectId !== thread.projectId ||
+          input.scope.environmentId !== scope.environmentId
+        )
+          return yield* failure("Use the calling conversation's environment and project.");
+        return yield* teams
+          .conversationCommand(input, thread.id)
+          .pipe(Effect.mapError((e) => failure(e.message)));
+      },
+    ),
+    conversationQuery: Effect.fn("TeamworkMcpService.conversationQuery")(function* (scope, input) {
+      const { thread } = yield* caller(scope);
+      if (
+        input.scope.projectId !== thread.projectId ||
+        input.scope.environmentId !== scope.environmentId
+      )
+        return yield* failure("Use the calling conversation's environment and project.");
+      return yield* teams
+        .conversationQuery(input, thread.id)
+        .pipe(Effect.mapError((e) => failure(e.message)));
+    }),
+  });
 });
 
 function workerBrief(state: TeamworkSnapshot, taskId: string): string {

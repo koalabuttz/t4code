@@ -24,6 +24,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.outpostSurfaceDocument]: AuthOrchestrationOperateScope,
   [WS_METHODS.outpostSurfaceRequest]: AuthOrchestrationOperateScope,
   [WS_METHODS.teamworkMutate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.crewConversationCommand]: AuthOrchestrationOperateScope,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.

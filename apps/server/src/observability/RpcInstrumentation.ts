@@ -111,6 +111,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.teamworkSubscribe]: "teamwork",
   [WS_METHODS.teamworkMutate]: "teamwork",
   [WS_METHODS.teamworkHistory]: "teamwork",
+  [WS_METHODS.crewConversationCommand]: "teamwork",
+  [WS_METHODS.crewConversationQuery]: "teamwork",
   [WS_METHODS.scheduledTasksUpsert]: "scheduledTasks",
   [WS_METHODS.scheduledTasksSetEnabled]: "scheduledTasks",
   [WS_METHODS.scheduledTasksDelete]: "scheduledTasks",

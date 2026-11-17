@@ -3872,6 +3872,9 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
     );
 
     const outcomes = [
+      "crew-reuse",
+      "crew-consultation",
+      "crew-board",
       "completed",
       "failed",
       "interrupted",
@@ -3967,7 +3970,12 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           yield* orchestrator.dispatch({
             type: "message.dispatch",
             createdBy: outcome === "failed" ? "user" : "agent",
-            creationSource: outcome === "failed" ? "web" : "mcp",
+            creationSource:
+              outcome === "failed"
+                ? "web"
+                : outcome === "crew-consultation" || outcome === "crew-board"
+                  ? "server"
+                  : "mcp",
             commandId: CommandId.make(`command:followup-send-${outcome}`),
             threadId: child.childThreadId,
             // `t3 thread send` and unscoped MCP sessions carry no sender thread.
@@ -3979,7 +3987,61 @@ it.layer(Layer.merge(layerTest, ProviderContinuationRequests.layer))(
           });
           const childProjection = yield* orchestrator.getThreadProjection(child.childThreadId);
           let run = childProjection.runs.find((row) => row.userMessageId === messageId)!;
+          if (outcome === "crew-consultation" || outcome === "crew-board") {
+            assert.isUndefined(run.delegatedTaskId);
+            assert.lengthOf((yield* orchestrator.getThreadProjection(parentThreadId)).subagents, 2);
+            return;
+          }
           assert.isDefined(run.delegatedTaskId);
+          if (outcome === "crew-reuse") {
+            const parent = yield* orchestrator.getThreadProjection(parentThreadId);
+            assert.equal(
+              parent.subagents.find((t) => t.id === run.delegatedTaskId)?.childThreadId,
+              child.childThreadId,
+            );
+            const replay = yield* orchestrator.dispatch({
+              type: "message.dispatch",
+              createdBy: "agent",
+              creationSource: "mcp",
+              commandId: CommandId.make(`command:followup-send-${outcome}`),
+              threadId: child.childThreadId,
+              senderThreadId: parentThreadId,
+              messageId,
+              text: "Check the same work again.",
+              attachments: [],
+              dispatchMode: { type: "start_immediately" },
+            });
+            assert.isTrue(
+              replay.storedEvents.some(
+                (stored) =>
+                  stored.event.type === "run.created" && stored.event.payload.id === run.id,
+              ),
+            );
+            assert.equal(
+              (yield* orchestrator.getThreadProjection(parentThreadId)).subagents.length,
+              parent.subagents.length,
+            );
+            const queuedMessageId = MessageId.make("crew-queued-implementation");
+            yield* orchestrator.dispatch({
+              type: "message.dispatch",
+              createdBy: "agent",
+              creationSource: "mcp",
+              commandId: CommandId.make("crew-queued-implementation"),
+              threadId: child.childThreadId,
+              senderThreadId: parentThreadId,
+              messageId: queuedMessageId,
+              text: "A subsequent authorized implementation.",
+              attachments: [],
+              dispatchMode: { type: "queue_after_active" },
+            });
+            const queued = (yield* orchestrator.getThreadProjection(child.childThreadId)).runs.find(
+              (r) => r.userMessageId === queuedMessageId,
+            )!;
+            assert.equal(queued.status, "queued");
+            assert.isDefined(queued.delegatedTaskId);
+            assert.notEqual(queued.delegatedTaskId, run.delegatedTaskId);
+            return;
+          }
           const workingParent = yield* orchestrator.getShellSnapshot();
           const backgroundTask = workingParent.threads
             .find((thread) => thread.id === parentThreadId)

@@ -2321,6 +2321,8 @@ export const layerWsRpc = (
         [WS_METHODS.teamworkSubscribe]: (input) => teamwork.subscribe(input.projectId),
         [WS_METHODS.teamworkMutate]: (input) => teamwork.mutate(input),
         [WS_METHODS.teamworkHistory]: (input) => teamwork.history(input),
+        [WS_METHODS.crewConversationCommand]: (input) => teamwork.conversationCommand(input),
+        [WS_METHODS.crewConversationQuery]: (input) => teamwork.conversationQuery(input),
         [WS_METHODS.scheduledTasksUpsert]: (input) => scheduledTasks.upsert(input),
         [WS_METHODS.scheduledTasksSetEnabled]: (input) =>
           Effect.annotateCurrentSpan({ "scheduled_task.id": input.id }).pipe(

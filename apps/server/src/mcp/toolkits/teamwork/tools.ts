@@ -5,6 +5,12 @@ import {
 } from "@t3tools/contracts";
 import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as Schema from "effect/Schema";
+import {
+  CrewConversationCommand,
+  CrewConversationQuery,
+  CrewConversationReceipt,
+  CrewConversationPage,
+} from "@t3tools/contracts/crewConversation";
 import * as Invocation from "../../McpInvocationContext.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Teamwork from "../../../teamwork/TeamworkMcpService.ts";
@@ -43,11 +49,35 @@ const update = Tool.make("t3_team_update", {
 const delegate = Tool.make("t3_team_delegate", {
   ...shared,
   description:
-    "Coordinator: start the worker for a ready team task. Uses its role's provider/model or inherits yours. Worktree isolation by default; shared only when explicitly suitable. Check orchestrator_capabilities for model choices. Keep requestId for retries; a reserved task must reuse it. Completion wakes the coordinator: end your turn, do not poll. Review evidence separately before marking done.",
+    "Coordinator: start the worker for a ready team task. workstreamThreadId reuses an open, stopped, completed app-owned child of this coordinator with its existing provider/model/workspace; root or previous-coordinator conversations need explicit recovery. Omit it to create a durable workstream using the role's provider/model or inheriting yours. Worktree isolation by default for new workers. Check orchestrator_capabilities for model choices. Keep requestId and destination for retries; a reserved task must reuse them. Busy or uncertain ownership blocks reuse. Completion wakes the coordinator: end your turn, do not poll. Review evidence separately before marking done.",
   parameters: Teamwork.TeamworkDelegateInput,
   success: OrchestratorMcpDelegateTaskResult,
 })
   .annotate(Tool.Destructive, true)
   .annotate(Tool.OpenWorld, true)
   .annotate(McpSchema.EnabledWhen, Invocation.hiddenFromOutsideClients);
-export const TeamworkToolkit = Toolkit.make(read, update, delegate);
+const conversationRead = Tool.make("t3_crew_conversations", {
+  ...shared,
+  description:
+    "Read this project's linked persistent workstreams, consultations, handoffs or coordinator attention. Use scope with the caller's environment/project and collection; follow nextCursor. Canonical source references preserve attribution; read their source conversation with its access checks. Queued delivery is not proof the provider considered it. Ordinary independent threads do not participate until explicitly linked.",
+  parameters: CrewConversationQuery,
+  success: CrewConversationPage,
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, Invocation.hiddenFromOutsideClients);
+const conversationCommand = Tool.make("t3_crew_conversation_command", {
+  ...shared,
+  description:
+    "Coordinator: manage persistent workstreams, correlated specialist consultations and visible handoffs. Use current Crew revision and a unique commandId; reuse only an identical retry. Consult the existing linked thread with consultation.request using exact canonical origin/context references; its actual final answer returns to that origin. Follow-ups use replyTo consultationId/responseId. Do not use board.post for consultations or create a replacement specialist for a question. A handoff requires a visible explanation at the origin and reconciled implementation ownership; forwarding never authorizes a second owner. Link/status changes start no work and never resume paused implementation. Human-only questions, secrets and approvals remain human-only. Unsupported coordinator capabilities are a blocker; never silently switch providers or implement yourself.",
+  parameters: CrewConversationCommand,
+  success: CrewConversationReceipt,
+})
+  .annotate(Tool.Destructive, true)
+  .annotate(McpSchema.EnabledWhen, Invocation.hiddenFromOutsideClients);
+export const TeamworkToolkit = Toolkit.make(
+  read,
+  update,
+  delegate,
+  conversationRead,
+  conversationCommand,
+);

@@ -34,6 +34,12 @@ import {
   ChatGptHandoffState,
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
+import {
+  CrewConversationCommand,
+  CrewConversationQuery,
+  CrewConversationPage,
+  CrewConversationReceipt,
+} from "./crewConversation.ts";
 import { OutpostSessionInput } from "./polytoken.ts";
 import {
   OutpostSurfaceState,
@@ -586,6 +592,8 @@ export const WS_METHODS = {
   teamworkSubscribe: "teamwork.subscribe",
   teamworkMutate: "teamwork.mutate",
   teamworkHistory: "teamwork.history",
+  crewConversationCommand: "crew.conversation.command",
+  crewConversationQuery: "crew.conversation.query",
   scheduledTasksUpsert: "scheduledTasks.upsert",
   scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
   scheduledTasksDelete: "scheduledTasks.delete",
@@ -2132,6 +2140,16 @@ const WsTeamworkHistoryRpc = Rpc.make(WS_METHODS.teamworkHistory, {
   success: TeamworkHistoryResult,
   error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
 });
+const WsCrewConversationCommandRpc = Rpc.make(WS_METHODS.crewConversationCommand, {
+  payload: CrewConversationCommand,
+  success: CrewConversationReceipt,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+});
+const WsCrewConversationQueryRpc = Rpc.make(WS_METHODS.crewConversationQuery, {
+  payload: CrewConversationQuery,
+  success: CrewConversationPage,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+});
 
 const WsScheduledTasksUpsertRpc = Rpc.make(WS_METHODS.scheduledTasksUpsert, {
   payload: ScheduledTaskUpsertInput,
@@ -2290,6 +2308,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsTeamworkSubscribeRpc,
   WsTeamworkMutateRpc,
   WsTeamworkHistoryRpc,
+  WsCrewConversationCommandRpc,
+  WsCrewConversationQueryRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,

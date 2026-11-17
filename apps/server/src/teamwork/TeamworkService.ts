@@ -37,6 +37,16 @@ import { RuntimeMode, ProviderInteractionMode } from "@t3tools/contracts";
 import { decideTeamwork, emptyTeamwork } from "./decide.ts";
 import { crewContext } from "./context.ts";
 import { CrewArtifacts } from "./CrewArtifacts.ts";
+import { makeCrewConversations } from "./CrewConversations.ts";
+import {
+  CrewWorkstream,
+  CrewWorkstreamTaskLink,
+  type CrewConversationCommand,
+  type CrewConversationQuery,
+  type CrewConversationPage,
+  type CrewConversationReceipt,
+} from "@t3tools/contracts/crewConversation";
+import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 
 const DeliveryPayload = Schema.Struct({
   text: Schema.String,
@@ -60,6 +70,11 @@ const decodeArchive = Schema.decodeUnknownEffect(Schema.fromJsonString(TeamworkA
 const decodeContext = Schema.decodeUnknownEffect(Schema.fromJsonString(TeamworkContext));
 const encodeArchive = Schema.encodeEffect(Schema.fromJsonString(TeamworkArchive));
 const encodeDelivery = Schema.encodeEffect(Schema.fromJsonString(DeliveryPayload));
+const encodeWorkstream = Schema.encodeEffect(Schema.fromJsonString(CrewWorkstream));
+const encodeTaskLink = Schema.encodeEffect(Schema.fromJsonString(CrewWorkstreamTaskLink));
+const encodeDestinationKey = Schema.encodeEffect(
+  Schema.fromJsonString(Schema.Array(Schema.String)),
+);
 const isTeamworkError = Schema.is(TeamworkError);
 const storageError = (cause: unknown) =>
   isTeamworkError(cause)
@@ -95,6 +110,24 @@ export class TeamworkService extends Context.Service<
       actor?: ThreadId | null,
     ) => Effect.Effect<TeamworkReadResult, TeamworkError>;
     readonly drain: Effect.Effect<void>;
+    readonly conversationCommand: (
+      input: CrewConversationCommand,
+      actor?: ThreadId | null,
+    ) => Effect.Effect<CrewConversationReceipt, TeamworkError>;
+    readonly conversationQuery: (
+      input: CrewConversationQuery,
+      actor?: ThreadId | null,
+    ) => Effect.Effect<CrewConversationPage, TeamworkError>;
+    readonly observeConversationEvent: (
+      event: import("@t3tools/contracts").OrchestrationV2StoredEvent,
+    ) => Effect.Effect<void, TeamworkError>;
+    readonly bindImplementationDestination: (
+      projectId: ProjectId,
+      taskId: string,
+      attemptId: string,
+      destination: ThreadId | null,
+      actor: ThreadId,
+    ) => Effect.Effect<void, TeamworkError>;
   }
 >()("t3/teamwork/TeamworkService") {}
 
@@ -103,6 +136,7 @@ const make = Effect.gen(function* () {
   const projects = yield* ProjectStore.ProjectStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const artifacts = yield* CrewArtifacts;
+  const environmentId = yield* (yield* ServerEnvironmentIdentity).getEnvironmentId;
   const locks = yield* KeyedLock.make<ProjectId>();
   const changes = yield* PubSub.unbounded<ProjectId>();
 
@@ -182,7 +216,7 @@ const make = Effect.gen(function* () {
           ORDER BY revision DESC, id DESC
         ) AS stop_rank FROM project_teamwork_outbox
         WHERE project_id = ${projectId} AND kind = 'stop' AND status != 'cancelled'
-      ) SELECT id, thread_id AS "threadId", kind, status,
+      ) SELECT id, thread_id AS "threadId", CASE WHEN kind LIKE 'crew-%' THEN 'message' ELSE kind END AS kind, status,
         json_extract(payload_json, '$.initiativeId') AS "initiativeId",
         json_extract(payload_json, '$.taskId') AS "taskId"
         FROM project_teamwork_outbox WHERE project_id = ${projectId}
@@ -296,7 +330,7 @@ const make = Effect.gen(function* () {
         initiativeId === undefined
           ? []
           : yield* sql<{ payload_json: string }>`
-        SELECT payload_json FROM project_teamwork_archive
+      SELECT payload_json FROM project_teamwork_archive
         WHERE project_id = ${input.projectId} AND initiative_id = ${initiativeId}`;
       return yield* decodeHistory({
         events: [],
@@ -312,6 +346,7 @@ const make = Effect.gen(function* () {
       created_at: string;
     }>`SELECT revision, actor_thread_id, action_json, created_at FROM project_teamwork_events
       WHERE project_id = ${input.projectId} AND revision < ${input.beforeRevision ?? Number.MAX_SAFE_INTEGER}
+      AND json_extract(action_json, '$.type') != 'crew.conversation'
       AND (${input.atRevision ?? null} IS NULL OR revision = ${input.atRevision ?? null})
       AND (${input.taskId ?? null} IS NULL OR (json_extract(action_json, '$.id') = ${input.taskId ?? null}
         AND json_extract(action_json, '$.type') LIKE 'task.%'))
@@ -383,6 +418,16 @@ const make = Effect.gen(function* () {
     });
   }, Effect.mapError(storageError));
 
+  const conversations = yield* makeCrewConversations({
+    environmentId,
+    threads,
+    locks,
+    load,
+    authorize,
+    requireThread,
+    requireStopped,
+    changed: (projectId) => PubSub.publish(changes, projectId),
+  });
   const deliver = Effect.fn("TeamworkService.deliver")(function* (projectId: ProjectId) {
     const acceptedStops: Array<{
       readonly id: string;
@@ -396,6 +441,14 @@ const make = Effect.gen(function* () {
       payload_json: string;
     }>`SELECT id, thread_id, kind, payload_json FROM project_teamwork_outbox WHERE project_id = ${projectId} AND status = 'pending' ORDER BY revision, id`;
     for (const row of pending) {
+      if (row.kind.startsWith("crew-")) {
+        yield* conversations.deliver({
+          ...row,
+          project_id: projectId,
+          thread_id: ThreadId.make(row.thread_id),
+        });
+        continue;
+      }
       const payload = yield* decodeDelivery(row.payload_json);
       const commandId = CommandId.make(
         `teamwork:${row.id}${payload.stopCommandId === undefined ? "" : `:retry:${payload.stopCommandId}`}`,
@@ -510,6 +563,32 @@ const make = Effect.gen(function* () {
     if (pending.length) yield* PubSub.publish(changes, projectId);
   }, Effect.mapError(storageError));
   const worker = yield* makeDrainableWorker(deliver);
+
+  const cursor = yield* sql<{
+    sequence: number;
+  }>`SELECT sequence FROM project_crew_event_cursor WHERE id = 1`;
+  let observedSequence = cursor[0]?.sequence ?? 0;
+  const meaningful = (stored: import("@t3tools/contracts").OrchestrationV2StoredEvent) =>
+    stored.event.type === "run.updated" ||
+    stored.event.type === "runtime-request.updated" ||
+    (stored.event.type === "message.updated" &&
+      stored.event.payload.role === "user" &&
+      !stored.event.payload.streaming);
+  const observe = Effect.fn("TeamworkService.observeConversation")(function* (
+    stored: import("@t3tools/contracts").OrchestrationV2StoredEvent,
+  ) {
+    if (stored.sequence <= observedSequence) return;
+    const projectId = yield* conversations.observe(stored);
+    yield* sql`UPDATE project_crew_event_cursor SET sequence = max(sequence, ${stored.sequence}) WHERE id = 1`;
+    observedSequence = stored.sequence;
+    if (projectId !== null) yield* worker.enqueue(projectId);
+  }, Effect.mapError(storageError));
+  yield* threads.streamStoredEventsFrom({ afterSequence: observedSequence }).pipe(
+    Stream.filter(meaningful),
+    Stream.runForEach(observe),
+    Effect.catch((error) => Effect.logError("Crew conversation observation stopped", error)),
+    Effect.forkScoped,
+  );
 
   const mutate = Effect.fn("TeamworkService.mutate")(function* (
     input: TeamworkMutateInput,
@@ -681,6 +760,7 @@ const make = Effect.gen(function* () {
             archive,
           );
           if (input.action.type === "task.assign") {
+            const action = input.action;
             const child = yield* requireThread(input.projectId, input.action.threadId);
             if (
               child.lineage.parentThreadId !== state.coordinatorThreadId ||
@@ -690,6 +770,28 @@ const make = Effect.gen(function* () {
                 reason: "invalid-state",
                 message: "Assign only a child delegated by this project's coordinator.",
               });
+            const task = state.tasks.find((t) => t.id === action.id);
+            if (task && Result.isSuccess(decision)) {
+              const conversation = {
+                environmentId,
+                projectId: input.projectId,
+                threadId: child.id,
+              };
+              const member = yield* encodeWorkstream({
+                conversation,
+                title: task.title.slice(0, 160),
+                status: "open",
+                linkedAt: now,
+                updatedAt: now,
+              });
+              const link = yield* encodeTaskLink({
+                workstream: conversation,
+                initiativeId: task.initiativeId,
+                taskId: task.id,
+              });
+              yield* sql`INSERT INTO project_crew_conversations VALUES (${input.projectId}, 'workstreams', ${child.id}, ${child.id}, ${member}) ON CONFLICT DO NOTHING`;
+              yield* sql`INSERT INTO project_crew_conversations VALUES (${input.projectId}, 'task-links', ${task.id}, ${child.id}, ${link}) ON CONFLICT DO NOTHING`;
+            }
           }
           if (Result.isFailure(decision)) return yield* decision.failure;
           const { snapshot, intents } = decision.success;
@@ -762,6 +864,45 @@ const make = Effect.gen(function* () {
     history,
     execution,
     mutate,
+    conversationQuery: conversations.query,
+    observeConversationEvent: observe,
+    bindImplementationDestination: Effect.fn("TeamworkService.bindImplementationDestination")(
+      function* (projectId, taskId, attemptId, destination, actor) {
+        yield* authorize(projectId, actor);
+        yield* locks.withLock(
+          projectId,
+          sql.withTransaction(
+            Effect.gen(function* () {
+              const state = yield* load(projectId);
+              const task = state.tasks.find((t) => t.id === taskId && t.delegationId === attemptId);
+              if (state.coordinatorThreadId !== actor || task?.status !== "delegating")
+                return yield* new TeamworkError({
+                  reason: "invalid-state",
+                  message: "Only the coordinator can bind the current implementation reservation.",
+                });
+              const id = yield* encodeDestinationKey([taskId, attemptId]);
+              const value = destination ?? "";
+              const rows = yield* sql<{
+                thread_id: string;
+              }>`SELECT thread_id FROM project_crew_conversations WHERE project_id = ${projectId} AND collection = 'implementation-destinations' AND id = ${id}`;
+              if (rows[0] && rows[0].thread_id !== value)
+                return yield* new TeamworkError({
+                  reason: "conflict",
+                  message:
+                    "This reserved attempt already selected a different implementation destination. Preserve the destination when retrying.",
+                });
+              yield* sql`INSERT INTO project_crew_conversations VALUES (${projectId}, 'implementation-destinations', ${id}, ${value}, '{}') ON CONFLICT DO NOTHING`;
+            }),
+          ),
+        );
+      },
+      Effect.mapError(storageError),
+    ),
+    conversationCommand: Effect.fn("TeamworkService.conversationCommand")((input, actor) =>
+      conversations
+        .command(input, actor)
+        .pipe(Effect.tap(() => worker.enqueue(input.scope.projectId))),
+    ),
     drain: worker.drain,
     subscribe: (projectId) =>
       Stream.unwrap(
