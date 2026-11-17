@@ -318,6 +318,8 @@ export const TeamworkDelivery = Schema.Struct({
   threadId: ThreadId,
   status: Schema.Literals(["pending", "delivered", "failed", "cancelled"]),
   kind: Schema.Literals(["message", "stop"]),
+  initiativeId: Schema.optional(Schema.NullOr(Id)),
+  taskId: Schema.optional(Schema.NullOr(Id)),
 });
 export const TeamworkReadResult = Schema.Struct({
   capabilities: Schema.optional(

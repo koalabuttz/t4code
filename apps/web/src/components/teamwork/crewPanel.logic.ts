@@ -82,6 +82,12 @@ export function crewSupervisionFacts(
         : null;
   };
   return {
+    threadExecution: shells.map((shell) =>
+      crewTaskExecution(
+        { id: shell.id, ownerThreadId: shell.id, status: "done" },
+        worker(shell.id),
+      ),
+    ),
     execution: snapshot.tasks.map((task) => crewTaskExecution(task, worker(task.ownerThreadId))),
     coordinatorExecution: snapshot.coordinatorThreadId
       ? crewTaskExecution(

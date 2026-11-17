@@ -58,6 +58,12 @@ export function mobileCrewSupervision(
   const coordinator = data.snapshot.coordinatorThreadId;
   return classifyCrewSupervision({
     snapshot: data.snapshot,
+    threadExecution: threads.map((thread) =>
+      crewTaskExecution(
+        { id: thread.id, ownerThreadId: thread.id, status: "done" },
+        execution(thread.id),
+      ),
+    ),
     execution: data.snapshot.tasks.map((task) =>
       crewTaskExecution(task, execution(task.ownerThreadId)),
     ),

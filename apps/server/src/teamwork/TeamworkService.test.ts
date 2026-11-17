@@ -310,6 +310,8 @@ it.effect(
         (delivery) => delivery.kind === "stop",
       )!;
       assert.equal(stop.status, "failed");
+      assert.equal(stop.initiativeId, "initiative");
+      assert.equal(stop.taskId, "task");
       yield* update({
         type: "task.create",
         id: "parallel",

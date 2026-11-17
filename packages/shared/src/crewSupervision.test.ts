@@ -371,6 +371,62 @@ describe("Crew supervision", () => {
       kind: "message-failed",
       action: { kind: "resume", initiativeId: "one" },
     });
+    const reset = {
+      ...paused,
+      snapshot: snapshot({
+        initiatives: [initiative({ status: "paused" })],
+        tasks: [task({ status: "ready", ownerThreadId: null })],
+      }),
+      execution: [
+        {
+          taskId: "task",
+          threadId: null,
+          state: "unassigned",
+          detail: null,
+          needsAttention: false,
+        },
+      ] as const,
+      threadExecution: [{ threadId: worker, state: "working", detail: null }] as const,
+    };
+    for (const status of ["pending", "failed", "delivered"] as const) {
+      const result = classifyCrewSupervision({
+        ...reset,
+        deliveries: [
+          {
+            id: "old-stop",
+            threadId: worker,
+            kind: "stop",
+            status,
+            initiativeId: "one",
+            taskId: "task",
+          },
+        ],
+      });
+      expect(result.initiatives[0]?.pause.state).toBe(status === "failed" ? "failed" : "stopping");
+      expect(result.initiatives[0]?.resume.prerequisites).toContainEqual({
+        kind: "wait-worker",
+        threadId: worker,
+      });
+      if (status !== "delivered")
+        expect(result.attention.find((item) => item.deliveryId === "old-stop")).toMatchObject({
+          initiativeId: "one",
+          taskId: "task",
+        });
+    }
+    for (const provenance of [{ initiativeId: "one", taskId: "task" }, {}]) {
+      const result = classifyCrewSupervision({
+        ...reset,
+        threadExecution: [],
+        deliveries: [
+          { id: "old-stop", threadId: worker, kind: "stop", status: "delivered", ...provenance },
+        ],
+      });
+      expect(result.initiatives[0]?.pause.state).toBe("unknown");
+      expect(result.initiatives[0]?.resume.prerequisites).toContainEqual({
+        kind: "verify-execution",
+        threadId: worker,
+      });
+    }
   });
 
   it("surfaces coordinator failures, failed messages and project-wide handover prerequisites", () => {

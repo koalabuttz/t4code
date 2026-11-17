@@ -172,8 +172,10 @@ const make = Effect.gen(function* () {
   ) {
     yield* authorize(projectId, actor);
     const snapshot = yield* load(projectId);
-    const rows =
-      yield* sql`SELECT id, thread_id AS "threadId", kind, status FROM project_teamwork_outbox WHERE project_id = ${projectId} ORDER BY revision DESC, id DESC LIMIT 60`;
+    const rows = yield* sql`SELECT id, thread_id AS "threadId", kind, status,
+        json_extract(payload_json, '$.initiativeId') AS "initiativeId",
+        json_extract(payload_json, '$.taskId') AS "taskId"
+        FROM project_teamwork_outbox WHERE project_id = ${projectId} ORDER BY revision DESC, id DESC LIMIT 60`;
     return yield* decodeRead({
       snapshot,
       deliveries: rows,

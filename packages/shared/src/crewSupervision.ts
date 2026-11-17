@@ -31,6 +31,7 @@ export interface CrewSupervisionInput {
   readonly coordinatorExecution: Execution | null;
   readonly deliveries: TeamworkReadResult["deliveries"];
   readonly freshness: Freshness;
+  readonly threadExecution?: ReadonlyArray<Execution>;
   // Supply only facts about the thread's current pending question.
   readonly inputRequests?: ReadonlyArray<{
     readonly threadId: ThreadId;
@@ -154,6 +155,8 @@ export function classifyCrewSupervision(input: CrewSupervisionInput) {
   };
   const observed = new Map<string, Execution>();
   const threadExecution = new Map<ThreadId, Execution>();
+  for (const execution of input.threadExecution ?? [])
+    if (execution.threadId !== null) threadExecution.set(execution.threadId, execution);
   for (const task of snapshot.tasks) {
     const fact = executions.get(task.id);
     const execution = fact?.threadId === task.ownerThreadId ? fact : crewTaskExecution(task, null);
@@ -418,7 +421,10 @@ export function classifyCrewSupervision(input: CrewSupervisionInput) {
       });
   }
 
-  const deliveryInitiative = (threadId: ThreadId) => {
+  const deliveryInitiative = (delivery: (typeof deliveries)[number]) => {
+    if (delivery.initiativeId != null)
+      return initiatives.has(delivery.initiativeId) ? delivery.initiativeId : null;
+    const threadId = delivery.threadId;
     if (threadId === snapshot.coordinatorThreadId) return null;
     const ids = new Set(
       snapshot.tasks
@@ -431,13 +437,16 @@ export function classifyCrewSupervision(input: CrewSupervisionInput) {
     if (delivery.status !== "failed" && delivery.status !== "pending") continue;
     const failed = delivery.status === "failed";
     const stop = delivery.kind === "stop";
-    const initiativeId = deliveryInitiative(delivery.threadId);
+    const initiativeId = deliveryInitiative(delivery);
     const pausedMessage =
       !stop && initiativeId !== null && initiatives.get(initiativeId)?.status === "paused";
     add({
       id: `delivery:${delivery.id}`,
       initiativeId,
-      taskId: null,
+      taskId:
+        delivery.taskId != null && tasks.get(delivery.taskId)?.initiativeId === initiativeId
+          ? delivery.taskId
+          : null,
       deliveryId: delivery.id,
       threadId: delivery.threadId,
       kind: stop
@@ -498,6 +507,46 @@ export function classifyCrewSupervision(input: CrewSupervisionInput) {
     const threadIds = new Set(
       owned.flatMap((task) => (task.ownerThreadId === null ? [] : [task.ownerThreadId])),
     );
+    for (const delivery of deliveries) {
+      if (delivery.kind !== "stop" || delivery.status === "cancelled") continue;
+      const origin = deliveryInitiative(delivery);
+      if (
+        origin === initiative.id ||
+        (origin === null && delivery.threadId !== snapshot.coordinatorThreadId)
+      )
+        threadIds.add(delivery.threadId);
+    }
+    for (const threadId of threadIds) {
+      if (owned.some((task) => task.ownerThreadId === threadId)) continue;
+      const execution = threadExecution.get(threadId);
+      if (current && execution && !active(execution.state) && !uncertain(execution.state)) continue;
+      const delivery = deliveries.find(
+        (item) =>
+          item.kind === "stop" &&
+          item.threadId === threadId &&
+          deliveryInitiative(item) === initiative.id,
+      );
+      const running = current && execution !== undefined && active(execution.state);
+      add({
+        id: `detached:${initiative.id}:${threadId}`,
+        initiativeId: initiative.id,
+        taskId:
+          delivery?.taskId != null && tasks.get(delivery.taskId)?.initiativeId === initiative.id
+            ? delivery.taskId
+            : null,
+        threadId,
+        kind: running ? "stopping" : "execution-unknown",
+        label: running ? "Previous worker is still active" : "Previous worker stop is unconfirmed",
+        detail: delivery
+          ? "Resetting its assignment did not confirm execution stopped."
+          : "This project stop has no established initiative; it may affect this work.",
+        responsibility: "unknown",
+        actor: unknown,
+        attention: true,
+        lastKnownState: execution?.state ?? null,
+        action: { kind: "open-thread", threadId },
+      });
+    }
     const stops = stopPrerequisites(threadIds);
     for (const task of owned)
       if (task.ownerThreadId === null && ["delegating", "running", "blocked"].includes(task.status))
