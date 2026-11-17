@@ -17,13 +17,15 @@ export function CrewContextView({
   state,
   preview,
   onOpenThread,
+  initialThreadId,
 }: {
   environmentId: EnvironmentId;
   state: TeamworkSnapshot;
   preview: TeamworkContext | null;
   onOpenThread: (id: ThreadId) => void;
+  initialThreadId?: ThreadId | null | undefined;
 }) {
-  const [selectedThreadId, setThreadId] = useState(state.coordinatorThreadId);
+  const [selectedThreadId, setThreadId] = useState(initialThreadId ?? state.coordinatorThreadId);
   const members = [
     ...new Set(
       [state.coordinatorThreadId, ...state.tasks.map((t) => t.ownerThreadId)].filter(

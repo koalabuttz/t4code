@@ -30,6 +30,7 @@ import {
   EnvironmentId,
   isProviderNativeSubagentThread,
   MessageId,
+  ProjectId,
   ThreadId,
   type ProjectScript,
 } from "@t3tools/contracts";
@@ -83,6 +84,8 @@ import {
 } from "../terminal/terminalLaunchContext";
 import type { ThreadDetailScreenProps } from "./ThreadDetailScreen";
 import { ThreadScreenBinding, ThreadScreenFallback, ThreadScreenHost } from "./ThreadScreenHost";
+import { CrewConversationReturn } from "./CrewConversationReturn";
+import type { CrewPage } from "./TeamworkSheet";
 import { draftRouteIdentity } from "./thread-route-state";
 import { NewTaskDraftRouteScreen, type NewTaskDraftRouteParams } from "./NewTaskDraftRouteScreen";
 import { GitOverviewSheet } from "./git/GitOverviewSheet";
@@ -172,6 +175,8 @@ type ThreadRouteScreenRouteProps = StaticScreenProps<{
   readonly draft?: NewTaskDraftRouteParams;
   readonly inspector?: ThreadInspectorTarget;
   readonly prompt?: string | string[];
+  readonly crewProjectId?: string;
+  readonly crewPage?: CrewPage;
 }>;
 
 interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
@@ -235,6 +240,16 @@ function UnavailableThreadDraftRedirect(props: { readonly environmentId: Environ
 export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
   return (
     <ThreadScreenHost>
+      {props.route.params?.crewProjectId &&
+        props.route.params.environmentId &&
+        props.route.params.threadId && (
+          <CrewConversationReturn
+            environmentId={EnvironmentId.make(props.route.params.environmentId)}
+            projectId={ProjectId.make(props.route.params.crewProjectId)}
+            threadId={ThreadId.make(props.route.params.threadId)}
+            page={props.route.params.crewPage ?? "overview"}
+          />
+        )}
       {props.route.params?.draft ? (
         <NewTaskDraftRouteScreen
           key={draftRouteIdentity(props.route.params.draft)}
