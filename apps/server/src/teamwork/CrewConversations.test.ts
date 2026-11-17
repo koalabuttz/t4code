@@ -18,7 +18,9 @@ import * as Stream from "effect/Stream";
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as SqlStatement from "effect/sql/Statement";
 import * as Sqlite from "../persistence/Sqlite.ts";
+import crewVisibleMessageIndexes from "../persistence/Migrations/100_CrewVisibleMessageIndexes.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
@@ -563,6 +565,9 @@ it.effect(
           ?.status,
         "failed",
       );
+      yield* sql`DROP INDEX project_crew_conversations_origin_message`;
+      yield* sql`DROP INDEX project_crew_conversations_explanation_message`;
+      yield* crewVisibleMessageIndexes;
       const ordinary = yield* teams.conversationQuery({
         scope,
         collection: "consultations",
@@ -620,6 +625,26 @@ it.effect(
         ["history-102"],
       );
       assert.deepEqual(visibleHandoffs.handoffs[0]?.ownership, route.ownership);
+      const overlappingHandoff = yield* teams.conversationQuery({
+        scope,
+        collection: "handoffs",
+        threadId: worker,
+        messageIds: [MessageId.make("history-102"), visibleExplanation, visibleExplanation],
+      });
+      assert.deepEqual(
+        overlappingHandoff.handoffs.map((record) => record.id),
+        ["history-102"],
+      );
+      for (const filter of [{ id: "history-101" }, { cursor: "history-102" }]) {
+        const excluded = yield* teams.conversationQuery({
+          scope,
+          collection: "handoffs",
+          threadId: worker,
+          messageIds: [MessageId.make("history-102"), visibleExplanation],
+          ...filter,
+        });
+        assert.deepEqual(excluded.handoffs, []);
+      }
       const wrongThreadSelection = yield* teams.conversationQuery({
         scope,
         collection: "consultations",
@@ -661,6 +686,69 @@ it.effect(
         exactSelected.consultations.map((record) => record.id),
         ["history-101"],
       );
+      for (const collection of ["consultations", "handoffs"] as const) {
+        for (const messageIds of [
+          [collection === "consultations" ? visibleQuestion : visibleExplanation],
+          [MessageId.make("no-visible-exchange")],
+        ]) {
+          const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+          const page = yield* teams
+            .conversationQuery({
+              scope,
+              collection,
+              threadId: collection === "consultations" ? coordinator : worker,
+              messageIds,
+              limit: 100,
+              ...(messageIds[0] === "no-visible-exchange" ? {} : { cursor: "history-099" }),
+            })
+            .pipe(
+              Effect.provideService(SqlStatement.CurrentTransformer, (statement) =>
+                Effect.sync(() => {
+                  const compiled = statement.compile();
+                  if (compiled[0].includes("project_crew_conversations")) statements.push(compiled);
+                  return statement;
+                }),
+              ),
+            );
+          assert.equal(statements.length, 1);
+          const [statement, parameters] = statements[0]!;
+          const plan = (yield* sql.unsafe<{ detail: string }>(
+            `EXPLAIN QUERY PLAN ${statement}`,
+            parameters,
+          )).map((row) => row.detail);
+          if (messageIds[0] === "no-visible-exchange") {
+            assert.deepEqual(page.consultations, []);
+            assert.deepEqual(page.handoffs, []);
+          }
+          assert.isTrue(
+            plan.some(
+              (detail) =>
+                detail.includes("project_crew_conversations_origin_message") &&
+                detail.includes("project_id=? AND collection=? AND <expr>=? AND <expr>=? AND id>?"),
+            ),
+            plan.join("\n"),
+          );
+          if (collection === "handoffs")
+            assert.isTrue(
+              plan.some(
+                (detail) =>
+                  detail.includes("project_crew_conversations_explanation_message") &&
+                  detail.includes(
+                    "project_id=? AND collection=? AND <expr>=? AND <expr>=? AND id>?",
+                  ),
+              ),
+              plan.join("\n"),
+            );
+          assert.isFalse(
+            plan.some((detail) => /SCAN (?:project_crew_conversations|record)\b/.test(detail)),
+            plan.join("\n"),
+          );
+          for (const detail of plan.filter((row) =>
+            row.includes("sqlite_autoindex_project_crew_conversations_1"),
+          ))
+            assert.include(detail, "(project_id=? AND collection=? AND id=?)");
+        }
+      }
     }).pipe(
       Effect.provide(
         Teamwork.layer.pipe(

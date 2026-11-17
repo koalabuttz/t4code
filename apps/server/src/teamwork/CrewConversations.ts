@@ -605,26 +605,48 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
         );
     }
     const limit = input.limit ?? 40;
-    const messageIds = input.messageIds === undefined ? null : yield* encodeState(input.messageIds);
-    const rows = yield* sql<{
-      id: string;
-      payload_json: string;
-    }>`SELECT id, payload_json FROM project_crew_conversations
-      WHERE project_id = ${projectId} AND collection = ${input.collection} AND id > ${input.cursor ?? ""}
-      AND (${input.id ?? null} IS NULL OR id = ${input.id ?? null})
-      AND (${input.threadId ?? null} IS NULL OR thread_id = ${input.threadId ?? null}
-        OR json_extract(payload_json, '$.origin.conversation.threadId') = ${input.threadId ?? null})
-      AND (${messageIds} IS NULL OR (
-        json_extract(payload_json, '$.origin.conversation.environmentId') = ${input.scope.environmentId}
-        AND json_extract(payload_json, '$.origin.conversation.projectId') = ${projectId}
-        AND json_extract(payload_json, '$.origin.conversation.threadId') = ${input.threadId ?? null}
-        AND (json_extract(payload_json, '$.origin.messageId') IN (SELECT value FROM json_each(${messageIds}))
-          OR (${input.collection} = 'handoffs'
-            AND json_extract(payload_json, '$.explanation.conversation.environmentId') = ${input.scope.environmentId}
-            AND json_extract(payload_json, '$.explanation.conversation.projectId') = ${projectId}
-            AND json_extract(payload_json, '$.explanation.conversation.threadId') = ${input.threadId ?? null}
-            AND json_extract(payload_json, '$.explanation.messageId') IN (SELECT value FROM json_each(${messageIds}))))))
-      ORDER BY id LIMIT ${limit + 1}`;
+    const rows = yield* input.messageIds === undefined
+      ? sql<{
+          id: string;
+          payload_json: string;
+        }>`SELECT id, payload_json FROM project_crew_conversations
+          WHERE project_id = ${projectId} AND collection = ${input.collection} AND id > ${input.cursor ?? ""}
+          AND (${input.id ?? null} IS NULL OR id = ${input.id ?? null})
+          AND (${input.threadId ?? null} IS NULL OR thread_id = ${input.threadId ?? null}
+            OR json_extract(payload_json, '$.origin.conversation.threadId') = ${input.threadId ?? null})
+          ORDER BY id LIMIT ${limit + 1}`
+      : Effect.gen(function* () {
+          const messageIds = yield* encodeState(input.messageIds);
+          // UNION ordering can otherwise make SQLite scan the collection's primary-key range.
+          const origin = sql`SELECT id FROM project_crew_conversations INDEXED BY project_crew_conversations_origin_message
+            WHERE project_id = ${projectId} AND collection = ${input.collection}
+            AND json_extract(payload_json, '$.origin.conversation.threadId') = ${input.threadId ?? null}
+            AND json_extract(payload_json, '$.origin.messageId') IN (SELECT value FROM json_each(${messageIds}))
+            AND id > ${input.cursor ?? ""}
+            AND (${input.id ?? null} IS NULL OR id = ${input.id ?? null})
+            AND json_extract(payload_json, '$.origin.conversation.environmentId') = ${input.scope.environmentId}
+            AND json_extract(payload_json, '$.origin.conversation.projectId') = ${projectId}`;
+          const selected =
+            input.collection === "handoffs"
+              ? sql`${origin} UNION SELECT id FROM project_crew_conversations INDEXED BY project_crew_conversations_explanation_message
+                WHERE project_id = ${projectId} AND collection = ${input.collection}
+                AND json_extract(payload_json, '$.explanation.conversation.threadId') = ${input.threadId ?? null}
+                AND json_extract(payload_json, '$.explanation.messageId') IN (SELECT value FROM json_each(${messageIds}))
+                AND id > ${input.cursor ?? ""}
+                AND (${input.id ?? null} IS NULL OR id = ${input.id ?? null})
+                AND json_extract(payload_json, '$.explanation.conversation.environmentId') = ${input.scope.environmentId}
+                AND json_extract(payload_json, '$.explanation.conversation.projectId') = ${projectId}
+                AND json_extract(payload_json, '$.origin.conversation.threadId') = ${input.threadId ?? null}
+                AND json_extract(payload_json, '$.origin.conversation.environmentId') = ${input.scope.environmentId}
+                AND json_extract(payload_json, '$.origin.conversation.projectId') = ${projectId}`
+              : origin;
+          return yield* sql<{
+            id: string;
+            payload_json: string;
+          }>`SELECT id, payload_json FROM project_crew_conversations
+            WHERE project_id = ${projectId} AND collection = ${input.collection} AND id IN (${selected})
+            ORDER BY id LIMIT ${limit + 1}`;
+        });
     const entries = yield* Effect.forEach(rows.slice(0, limit), (row) =>
       decodeJson(row.payload_json),
     );
