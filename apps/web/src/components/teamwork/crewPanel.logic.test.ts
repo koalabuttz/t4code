@@ -1,18 +1,105 @@
 import {
   ProjectId,
   EnvironmentId,
+  CommandId,
+  MessageId,
+  RunId,
   RuntimeRequestId,
   ThreadId,
   type TeamworkSnapshot,
   type TeamworkTask,
 } from "@t3tools/contracts";
+import type { CrewConsultation } from "@t3tools/contracts/crewConversation";
 import * as DateTime from "effect/DateTime";
 import { expect, it } from "vite-plus/test";
 import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
 import { crewMessageRecipients, crewSupervisionFacts } from "./crewPanel.logic";
+import { crewChatExchanges, crewReturnedAnswer } from "./crewChat.logic";
 
 const workerId = ThreadId.make("worker");
 const coordinatorId = ThreadId.make("coordinator");
+
+it("attributes only the correlated server return at its origin across follow-ups", () => {
+  const scope = {
+    environmentId: EnvironmentId.make("machine"),
+    projectId: ProjectId.make("project"),
+  };
+  const origin = { ...scope, threadId: coordinatorId };
+  const destination = { ...scope, threadId: workerId };
+  const originMessage = {
+    conversation: origin,
+    messageId: MessageId.make("question"),
+    runId: null,
+    actor: "user",
+    sender: null,
+  } as const;
+  const source = {
+    conversation: destination,
+    messageId: MessageId.make("answer"),
+    runId: RunId.make("worker-run"),
+    actor: "agent",
+    sender: null,
+  } as const;
+  const consultation: CrewConsultation = {
+    id: "consult-1",
+    origin: originMessage,
+    destination,
+    deliveryId: CommandId.make("delivery-1"),
+    context: { replyTo: null, sources: [], attachments: [] },
+    replyTo: null,
+    progress: {
+      state: "answered",
+      exchange: {
+        request: { ...source, messageId: MessageId.make("request") },
+        response: source,
+        responseId: "response-1",
+      },
+    },
+    createdAt: "2026-11-17T00:00:00Z",
+    updatedAt: "2026-11-17T00:00:01Z",
+  };
+  const followUp: CrewConsultation = {
+    ...consultation,
+    id: "follow-up",
+    deliveryId: CommandId.make("delivery-2"),
+    origin: { ...originMessage, messageId: MessageId.make("next-question") },
+    replyTo: { consultationId: consultation.id, responseId: "response-1" },
+    progress: { state: "queued" },
+  };
+  const exchanges = crewChatExchanges(scope, coordinatorId, [consultation, followUp], []);
+  expect([...exchanges.byReturn.keys()]).toEqual(["delivery-1:return"]);
+  expect(exchanges.byOrigin.get(followUp.origin.messageId)).toEqual([followUp]);
+  expect(crewChatExchanges(scope, workerId, [consultation], []).byReturn.size).toBe(0);
+  expect(
+    crewChatExchanges(
+      { ...scope, environmentId: EnvironmentId.make("other") },
+      coordinatorId,
+      [consultation],
+      [],
+    ).byReturn.size,
+  ).toBe(0);
+  const returned = {
+    id: MessageId.make("delivery-1:return"),
+    text: `Crew consultation consult-1 answered. From worker. Canonical source: ${JSON.stringify(source)}\nAndroid draws behind the system bar.`,
+    creationSource: "server",
+    createdBy: "agent",
+    senderThreadId: workerId,
+  } as const;
+  expect(crewReturnedAnswer(returned, exchanges.byReturn.get(returned.id))).toBe(
+    "Android draws behind the system bar.",
+  );
+  expect(crewReturnedAnswer({ ...returned, createdBy: "user" }, consultation)).toBeNull();
+  expect(
+    crewReturnedAnswer({ ...returned, id: MessageId.make("delivery-2:return") }, consultation),
+  ).toBeNull();
+  expect(
+    crewReturnedAnswer(
+      { ...returned, text: returned.text.replace('"worker-run"', '"unrelated-run"') },
+      consultation,
+    ),
+  ).toBeNull();
+});
+
 function fixture() {
   const task: TeamworkTask = {
     id: "task",

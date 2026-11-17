@@ -296,6 +296,8 @@ import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { useCitedHistory } from "./chat/citationProcedure";
 import type { MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ThreadTimeline } from "./chat/ThreadTimeline";
+import { CrewChatControls } from "./teamwork/CrewChatControls";
+import { useCrewChatIdentity } from "./teamwork/crewChatState";
 import { NativeChildWorkDialog } from "./chat/NativeChildWorkDialog";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
@@ -1136,6 +1138,14 @@ export default function ChatView(props: ChatViewProps) {
       ? scopeProjectRef(activeThreadEnvironmentId, activeThreadProjectId)
       : null;
   const activeProject = useProject(activeProjectRef);
+  const crewScope =
+    !embedded && isServerThread && activeProject && !activeProject.isScratch
+      ? activeProjectRef
+      : null;
+  const { isCoordinator, workstreamTitle } = useCrewChatIdentity(crewScope, threadId);
+  const crewConversation = isCoordinator || workstreamTitle !== null;
+  const crewRequestId = useLocation({ select: (location) => location.state.crewRequestId });
+  const crewRequestRunId = useLocation({ select: (location) => location.state.crewRequestRunId });
   const activeProjectSettings = resolveProjectSettings(
     settings,
     activeProject?.id ?? null,
@@ -1403,6 +1413,8 @@ export default function ChatView(props: ChatViewProps) {
   } = usePendingThreadRequests({
     environmentId,
     activeThreadId,
+    requestedRuntimeRequestId: embedded ? undefined : crewRequestId,
+    requestedRuntimeRunId: embedded ? undefined : crewRequestRunId,
     serverProjection,
     supportsQuestionAttachments,
     composerDraftTarget,
@@ -3381,6 +3393,7 @@ export default function ChatView(props: ChatViewProps) {
               parentThreadLink={headerParentThreadLink}
               onOpenThread={onOpenRelatedThreadStable}
               rightPanelOpen={inlineRightPanelOwnsTitleBar}
+              crewConversation={crewConversation}
               onNewThreadInProject={handleNewThreadInActiveProjectStable}
               {...(activeDraftLogicalProjectKey
                 ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
@@ -3389,6 +3402,15 @@ export default function ChatView(props: ChatViewProps) {
             />
           </header>
         )}
+        {crewScope && crewConversation ? (
+          <CrewChatControls
+            key={routeThreadKey}
+            scope={crewScope}
+            threadId={threadId}
+            coordinator={isCoordinator}
+            workstreamTitle={workstreamTitle}
+          />
+        ) : null}
 
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <ThreadFindCanvas
@@ -3440,6 +3462,7 @@ export default function ChatView(props: ChatViewProps) {
                   onRespondToApproval={onRespondToApprovalStable}
                   canOperateThread={canOperateThread}
                   threadDetailRef={routeThreadDetailRef}
+                  crewScope={crewConversation ? crewScope : null}
                   entriesInput={timelineEntriesInput}
                   draftEntries={isServerThread ? null : draftTimelineEntries}
                   activeThreadKey={activeThreadKey}
@@ -3628,6 +3651,7 @@ export default function ChatView(props: ChatViewProps) {
                             ) : null}
                             {!composerMounted ? null : (
                               <ChatComposer
+                                crewCoordinator={isCoordinator}
                                 canOperateThread={canOperateThread}
                                 reportedModelSelection={reportedModelSelection}
                                 multipleModelSelections={multipleModelSelections}

@@ -272,6 +272,8 @@ function makePendingCustomAnswerSetter(input: {
 export function usePendingThreadRequests(input: {
   readonly environmentId: EnvironmentId;
   readonly activeThreadId: ThreadId | null;
+  readonly requestedRuntimeRequestId?: string | undefined;
+  readonly requestedRuntimeRunId?: string | undefined;
   readonly serverProjection: ThreadStructure | null;
   readonly supportsQuestionAttachments: boolean;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
@@ -283,6 +285,8 @@ export function usePendingThreadRequests(input: {
   const {
     environmentId,
     activeThreadId,
+    requestedRuntimeRequestId,
+    requestedRuntimeRunId,
     serverProjection,
     supportsQuestionAttachments,
     composerDraftTarget,
@@ -330,7 +334,25 @@ export function usePendingThreadRequests(input: {
     pendingRequests.userInputs.length === 0
       ? NO_PENDING_USER_INPUTS
       : derivePendingUserInputs(pendingRequests.userInputs);
-  const activePendingUserInput = pendingUserInputs[0] ?? null;
+  const requested =
+    requestedRuntimeRequestId && serverProjection?.thread.id === activeThreadId
+      ? serverProjection.runtimeRequests.find(
+          (request) =>
+            request.id === requestedRuntimeRequestId &&
+            request.status === "pending" &&
+            (requestedRuntimeRunId === undefined ||
+              serverProjection.turnItems.some(
+                (item) =>
+                  (item.type === "approval_request" || item.type === "user_input_request") &&
+                  item.requestId === request.id &&
+                  item.runId === requestedRuntimeRunId,
+              )),
+        )
+      : undefined;
+  const requestedInput = pendingUserInputs.find((request) => request.requestId === requested?.id);
+  const requestedApproval = pendingApprovals.find((request) => request.requestId === requested?.id);
+  const activePendingUserInput =
+    requestedInput ?? (requestedApproval ? null : (pendingUserInputs[0] ?? null));
   const activePendingRequestKey = userInputDraftKey(
     environmentId,
     activeThreadId,
@@ -346,7 +368,8 @@ export function usePendingThreadRequests(input: {
     ? activePendingUserInput.responseCapability === "not_resumable" ||
       respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
     : false;
-  const activePendingApproval = pendingApprovals[0] ?? null;
+  const activePendingApproval =
+    requestedApproval ?? (requestedInput ? null : (pendingApprovals[0] ?? null));
 
   const onRespondToApproval = async (
     requestId: RuntimeRequestId,

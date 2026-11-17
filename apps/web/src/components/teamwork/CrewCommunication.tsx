@@ -21,6 +21,7 @@ export function CrewCommunication({
   disabled,
   act,
   onResume,
+  notesOnly = false,
 }: {
   state: TeamworkSnapshot;
   project: ScopedProjectRef;
@@ -29,9 +30,13 @@ export function CrewCommunication({
   deliveries: TeamworkReadResult["deliveries"];
   disabled: boolean;
   act: (action: TeamworkAction) => Promise<boolean>;
-  onResume: () => void;
+  onResume?: () => void;
+  notesOnly?: boolean;
 }) {
-  const [draft, setDraft] = useAtom(crewMessageDraft(scopedProjectKey(project)));
+  const projectKey = scopedProjectKey(project);
+  const [draft, setDraft] = useAtom(
+    crewMessageDraft(notesOnly ? `${projectKey}:notes` : projectKey),
+  );
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const active =
@@ -43,7 +48,7 @@ export function CrewCommunication({
     threads,
     selected: draft.recipients,
   });
-  const asking = draft.intent === "ask";
+  const asking = !notesOnly && draft.intent === "ask";
   const sendDisabled =
     disabled || sending || !draft.text.trim() || (asking && (!active || !canAsk));
   return (
@@ -73,24 +78,26 @@ export function CrewCommunication({
             setDraft((current) => (current === draft ? { ...current, text: "" } : current));
         }}
       >
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant={asking ? "secondary" : "ghost"}
-            onClick={() => setDraft({ ...draft, intent: "ask" })}
-          >
-            Ask crew
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant={!asking ? "secondary" : "ghost"}
-            onClick={() => setDraft({ ...draft, intent: "note" })}
-          >
-            Save a note
-          </Button>
-        </div>
+        {!notesOnly ? (
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={asking ? "secondary" : "ghost"}
+              onClick={() => setDraft({ ...draft, intent: "ask" })}
+            >
+              Ask crew
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={!asking ? "secondary" : "ghost"}
+              onClick={() => setDraft({ ...draft, intent: "note" })}
+            >
+              Save a note
+            </Button>
+          </div>
+        ) : null}
         <p className="text-sm">
           {asking
             ? "Request an agent response from the selected recipients."
@@ -199,7 +206,11 @@ export function CrewCommunication({
         )}
       </form>
       {state.board
-        .filter((entry) => entry.initiativeId === initiativeId || entry.initiativeId === null)
+        .filter((entry) =>
+          notesOnly
+            ? entry.initiativeId === null && entry.recipients.length === 0
+            : entry.initiativeId === initiativeId || entry.initiativeId === null,
+        )
         .toReversed()
         .map((entry) => {
           const delivery = deliveries.filter(

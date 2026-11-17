@@ -10,7 +10,8 @@ import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
-import { Atom } from "effect/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   DndContext,
@@ -161,6 +162,8 @@ import { useThreadSearch } from "../state/queries";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentShell } from "../state/shell";
+import { serverEnvironment } from "../state/server";
 import { canShareWithGuestAtom } from "./chat/guestShareAvailability";
 import { openGuestShareDialog } from "./chat/guestShareDialogState";
 import {
@@ -917,7 +920,42 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   } = useSidebarLookups();
   const delegatedUnderParent = useDelegatedUnderParent();
   const router = useRouter();
+  const projectSelection = useRef(0);
   const { isMobile, setOpenMobile } = useSidebar();
+  const openCrewProjectIfConfigured = useStableCallback(
+    async (group: SidebarProjectSnapshot | undefined) => {
+      const selection = ++projectSelection.current;
+      if (!group) return;
+      const scope = scopeProjectRef(group.environmentId, group.id);
+      if (
+        serverConfigs.get(scope.environmentId)?.environment.capabilities.projectTeamwork !== true ||
+        appAtomRegistry.get(environmentShell.statusAtom(scope.environmentId)) !== "live"
+      )
+        return;
+      const href = router.state.location.href;
+      const state = await Effect.runPromise(
+        AtomRegistry.getResult(
+          appAtomRegistry,
+          serverEnvironment.teamworkLive({
+            environmentId: scope.environmentId,
+            input: { projectId: scope.projectId },
+          }),
+        ).pipe(Effect.timeoutOption("5 seconds"), Effect.orElseSucceed(Option.none)),
+      );
+      const snapshot = Option.getOrNull(state)?.snapshot;
+      if (
+        projectSelection.current !== selection ||
+        router.state.location.href !== href ||
+        !snapshot?.revision
+      )
+        return;
+      if (isMobile) setOpenMobile(false);
+      void router.navigate({
+        to: "/projects/$projectKey/crew",
+        params: { projectKey: scopedProjectKey(scope) },
+      });
+    },
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -3007,6 +3045,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     }
                     if (!item) return;
                     if (item.value === "all") {
+                      projectSelection.current++;
                       setProjectScopeKeys([]);
                     } else if (
                       eventDetails.event instanceof MouseEvent &&
@@ -3014,9 +3053,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     ) {
                       // Canceling skips Base UI's commit, which would freeze the search query, and its close.
                       eventDetails.cancel();
+                      projectSelection.current++;
                       toggleProjectScopeKey(item.value);
                     } else {
                       setProjectScopeKeys([item.value]);
+                      void openCrewProjectIfConfigured(projectGroupByScopeKey.get(item.value));
                     }
                   }}
                 >
@@ -3514,7 +3555,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 group={folder.group}
                                 collapsed={folder.collapsed}
                                 hiddenThreads={folder.hiddenThreads}
-                                onToggle={toggleProjectFolder}
+                                onToggle={(group) => {
+                                  toggleProjectFolder(group);
+                                  if (folder.collapsed) void openCrewProjectIfConfigured(group);
+                                }}
                                 onNewThread={startThreadInProjectFolder}
                                 onContextMenu={handleProjectFolderContextMenu}
                               />,

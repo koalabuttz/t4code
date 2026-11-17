@@ -1,9 +1,11 @@
 import { Atom } from "effect/reactivity";
 import { parseScopedProjectKey } from "@t3tools/client-runtime/environment";
+import type { OrchestrationV2ThreadShell } from "@t3tools/contracts";
 import { threadFamilies } from "../../state/threads";
 import type { crewSupervisionFacts } from "./crewPanel.logic";
 
-type Shell = Parameters<typeof crewSupervisionFacts>[1][number];
+type Shell = Parameters<typeof crewSupervisionFacts>[1][number] &
+  Pick<OrchestrationV2ThreadShell, "title">;
 
 export const crewSupervisionShells = Atom.family((projectKey: string) => {
   const project = parseScopedProjectKey(projectKey);
@@ -19,6 +21,7 @@ export const crewSupervisionShells = Atom.family((projectKey: string) => {
         // Streaming text and timestamps do not change Crew execution or question ownership.
         return old &&
           old.status === shell.status &&
+          old.title === shell.title &&
           old.deletedAt === shell.deletedAt &&
           old.lastError === shell.lastError &&
           old.pendingRuntimeRequest?.id === shell.pendingRuntimeRequest?.id &&

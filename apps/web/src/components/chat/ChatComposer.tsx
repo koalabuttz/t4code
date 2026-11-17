@@ -361,6 +361,7 @@ export interface ChatComposerHandle {
 }
 
 export interface ChatComposerProps {
+  crewCoordinator?: boolean;
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
   canOperateThread: boolean;
@@ -497,6 +498,7 @@ const NO_PROVIDER_SLASH_COMMANDS: ServerProvider["slashCommands"] = [];
 
 export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps) {
   const {
+    crewCoordinator = false,
     composerDraftTarget,
     environmentId,
     canOperateThread,
@@ -2420,6 +2422,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const freshSessionArmed = useFreshSessionArmed(scopedThreadKey(routeThreadRef));
   // Offered only where the default placeholder would show, so it never hides a pending question.
   const offeredPromptSuggestion =
+    !crewCoordinator &&
     phase !== "running" &&
     !isSendBusy &&
     !freshSessionArmed &&
@@ -3727,7 +3730,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <ComposerPromptEditor
                     draftKey={composerDraftTargetKey}
                     // Switching threads lands focus here, so the label names the thread.
-                    ariaLabel={activeThread ? `Message ${activeThread.title}` : "Message"}
+                    ariaLabel={
+                      crewCoordinator
+                        ? "Message your project"
+                        : activeThread
+                          ? `Message ${activeThread.title}`
+                          : "Message"
+                    }
                     suggestionListId={composerSuggestionListId}
                     activeSuggestionId={
                       composerSuggestionListVisible && activeComposerMenuItem
@@ -3771,7 +3780,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             ? "Choose a project above to start a thread"
                             : showProviderUnavailable
                               ? "Enable a provider in Settings to send a message"
-                              : (offeredPromptSuggestion ?? DEFAULT_COMPOSER_PLACEHOLDER)
+                              : crewCoordinator
+                                ? "Message your project"
+                                : (offeredPromptSuggestion ?? DEFAULT_COMPOSER_PLACEHOLDER)
                     }
                     placeholderSuffix={
                       offeredPromptSuggestion !== null ? (
