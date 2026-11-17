@@ -8,7 +8,7 @@ import type {
 import { sameCrewProject } from "@t3tools/shared/crewConversation";
 
 import { requestThreadMessageJump } from "./threadMessageJump";
-import type { CrewRequestTarget } from "./CrewChat";
+import type { CrewRequestTarget } from "./crewMobile.logic";
 import type { CrewPage } from "./TeamworkSheet";
 
 export type CrewProjectPage =

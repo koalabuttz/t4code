@@ -3,6 +3,8 @@ import {
   EnvironmentId,
   CommandId,
   MessageId,
+  NodeId,
+  RunId,
   ProjectId,
   RuntimeRequestId,
   ThreadId,
@@ -18,6 +20,9 @@ import {
   mobileCrewRecipients,
   mobileCrewSupervision,
   mobileCrewReturnedAnswer,
+  mobileCrewReturnEnvelope,
+  mobileCrewPendingAttention,
+  mobileCrewRequestState,
   mobileCrewWorkstreamGroups,
 } from "./crewMobile.logic";
 import type { CrewConsultation } from "@t3tools/contracts/crewConversation";
@@ -108,12 +113,18 @@ describe("mobile Crew source adaptation", () => {
       createdAt: now,
       updatedAt: now,
     } satisfies CrewConsultation;
-    const text =
-      "Crew consultation example answered. From specialist. Canonical source: {}\nThe answer.";
+    const text = `Crew consultation example answered. From specialist. Canonical source: ${JSON.stringify(response)}\nThe answer.`;
     const returned = { id: "exact-delivery:return", text, senderThreadId: destination.threadId };
 
     expect(mobileCrewReturnedAnswer(conversation, consultation, returned)).toBe("The answer.");
     expect(mobileCrewReturnedAnswer(destination, consultation, returned)).toBeNull();
+    expect(mobileCrewReturnEnvelope(returned)?.consultationId).toBe("example");
+    expect(
+      mobileCrewReturnedAnswer(conversation, consultation, {
+        ...returned,
+        text: text.replace('"messageId":"answer"', '"messageId":"different-answer"'),
+      }),
+    ).toBeNull();
     expect(
       mobileCrewReturnedAnswer(
         { ...conversation, environmentId: EnvironmentId.make("other") },
@@ -137,6 +148,91 @@ describe("mobile Crew source adaptation", () => {
         returned,
       ),
     ).toBeNull();
+  });
+
+  it("continues past historical attention and ignores resolved and wrong-coordinator requests", () => {
+    const conversation = {
+      environmentId: EnvironmentId.make("env"),
+      projectId: ProjectId.make("project"),
+      threadId: ThreadId.make("work"),
+    };
+    const target = { ...conversation, threadId: coordinator };
+    const when = "2026-11-17T00:00:00Z";
+    const attention = {
+      id: "request:201",
+      source: {
+        conversation,
+        messageId: MessageId.make("question"),
+        actor: "user" as const,
+        runId: null,
+        sender: null,
+      },
+      coordinator: target,
+      reason: "question" as const,
+      correlationId: null,
+      pendingRequest: {
+        requestId: RuntimeRequestId.make("question"),
+        runId: RunId.make("run"),
+        responder: "user-only" as const,
+      },
+      progress: { state: "pending" as const },
+      createdAt: when,
+      updatedAt: when,
+    };
+    const page = { revision: 2, scope: target };
+    expect(
+      mobileCrewPendingAttention(target, 2, {
+        ...page,
+        attention: [{ ...attention, pendingRequest: null }],
+        nextCursor: "request:200",
+      }),
+    ).toEqual({ requests: [], nextCursor: "request:200" });
+    expect(
+      mobileCrewPendingAttention(target, 2, {
+        ...page,
+        attention: [attention, { ...attention, id: "request:202", coordinator: conversation }],
+        nextCursor: null,
+      }),
+    ).toEqual({ requests: [attention], nextCursor: null });
+    expect(
+      mobileCrewPendingAttention(target, 3, {
+        ...page,
+        attention: [attention],
+        nextCursor: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("does not select an unrelated request when the linked one resolves or points to a different run", () => {
+    const requestId = RuntimeRequestId.make("A");
+    const runId = RunId.make("run-A");
+    const nodeId = NodeId.make("node");
+    const target = { requestId, runId };
+    const a = { id: requestId, nodeId, status: "pending" as const };
+    const b = { ...a, id: RuntimeRequestId.make("B") };
+    expect(
+      mobileCrewRequestState(
+        target,
+        { runtimeRequests: [a, b], nodes: [{ id: nodeId, runId }] },
+        true,
+      ),
+    ).toEqual({ kind: "pending", requestId });
+    expect(
+      mobileCrewRequestState(
+        target,
+        { runtimeRequests: [{ ...a, status: "resolved" }, b], nodes: [{ id: nodeId, runId }] },
+        true,
+      ),
+    ).toEqual({ kind: "unavailable" });
+    expect(
+      mobileCrewRequestState(
+        target,
+        { runtimeRequests: [a, b], nodes: [{ id: nodeId, runId: RunId.make("other") }] },
+        true,
+      ),
+    ).toEqual({ kind: "unavailable" });
+    expect(mobileCrewRequestState({ requestId }, null, false)).toEqual({ kind: "unavailable" });
+    expect(mobileCrewRequestState(target, null, false)).toEqual({ kind: "loading" });
   });
 
   it("keeps a replacement under its linked workstream and treats offline execution as unconfirmed", () => {

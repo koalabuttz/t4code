@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { crewLiveFreshness } from "@t3tools/client-runtime/state/crew";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { CommandId, TeamworkError, type TeamworkAction } from "@t3tools/contracts";
+import { CommandId, TeamworkError, type TeamworkAction, type ThreadId } from "@t3tools/contracts";
 import { sameCrewProject } from "@t3tools/shared/crewConversation";
 import * as Schema from "effect/Schema";
 import type {
@@ -18,7 +18,11 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentShellReadiness } from "../../state/shell";
 import { environmentThreadShells } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { mobileCrewSupervision } from "./crewMobile.logic";
+import {
+  CREW_REQUEST_CURSOR,
+  mobileCrewPendingAttention,
+  mobileCrewSupervision,
+} from "./crewMobile.logic";
 
 const isTeamworkError = Schema.is(TeamworkError);
 
@@ -43,6 +47,30 @@ export function useCrewCollection(
         input: { ...query, scope },
       }),
   );
+}
+
+export function useCrewHumanAttention(
+  scope: CrewProjectScope,
+  coordinator: ThreadId | null,
+  revision: number | undefined,
+  cursor = CREW_REQUEST_CURSOR,
+) {
+  const enabled = coordinator !== null && revision !== undefined;
+  const query = useCrewCollection(enabled ? scope : null, {
+    collection: "attention",
+    cursor,
+    limit: 100,
+  });
+  const page = enabled
+    ? mobileCrewPendingAttention({ ...scope, threadId: coordinator }, revision, query.data)
+    : null;
+  return {
+    requests: page?.requests ?? [],
+    nextCursor: page?.nextCursor ?? null,
+    checking: enabled && page === null && query.error === null,
+    error: query.error,
+    refresh: query.refresh,
+  };
 }
 
 export function useCrewProject(scope: CrewProjectScope, enabled = true) {

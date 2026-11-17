@@ -1,15 +1,27 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { crewMessageDraft } from "@t3tools/client-runtime/state/crew";
-import type { TeamworkReadResult, TeamworkSnapshot, ThreadId } from "@t3tools/contracts";
+import {
+  RunId,
+  RuntimeRequestId,
+  type OrchestrationV2ThreadProjection,
+  type TeamworkReadResult,
+  type TeamworkSnapshot,
+  type ThreadId,
+} from "@t3tools/contracts";
 import type {
   CrewConsultation,
+  CrewAttention,
+  CrewConversationPage,
   CrewConversationRef,
   CrewProjectScope,
   CrewWorkstream,
   CrewWorkstreamTaskLink,
 } from "@t3tools/contracts/crewConversation";
+import { CrewMessageRef } from "@t3tools/contracts/crewConversation";
 import type { Atom } from "effect/reactivity";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { crewTaskExecution } from "@t3tools/shared/crewExecution";
 import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
 import { sameCrewConversation, sameCrewProject } from "@t3tools/shared/crewConversation";
@@ -124,10 +136,28 @@ export function mobileCrewArtifactWorkspace(
   return source ? (source.worktreePath ?? projectWorkspace) : null;
 }
 
+const decodeSource = Schema.decodeUnknownOption(Schema.fromJsonString(CrewMessageRef));
+type CrewReturnMessage = { id: string; text: string; senderThreadId?: ThreadId };
+
+export function mobileCrewReturnEnvelope(message: CrewReturnMessage) {
+  if (!message.id.endsWith(":return") || !message.senderThreadId) return null;
+  const newline = message.text.indexOf("\n");
+  if (newline < 0) return null;
+  const metadata =
+    /^Crew consultation (.{1,120}) answered\. From (.+?)\. Canonical source: (\{.*\})$/.exec(
+      message.text.slice(0, newline),
+    );
+  if (!metadata || metadata[2] !== message.senderThreadId) return null;
+  const source = Option.getOrNull(decodeSource(metadata[3]));
+  return source?.conversation.threadId === message.senderThreadId && source.actor === "agent"
+    ? { consultationId: metadata[1]!, source, answer: message.text.slice(newline + 1) }
+    : null;
+}
+
 export function mobileCrewReturnedAnswer(
   conversation: CrewConversationRef,
   consultation: CrewConsultation,
-  message: { id: string; text: string; senderThreadId?: ThreadId },
+  message: CrewReturnMessage,
 ): string | null {
   if (
     consultation.progress.state !== "answered" ||
@@ -142,9 +172,73 @@ export function mobileCrewReturnedAnswer(
     message.senderThreadId !== consultation.destination.threadId
   )
     return null;
-  // The return envelope has one metadata line followed by the canonical answer excerpt.
-  const newline = message.text.indexOf("\n");
-  return newline < 0 ? null : message.text.slice(newline + 1);
+  const envelope = mobileCrewReturnEnvelope(message);
+  const source = consultation.progress.exchange.response;
+  return envelope &&
+    envelope.consultationId === consultation.id &&
+    sameCrewConversation(envelope.source.conversation, source.conversation) &&
+    envelope.source.messageId === source.messageId &&
+    envelope.source.runId === source.runId
+    ? envelope.answer
+    : null;
+}
+
+export type CrewRequestTarget = { requestId: RuntimeRequestId; runId: RunId };
+export type CrewRequestState =
+  | { kind: "ordinary" | "loading" | "unavailable" }
+  | { kind: "pending"; requestId: RuntimeRequestId };
+
+const decodeRequestTarget = Schema.decodeUnknownOption(
+  Schema.Struct({
+    requestId: RuntimeRequestId,
+    runId: RunId,
+  }),
+);
+
+export function mobileCrewRequestState(
+  value: unknown,
+  projection: {
+    runtimeRequests: ReadonlyArray<
+      Pick<OrchestrationV2ThreadProjection["runtimeRequests"][number], "id" | "nodeId" | "status">
+    >;
+    nodes: ReadonlyArray<Pick<OrchestrationV2ThreadProjection["nodes"][number], "id" | "runId">>;
+  } | null,
+  live: boolean,
+): CrewRequestState {
+  if (value === undefined) return { kind: "ordinary" };
+  const target = Option.getOrNull(decodeRequestTarget(value));
+  if (!target) return { kind: "unavailable" };
+  if (!live) return { kind: "loading" };
+  const pending = projection?.runtimeRequests.some(
+    (request) =>
+      request.id === target.requestId &&
+      request.status === "pending" &&
+      projection.nodes.some((node) => node.id === request.nodeId && node.runId === target.runId),
+  );
+  return pending ? { kind: "pending", requestId: target.requestId } : { kind: "unavailable" };
+}
+
+// The service stores requests after ordinary attention records in its lexical cursor order.
+export const CREW_REQUEST_CURSOR = "request:";
+
+export function mobileCrewPendingAttention(
+  coordinator: CrewConversationRef,
+  revision: number,
+  page: Pick<CrewConversationPage, "scope" | "revision" | "attention" | "nextCursor"> | null,
+) {
+  if (!page || page.revision !== revision || !sameCrewProject(page.scope, coordinator)) return null;
+  return {
+    requests: page.attention.filter(
+      (
+        item,
+      ): item is CrewAttention & { pendingRequest: NonNullable<CrewAttention["pendingRequest"]> } =>
+        item.id.startsWith(CREW_REQUEST_CURSOR) &&
+        item.pendingRequest !== null &&
+        sameCrewConversation(item.coordinator, coordinator) &&
+        sameCrewProject(item.source.conversation, coordinator),
+    ),
+    nextCursor: page.nextCursor?.startsWith(CREW_REQUEST_CURSOR) ? page.nextCursor : null,
+  };
 }
 
 type WorkstreamGroup = "Needs you" | "Working" | "Waiting" | "Resolved";

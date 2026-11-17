@@ -28,7 +28,12 @@ import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { openCrewPage, openCrewSource, type CrewProjectPage } from "./crewProjectNavigation";
 import { mobileCrewWorkstreamGroups } from "./crewMobile.logic";
-import { useCrewCollection, useCrewControls, useCrewProject } from "./use-crew-project";
+import {
+  useCrewCollection,
+  useCrewControls,
+  useCrewHumanAttention,
+  useCrewProject,
+} from "./use-crew-project";
 import type { CrewMessageRef } from "@t3tools/contracts/crewConversation";
 
 export function CrewProjectDestinations({
@@ -345,13 +350,19 @@ function WorkstreamList({ scope }: { scope: CrewProjectScope }) {
   const [search, setSearch] = useState("");
   const [linking, setLinking] = useState(false);
   const [cursor, setCursor] = useState<string>();
+  const [requestCursor, setRequestCursor] = useState<string>();
   const workstreams = useCrewCollection(scope, {
     collection: "workstreams",
     limit: 100,
     ...(cursor ? { cursor } : {}),
   });
   const taskLinks = useCrewCollection(scope, { collection: "task-links", limit: 100 });
-  const attention = useCrewCollection(scope, { collection: "attention", limit: 100 });
+  const attention = useCrewHumanAttention(
+    scope,
+    freshness === "current" ? (snapshot?.coordinatorThreadId ?? null) : null,
+    snapshot?.revision,
+    requestCursor,
+  );
   const controls = useCrewControls(scope, snapshot?.revision, freshness === "current");
   const entries = workstreams.data?.workstreams ?? [];
   const groups = mobileCrewWorkstreamGroups({
@@ -397,8 +408,12 @@ function WorkstreamList({ scope }: { scope: CrewProjectScope }) {
           {controls.error}
         </AppText>
       )}
+      {attention.checking && <AppText>Checking pending requests…</AppText>}
+      {attention.error && (
+        <Button label="Refresh pending requests" size="compact" onPress={attention.refresh} />
+      )}
       {freshness === "current" &&
-        attention.data?.attention.map((item) => {
+        attention.requests.map((item) => {
           const pending = item.pendingRequest;
           const thread = threads.find(
             (entry) => entry.id === item.source.conversation.threadId && entry.deletedAt === null,
@@ -416,6 +431,20 @@ function WorkstreamList({ scope }: { scope: CrewProjectScope }) {
             />
           ) : null;
         })}
+      {attention.nextCursor && (
+        <Button
+          label="Check next request page"
+          size="compact"
+          onPress={() => setRequestCursor(attention.nextCursor ?? undefined)}
+        />
+      )}
+      {requestCursor && (
+        <Button
+          label="First request page"
+          size="compact"
+          onPress={() => setRequestCursor(undefined)}
+        />
+      )}
       {groups.map(
         ({ title, rows }) =>
           rows.length > 0 && (

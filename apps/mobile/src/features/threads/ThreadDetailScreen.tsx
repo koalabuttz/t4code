@@ -1,4 +1,6 @@
 import { ChildThreadApprovals } from "./ChildThreadApprovals";
+import { Button } from "../../components/ui/Button";
+import { AppText } from "../../components/ui/AppText";
 import { useOpenThreadInspector } from "./thread-inspector-navigation";
 import { useSidebarWorkspaceTabs } from "../layout/workspace/useSystemWorkspaceTabBar";
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
@@ -15,7 +17,7 @@ import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entitie
 import { createThreadVisitTracker } from "@t3tools/client-runtime/state/thread-visits";
 import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import {
   effectiveSnoozed,
   threadWokeAt,
@@ -213,12 +215,14 @@ import { ThreadSideChatsRow } from "./ThreadSideChatsRow";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-scroll-position";
 import { CrewChatStatus, type CrewChatRoute, useCrewChat } from "./CrewChat";
+import type { CrewRequestState } from "./crewMobile.logic";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
 import type { OrchestrationV2ProviderSession } from "@t3tools/contracts";
 
 export interface ThreadDetailScreenProps {
   readonly crewRoute?: CrewChatRoute | undefined;
+  readonly crewRequest?: CrewRequestState;
   readonly header?: React.ReactNode;
   readonly draftMode?: {
     /** viewportHeight excludes the composer so draft chrome can resize it without feedback. */
@@ -410,6 +414,7 @@ function ThreadDetailBody(
 ) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
   const crewChat = useCrewChat();
+  const requestFocused = props.crewRequest !== undefined && props.crewRequest.kind !== "ordinary";
   const { layout } = useAdaptiveWorkspaceLayout();
   const deviceType = useDeviceType();
   const workspace = useWorkspaceTabs();
@@ -945,7 +950,7 @@ function ThreadDetailBody(
   const activeUserInputRequestId = props.activePendingUserInput?.requestId ?? null;
   const questionInFlow = Platform.OS === "android" && activeUserInputRequestId !== null;
   const composerSlotHidden =
-    activeUserInputRequestId !== null || props.creationState?.kind === "failed";
+    requestFocused || activeUserInputRequestId !== null || props.creationState?.kind === "failed";
   const pendingMessageEditBlocked =
     queuedRunEditBlockedReason({ openQuestionCount: activeUserInputRequestId === null ? 0 : 1 }) !==
     null;
@@ -1470,10 +1475,11 @@ function ThreadDetailBody(
                   // A native subagent has no composer to edit a pending message in;
                   // Cancel on the edit banner would discard it.
                   onEditPendingMessage={
-                    isProviderSubagent || pendingMessageEditBlocked
+                    requestFocused || isProviderSubagent || pendingMessageEditBlocked
                       ? null
                       : handleEditPendingMessage
                   }
+                  crewRequestFocused={requestFocused}
                   contentPresentation={props.contentPresentation}
                   threadTitle={props.selectedThread.title}
                   latestRun={props.activityRun}
@@ -1624,7 +1630,34 @@ function ThreadDetailBody(
                     keyboardShouldPersistTaps="handled"
                     nestedScrollEnabled
                   >
-                    <CrewChatStatus />
+                    {requestFocused ? (
+                      <View className="mx-4 mb-2 gap-1 rounded-xl border border-border bg-screen px-3 py-2">
+                        <AppText accessibilityRole="alert">
+                          {props.crewRequest?.kind === "loading"
+                            ? props.connectionStateLabel === "connected"
+                              ? "Checking the linked request…"
+                              : "Reconnect to check the linked request."
+                            : props.activePendingApproval || props.activePendingUserInput
+                              ? "Linked request"
+                              : "This linked request is unavailable."}
+                        </AppText>
+                        <Button
+                          label="Open conversation"
+                          size="compact"
+                          onPress={() =>
+                            navigation.dispatch(
+                              StackActions.replace("Thread", {
+                                environmentId: props.environmentId,
+                                threadId: props.selectedThread.id,
+                                crewSourceProjectId: props.selectedThread.projectId,
+                              }),
+                            )
+                          }
+                        />
+                      </View>
+                    ) : (
+                      <CrewChatStatus />
+                    )}
                     {props.queuedRunEdit !== null ? (
                       <Animated.View
                         className="shrink-0"
@@ -1645,10 +1678,12 @@ function ThreadDetailBody(
                       thread={props.selectedThread}
                       environmentId={props.environmentId}
                     />
-                    <ChildThreadApprovals
-                      threadRef={props.selectedThreadDetailRef}
-                      maxHeight={pendingUserInputMaxHeight}
-                    />
+                    {!requestFocused && (
+                      <ChildThreadApprovals
+                        threadRef={props.selectedThreadDetailRef}
+                        maxHeight={pendingUserInputMaxHeight}
+                      />
+                    )}
                     <ThreadGuestShareBar
                       threadRef={props.selectedThreadDetailRef}
                       canOperateThread={props.canOperateThread}

@@ -2,7 +2,7 @@ import { useNavigation } from "@react-navigation/native";
 import { scopedProjectKey } from "@t3tools/client-runtime/environment";
 import { crewDraftBrief, crewSelectedInitiative } from "@t3tools/client-runtime/state/crew";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import type { MessageId, RuntimeRequestId, RunId, ThreadId } from "@t3tools/contracts";
+import { AuthOrchestrationReadScope, type MessageId, type ThreadId } from "@t3tools/contracts";
 import type {
   CrewAttention,
   CrewConsultation,
@@ -19,27 +19,29 @@ import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { threadEnvironment, useEnvironmentThread } from "../../state/threads";
+import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { appendComposerDraftText, getComposerDraftSnapshot } from "../../state/use-composer-drafts";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import type { ThreadFeedEntry } from "../../lib/threadActivity";
-import { mobileCrewReturnedAnswer } from "./crewMobile.logic";
+import {
+  mobileCrewReturnedAnswer,
+  mobileCrewReturnEnvelope,
+  type CrewRequestTarget,
+} from "./crewMobile.logic";
 import { openCrewExchange, openCrewPage, openCrewSource } from "./crewProjectNavigation";
 import {
   useCrewCollection,
   useCrewControls,
+  useCrewHumanAttention,
   useCrewProject,
   useCrewRead,
 } from "./use-crew-project";
-
-export type CrewRequestTarget = { requestId: RuntimeRequestId; runId: RunId };
 
 export type CrewChatRoute = {
   projectTitle: string;
   coordinator: boolean;
   source: boolean;
-  focusRequest?: CrewRequestTarget | undefined;
-  exactRequestPending?: boolean;
 };
 
 const CrewChatContext = createContext<ReturnType<typeof useCrewChatModel> | null>(null);
@@ -87,6 +89,10 @@ function useCrewChatModel(
     [thread.environmentId, thread.projectId, thread.id],
   );
   const { snapshot, query, freshness, supervision, threads } = useCrewProject(scope, active);
+  const canRead = useEnvironmentScope(
+    active ? scope.environmentId : null,
+    AuthOrchestrationReadScope,
+  );
   const navigation = useNavigation();
   const controls = useCrewControls(scope, snapshot?.revision, freshness === "current");
   const consultations = useCrewCollection(active ? scope : null, {
@@ -99,7 +105,7 @@ function useCrewChatModel(
     threadId: thread.id,
     limit: 100,
   });
-  const attention = useCrewCollection(active ? scope : null, {
+  const attention = useCrewCollection(active && !route.coordinator ? scope : null, {
     collection: "attention",
     ...(route.coordinator ? {} : { threadId: thread.id }),
     limit: 100,
@@ -141,13 +147,11 @@ function useCrewChatModel(
   const stop = supervision?.attention.find(
     (item) => item.kind === "stop-failed" || item.kind === "stop-pending",
   );
-  const requests =
-    attention.data?.attention.filter(
-      (item) =>
-        item.pendingRequest &&
-        sameCrewConversation(item.coordinator, conversation) &&
-        sameCrewProject(item.source.conversation, scope),
-    ) ?? [];
+  const humanAttention = useCrewHumanAttention(
+    scope,
+    active && route.coordinator && freshness === "current" ? thread.id : null,
+    snapshot?.revision,
+  );
   const coordinatorInbox = route.coordinator
     ? []
     : (attention.data?.attention ?? []).filter(
@@ -159,7 +163,7 @@ function useCrewChatModel(
   const threadName = (id: ThreadId) =>
     threads.find((shell) => shell.id === id && shell.deletedAt === null)?.title ?? "Work thread";
   const available = (id: ThreadId) =>
-    threads.some((shell) => shell.id === id && shell.deletedAt === null);
+    canRead && threads.some((shell) => shell.id === id && shell.deletedAt === null);
   const go = (page?: Parameters<typeof openCrewPage>[2]) => {
     Keyboard.dismiss();
     openCrewPage(navigation, scope, page);
@@ -192,7 +196,8 @@ function useCrewChatModel(
     freshness,
     controls,
     exchange,
-    requests,
+    requests: humanAttention.requests,
+    requestsComplete: !humanAttention.checking && humanAttention.nextCursor === null,
     inbox,
     actionInitiative,
     stop,
@@ -200,7 +205,7 @@ function useCrewChatModel(
     pauseOrRecover,
     threadName,
     available,
-    queryError: consultations.error ?? handoffs.error ?? attention.error,
+    queryError: consultations.error ?? handoffs.error ?? attention.error ?? humanAttention.error,
     deliveries: query.data?.deliveries ?? [],
     openExchange: (kind: "handoffs" | "consultations", id: string) => {
       Keyboard.dismiss();
@@ -211,6 +216,7 @@ function useCrewChatModel(
       message?: Parameters<typeof openCrewSource>[3],
       request?: CrewRequestTarget,
     ) => {
+      if (!canRead) return;
       Keyboard.dismiss();
       openCrewSource(navigation, scope, ref, message, request);
     },
@@ -241,10 +247,8 @@ export function CrewChatStatus() {
   const status =
     freshness !== "current"
       ? "Project updates are last known. Execution is unconfirmed."
-      : route.focusRequest && !route.exactRequestPending
-        ? "This request is no longer available in the current conversation."
-        : (controls.error ?? stop?.label ?? (plan ? "Project plan needs approval" : null));
-  if (!status && !pending && !chat.queryError) return null;
+      : (controls.error ?? stop?.label ?? (plan ? "Project plan needs approval" : null));
+  if (!status && !pending && !chat.queryError && chat.requestsComplete) return null;
   return (
     <View className="mx-4 mb-2 gap-1 rounded-xl border border-border bg-screen px-3 py-2">
       {(status || chat.queryError) && (
@@ -267,9 +271,13 @@ export function CrewChatStatus() {
           onPress={() => chat.openSource(request.source.conversation, undefined, pending)}
         />
       )}
-      {route.coordinator && requests.length > 1 && (
+      {route.coordinator && (requests.length > 1 || !chat.requestsComplete) && (
         <Button
-          label={`More requests · ${requests.length - 1}`}
+          label={
+            chat.requestsComplete
+              ? `More requests · ${requests.length - 1}`
+              : "View pending requests"
+          }
           size="compact"
           onPress={() => chat.go("threads")}
         />
@@ -278,12 +286,16 @@ export function CrewChatStatus() {
   );
 }
 
+type ChatMessage = Extract<ThreadFeedEntry, { type: "message" }>["message"];
+
 export function CrewChatMessage({
   entry,
   children,
+  returnMessages,
 }: {
   entry: Extract<ThreadFeedEntry, { type: "message" }>;
   children: ReactNode;
+  returnMessages: ReadonlyMap<string, ChatMessage>;
 }) {
   const chat = useCrewChat();
   if (!chat) return children;
@@ -293,6 +305,16 @@ export function CrewChatMessage({
   if (returned && returned.progress.state === "answered" && answer !== null) {
     return <ConsultationAnswer key={returned.id} consultation={returned} answer={answer} />;
   }
+  if (!returned && message.id.startsWith(`crew:${chat.conversation.projectId}:`)) {
+    const envelope = mobileCrewReturnEnvelope(message);
+    if (envelope && sameCrewProject(chat.conversation, envelope.source.conversation)) {
+      return (
+        <HistoricalConsultationReturn message={message} consultationId={envelope.consultationId}>
+          {children}
+        </HistoricalConsultationReturn>
+      );
+    }
+  }
   const consultations = chat.exchange.byOrigin.get(message.id);
   const handoffs = chat.exchange.routes.get(message.id);
   const attention = chat.inbox.get(message.id);
@@ -301,9 +323,19 @@ export function CrewChatMessage({
     <>
       {children}
       <View className="mx-4 mb-2 gap-2">
-        {consultations?.map((item) => (
-          <ConsultationStatus key={item.id} consultation={item} />
-        ))}
+        {consultations?.map((item) => {
+          const echo = returnMessages.get(`${item.deliveryId}:return`);
+          return (
+            <ConsultationStatus
+              key={item.id}
+              consultation={item}
+              hasEcho={
+                echo !== undefined &&
+                mobileCrewReturnedAnswer(chat.conversation, item, echo) !== null
+              }
+            />
+          );
+        })}
         {handoffs?.map((handoff) => (
           <HandoffCard key={handoff.id} handoff={handoff} />
         ))}
@@ -313,7 +345,52 @@ export function CrewChatMessage({
   );
 }
 
-function ConsultationStatus({ consultation }: { consultation: CrewConsultation }) {
+function HistoricalConsultationReturn({
+  message,
+  consultationId,
+  children,
+}: {
+  message: ChatMessage;
+  consultationId: string;
+  children: ReactNode;
+}) {
+  const chat = useCrewChat()!;
+  const { environmentId, projectId, threadId } = chat.conversation;
+  const query = useCrewCollection(
+    { environmentId, projectId },
+    {
+      collection: "consultations",
+      id: consultationId,
+      threadId,
+      limit: 1,
+    },
+  );
+  const consultation = query.data?.consultations[0];
+  const answer = consultation
+    ? mobileCrewReturnedAnswer(chat.conversation, consultation, message)
+    : null;
+  if (consultation && answer !== null) {
+    return <ConsultationAnswer consultation={consultation} answer={answer} />;
+  }
+  return (
+    <>
+      {children}
+      {query.error && (
+        <AppText className="mx-4 text-foreground-muted">
+          The source exchange is unavailable.
+        </AppText>
+      )}
+    </>
+  );
+}
+
+function ConsultationStatus({
+  consultation,
+  hasEcho,
+}: {
+  consultation: CrewConsultation;
+  hasEcho: boolean;
+}) {
   const chat = useCrewChat()!;
   const [showRecordedAnswer, setShowRecordedAnswer] = useState(false);
   const name = chat.threadName(consultation.destination.threadId);
@@ -358,28 +435,32 @@ function ConsultationStatus({ consultation }: { consultation: CrewConsultation }
             onPress={() => chat.openSource(consultation.destination, progress.request ?? undefined)}
           />
         ))}
-      {progress.state === "answered" && returned?.status === "failed" && (
+      {progress.state === "answered" && !hasEcho && (
         <>
-          <AppText>The answer is recorded. Delivery to this chat failed.</AppText>
+          {returned?.status === "failed" && (
+            <AppText>The answer is recorded. Delivery to this chat failed.</AppText>
+          )}
+          {returned?.status === "pending" && (
+            <AppText>Answer recorded. Waiting to deliver it to this chat.</AppText>
+          )}
           <Button
             label={showRecordedAnswer ? "Hide recorded answer" : "Read recorded answer"}
             size="compact"
             disabled={!chat.available(consultation.destination.threadId)}
             onPress={() => setShowRecordedAnswer(!showRecordedAnswer)}
           />
-          {showRecordedAnswer && (
+          {showRecordedAnswer && chat.available(consultation.destination.threadId) && (
             <CrewRecordedAnswer consultation={consultation} source={progress.exchange.response} />
           )}
-          <Button
-            label="Retry answer delivery"
-            size="compact"
-            disabled={!chat.controls.canEdit}
-            onPress={() => void chat.controls.act({ type: "delivery.retry", id: returned.id })}
-          />
+          {returned?.status === "failed" && (
+            <Button
+              label="Retry answer delivery"
+              size="compact"
+              disabled={!chat.controls.canEdit}
+              onPress={() => void chat.controls.act({ type: "delivery.retry", id: returned.id })}
+            />
+          )}
         </>
-      )}
-      {progress.state === "answered" && returned?.status === "pending" && (
-        <AppText>Answer recorded. Waiting to deliver it to this chat.</AppText>
       )}
       {progress.state === "answered" && (
         <Button

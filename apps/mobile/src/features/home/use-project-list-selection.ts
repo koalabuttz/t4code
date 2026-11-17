@@ -33,7 +33,15 @@ export function useProjectListSelection(
       input: { projectId: scope.projectId },
     });
     const hasCrew = (read: TeamworkReadResult | null | undefined) =>
-      Boolean(read?.snapshot.coordinatorThreadId || read?.snapshot.initiatives.length);
+      Boolean(
+        read?.snapshot.coordinatorThreadId ||
+        read?.snapshot.initiatives.some(
+          (initiative) =>
+            initiative.status === "active" ||
+            initiative.status === "paused" ||
+            initiative.status === "draft",
+        ),
+      );
     const cached = appAtomRegistry.get(atom);
     if (cached._tag === "Success") {
       if (hasCrew(cached.value)) openCrewPage(navigation, scope);

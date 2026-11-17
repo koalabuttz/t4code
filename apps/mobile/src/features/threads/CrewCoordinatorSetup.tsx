@@ -76,6 +76,10 @@ export function CrewCoordinatorSetup({
   const canCreate = useAtomValue(
     orchestrationEnvironment.v2.dispatchCommand.permissionAtom(environmentId),
   );
+  const stableThreadId = ThreadId.make(`crew-coordinator:${projectId}`);
+  const stableShell = useAtomValue(
+    environmentThreadShells.threadShellAtom({ environmentId, threadId: stableThreadId }),
+  );
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const inFlight = useRef(false);
@@ -88,13 +92,14 @@ export function CrewCoordinatorSetup({
       !controls.canEdit
     )
       return;
-    const threadId = useExisting ? existing?.id : ThreadId.make(`crew-coordinator:${projectId}`);
+    const threadId = useExisting ? existing?.id : stableThreadId;
     if (!threadId) return;
     inFlight.current = true;
     setCreating(true);
     setError(null);
     try {
-      if (!useExisting) {
+      const shellAtom = environmentThreadShells.threadShellAtom({ environmentId, threadId });
+      if (!useExisting && appAtomRegistry.get(shellAtom) === null) {
         if (!canCreate || !usableModel || !modelSelection) return;
         const result = await dispatch({
           environmentId,
@@ -114,10 +119,7 @@ export function CrewCoordinatorSetup({
           },
         });
         const shell = await Effect.runPromise(
-          AtomRegistry.toStream(
-            appAtomRegistry,
-            environmentThreadShells.threadShellAtom({ environmentId, threadId }),
-          ).pipe(
+          AtomRegistry.toStream(appAtomRegistry, shellAtom).pipe(
             Stream.filter((entry) => entry !== null),
             Stream.runHead,
             Effect.timeoutOption("3 seconds"),
@@ -129,11 +131,11 @@ export function CrewCoordinatorSetup({
           !isCrewCoordinatorCandidate(scope, created.value) ||
           created.value.archivedAt
         ) {
+          query.refresh();
           if (result._tag !== "Failure") {
             setError(
               "The coordinator conversation could not be confirmed. Refresh the connection and retry.",
             );
-            query.refresh();
             return;
           }
           const failure = squashAtomCommandFailure(result);
@@ -166,6 +168,16 @@ export function CrewCoordinatorSetup({
       }
       const current = value.value.snapshot;
       if (current.coordinatorThreadId) return;
+      const shell = appAtomRegistry.get(shellAtom);
+      if (
+        !shell ||
+        !isCrewCoordinatorCandidate(scope, shell) ||
+        shell.archivedAt ||
+        current.tasks.some((task) => task.ownerThreadId === threadId)
+      ) {
+        setError("This conversation is unavailable or already assigned to project work.");
+        return;
+      }
       if (!(await controls.act({ type: "coordinator.set", threadId }, current.revision)))
         query.refresh();
     } finally {
@@ -191,18 +203,16 @@ export function CrewCoordinatorSetup({
         </AppText>
       )}
       <Button
-        label="Create project coordinator"
+        label={stableShell ? "Confirm project coordinator" : "Create project coordinator"}
         tone="primary"
         disabled={
           creating ||
           !controls.canEdit ||
-          !canCreate ||
-          !usableModel ||
-          !defaultWorkspaceModeSettled
+          (!stableShell && (!canCreate || !usableModel || !defaultWorkspaceModeSettled))
         }
         onPress={() => void establish(false)}
       />
-      {!usableModel && (
+      {!stableShell && !usableModel && (
         <AppText>The configured model is unavailable. Check the project’s model settings.</AppText>
       )}
       {existing && (

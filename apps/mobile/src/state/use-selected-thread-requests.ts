@@ -163,7 +163,7 @@ function collectAnsweredRequestDrafts(
   );
 }
 
-export function useSelectedThreadRequests(focus?: RuntimeRequestId, exactRequestPending = true) {
+export function useSelectedThreadRequests(focus?: RuntimeRequestId | null) {
   const respondToApproval = useAtomCommand(
     threadEnvironment.respondToApproval,
     "thread approval response",
@@ -185,17 +185,13 @@ export function useSelectedThreadRequests(focus?: RuntimeRequestId, exactRequest
 
   const approvals = pendingRequests?.approvals ?? EMPTY_PENDING_REQUESTS.approvals;
   const activePendingApprovals =
-    focus === undefined
-      ? approvals
-      : approvals.filter((request) => exactRequestPending && request.requestId === focus);
+    focus === undefined ? approvals : approvals.filter((request) => request.requestId === focus);
   const activePendingApproval = activePendingApprovals[0] ?? null;
   const activePendingUserInputs = pendingRequests?.userInputs ?? EMPTY_PENDING_REQUESTS.userInputs;
   const activePendingUserInput =
     (focus === undefined
       ? activePendingUserInputs[0]
-      : activePendingUserInputs.find(
-          (request) => exactRequestPending && request.requestId === focus,
-        )) ?? null;
+      : activePendingUserInputs.find((request) => request.requestId === focus)) ?? null;
   const questionServerConfigs = useServerConfigs();
   const attachmentDrafts = useAtomValue(
     questionAttachmentDraftsAtom(

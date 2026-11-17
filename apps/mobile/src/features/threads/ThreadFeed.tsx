@@ -351,6 +351,7 @@ export interface ThreadFeedHistoryControls {
 }
 
 export interface ThreadFeedProps {
+  readonly crewRequestFocused?: boolean;
   readonly toolCallVisibility?: ToolCallVisibility;
   readonly worktreeSetup?: WorktreeSetupCardProps | null;
   readonly preparingWorktree?: boolean;
@@ -3569,7 +3570,26 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const [setupDetailsThreadId, setSetupDetailsThreadId] = useState<string | null>(null);
   const setupDetailsOpen = setupDetailsThreadId === props.threadId && !!props.worktreeSetup;
   const openSetupDetails = () => setSetupDetailsThreadId(props.threadId);
+  const crewChat = useCrewChat();
+  const isCrewChat = crewChat !== null;
+  const crewReturnMessages = useMemo(
+    () =>
+      new Map(
+        isCrewChat
+          ? props.feed.flatMap((entry) =>
+              entry.type === "message" &&
+              entry.message.senderThreadId &&
+              entry.message.id.endsWith(":return")
+                ? [[entry.message.id, entry.message] as const]
+                : [],
+            )
+          : [],
+      ),
+    [isCrewChat, props.feed],
+  );
   const listAppearanceData = {
+    crewReturnMessages,
+    crewRequestFocused: props.crewRequestFocused,
     setupDetailsOpen,
     disclosureLayout,
     reduceMotion,
@@ -3600,7 +3620,6 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     onHeaderMaterialVisibilityChange?.(visible);
   };
   const feedThreadKey = scopedThreadKey(props.environmentId, props.threadId);
-  const crewChat = useCrewChat();
   const crewScroll = crewChat ? crewScrollOffset(`native-chat:${feedThreadKey}`) : null;
   const [initialCrewPosition, setInitialCrewPosition] = useState(() => ({
     key: feedThreadKey,
@@ -4018,8 +4037,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }
   }, [textSizeKey, contentWidth, hasHtmlRenders, listRef]);
 
-  const renderMessageRow = (info: { item: GroupedThreadFeedRow; index: number }) =>
-    renderFeedEntry(info, {
+  const renderMessageRow = (info: { item: GroupedThreadFeedRow; index: number }) => {
+    if (
+      props.crewRequestFocused &&
+      info.item.type === "activity-group" &&
+      (isSecretRequestActivityGroup(info.item) || isLinkRequestActivityGroup(info.item))
+    )
+      return null;
+    return renderFeedEntry(info, {
       userMessageGrouping: info.item.userMessageGrouping,
       formatMessageTime,
       environmentId: props.environmentId,
@@ -4068,6 +4093,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       workspaceRoot: props.workspaceRoot,
       workflowOpening,
     });
+  };
   const renderItem = (info: { item: GroupedThreadFeedRow; index: number }) => (
     <DisclosureRow
       key={info.item.id}
@@ -4102,7 +4128,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             />
           ) : null}
           {crewChat && info.item.type === "message" ? (
-            <CrewChatMessage entry={info.item}>{renderMessageRow(info)}</CrewChatMessage>
+            <CrewChatMessage entry={info.item} returnMessages={crewReturnMessages}>
+              {renderMessageRow(info)}
+            </CrewChatMessage>
           ) : (
             renderMessageRow(info)
           )}

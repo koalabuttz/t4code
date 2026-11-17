@@ -88,7 +88,7 @@ import {
 import type { ThreadDetailScreenProps } from "./ThreadDetailScreen";
 import { ThreadScreenBinding, ThreadScreenFallback, ThreadScreenHost } from "./ThreadScreenHost";
 import { CrewConversationReturn } from "./CrewConversationReturn";
-import type { CrewRequestTarget } from "./CrewChat";
+import { mobileCrewRequestState, type CrewRequestTarget } from "./crewMobile.logic";
 import { openCrewPage } from "./crewProjectNavigation";
 import type { CrewPage } from "./TeamworkSheet";
 import { draftRouteIdentity } from "./thread-route-state";
@@ -457,18 +457,18 @@ function ThreadRouteContent(
   const composer = useThreadComposerState({ startSideChat });
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
-  const focusRequest = props.route.params?.crewRequest;
-  const exactRequestPending =
-    !focusRequest ||
-    selectedThreadDetail?.runtimeRequests.some(
-      (request) =>
-        request.id === focusRequest.requestId &&
-        request.status === "pending" &&
-        selectedThreadDetail.nodes.some(
-          (node) => node.id === request.nodeId && node.runId === focusRequest.runId,
-        ),
-    ) === true;
-  const requests = useSelectedThreadRequests(focusRequest?.requestId, exactRequestPending);
+  const crewRequest = mobileCrewRequestState(
+    props.route.params?.crewRequest,
+    selectedThreadDetailState.status === "deleted" ? null : selectedThreadDetail,
+    selectedThreadDetailState.status === "live" || selectedThreadDetailState.status === "deleted",
+  );
+  const requests = useSelectedThreadRequests(
+    crewRequest.kind === "ordinary"
+      ? undefined
+      : crewRequest.kind === "pending"
+        ? crewRequest.requestId
+        : null,
+  );
   useThreadStatusAnnouncements({
     threadKey:
       selectedThread === null || isProviderNativeSubagentThread(selectedThread.source)
@@ -1104,8 +1104,6 @@ function ThreadRouteContent(
                   coordinator:
                     props.route.params?.crewCoordinatorProjectId === selectedThread.projectId,
                   source: props.route.params?.crewSourceProjectId === selectedThread.projectId,
-                  focusRequest,
-                  exactRequestPending,
                 }
               : undefined
           }
@@ -1132,6 +1130,7 @@ function ThreadRouteContent(
             )
           }
           canOperateThread={canOperateThread}
+          crewRequest={crewRequest}
           selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
           selectedThreadDetailRef={selectedThreadDetailRef}
           contentPresentation={contentPresentation}
