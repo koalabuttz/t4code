@@ -18,6 +18,7 @@ type Action =
       readonly kind: "open-thread";
       readonly threadId: ThreadId;
       readonly focus?: "approval" | "input";
+      readonly requestId?: string;
     }
   | { readonly kind: "open-task"; readonly taskId: string }
   | { readonly kind: "retry-delivery"; readonly deliveryId: string }
@@ -30,6 +31,13 @@ export interface CrewSupervisionInput {
   readonly coordinatorExecution: Execution | null;
   readonly deliveries: TeamworkReadResult["deliveries"];
   readonly freshness: Freshness;
+  // Supply only facts about the thread's current pending question.
+  readonly inputRequests?: ReadonlyArray<{
+    readonly threadId: ThreadId;
+    readonly requestId?: string;
+    readonly userOnly?: boolean;
+    readonly responseActor?: Actor;
+  }>;
   // Only explicit review assignments for this exact submission belong here.
   readonly reviewAssignments?: ReadonlyArray<{
     readonly taskId: string;
@@ -81,6 +89,7 @@ export interface CrewSupervisionItem {
   readonly submissionRevision?: number;
   readonly dependencyIds?: ReadonlyArray<string>;
   readonly deliveryId?: string;
+  readonly requestId?: string;
 }
 
 export type CrewPrerequisite =
@@ -198,17 +207,32 @@ export function classifyCrewSupervision(input: CrewSupervisionInput) {
       });
     }
     if (execution.state === "approval" || execution.state === "input") {
+      const requests =
+        execution.state === "input"
+          ? input.inputRequests?.filter((request) => request.threadId === execution.threadId)
+          : undefined;
+      const request = requests?.length === 1 ? requests[0] : undefined;
+      const responseActor =
+        execution.state === "approval" || request?.userOnly === true
+          ? human
+          : (request?.responseActor ?? unknown);
       return add({
         ...base,
         kind: execution.state,
         label: execution.state === "approval" ? "Approval needed" : "Question needs a response",
-        actor: human,
-        responsibility: "human",
+        actor: responseActor,
+        responsibility: responseActor.kind === "agent" ? "crew" : responseActor.kind,
         attention: true,
+        ...(request?.requestId ? { requestId: request.requestId } : {}),
         action:
           execution.threadId === null
             ? null
-            : { kind: "open-thread", threadId: execution.threadId, focus: execution.state },
+            : {
+                kind: "open-thread",
+                threadId: execution.threadId,
+                focus: execution.state,
+                ...(request?.requestId ? { requestId: request.requestId } : {}),
+              },
       });
     }
     if (execution.state === "failed")
@@ -234,14 +258,18 @@ export function classifyCrewSupervision(input: CrewSupervisionInput) {
         label:
           paused && !isCoordinator
             ? "Stopping workers…"
-            : execution.state === "waiting"
-              ? "Waiting for ongoing work"
-              : isCoordinator
-                ? "Coordinator running"
-                : "Worker running",
+            : execution.state === "starting"
+              ? isCoordinator
+                ? "Coordinator starting"
+                : "Worker starting"
+              : execution.state === "waiting"
+                ? "Waiting for ongoing work"
+                : isCoordinator
+                  ? "Coordinator running"
+                  : "Worker running",
         responsibility: execution.state === "waiting" && !paused ? "waiting" : "crew",
         actor: agent(execution.threadId),
-        underway: true,
+        underway: execution.state !== "starting",
         attention: paused && !isCoordinator,
       });
     if (execution.state === "stopped" && !paused)
@@ -328,7 +356,7 @@ export function classifyCrewSupervision(input: CrewSupervisionInput) {
         current &&
         assignment?.execution?.threadId === assignment?.threadId &&
         assignment?.execution !== undefined &&
-        ["starting", "working"].includes(assignment.execution.state);
+        assignment.execution.state === "working";
       add({
         ...base,
         id: `task:${task.id}:review`,
@@ -532,7 +560,15 @@ export function classifyCrewSupervision(input: CrewSupervisionInput) {
         needingReview: owned.filter((task) => task.status === "review").length,
         running: current
           ? owned.filter(
-              (task) => task.ownerThreadId !== null && active(observed.get(task.id)!.state),
+              (task) =>
+                task.ownerThreadId !== null &&
+                active(observed.get(task.id)!.state) &&
+                observed.get(task.id)!.state !== "starting",
+            ).length
+          : null,
+        starting: current
+          ? owned.filter(
+              (task) => task.ownerThreadId !== null && observed.get(task.id)!.state === "starting",
             ).length
           : null,
         finished: current

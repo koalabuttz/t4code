@@ -67,20 +67,69 @@ const input = (overrides: Partial<CrewSupervisionInput> = {}): CrewSupervisionIn
 
 describe("Crew supervision", () => {
   it("distinguishes human responses, crew execution and unknown review ownership", () => {
-    for (const state of ["approval", "input"] as const) {
+    const responder = { kind: "agent", threadId: coordinator } as const;
+    for (const { state, request, actor, responsibility } of [
+      { state: "approval", request: undefined, actor: { kind: "human" }, responsibility: "human" },
+      { state: "input", request: undefined, actor: { kind: "unknown" }, responsibility: "unknown" },
+      {
+        state: "input",
+        request: { userOnly: false },
+        actor: { kind: "unknown" },
+        responsibility: "unknown",
+      },
+      {
+        state: "input",
+        request: { userOnly: true },
+        actor: { kind: "human" },
+        responsibility: "human",
+      },
+      {
+        state: "input",
+        request: { responseActor: responder },
+        actor: responder,
+        responsibility: "crew",
+      },
+      {
+        state: "input",
+        request: { responseActor: { kind: "human" } },
+        actor: { kind: "human" },
+        responsibility: "human",
+      },
+      {
+        state: "input",
+        request: { userOnly: true, responseActor: responder },
+        actor: { kind: "human" },
+        responsibility: "human",
+      },
+      {
+        state: "approval",
+        request: { responseActor: responder },
+        actor: { kind: "human" },
+        responsibility: "human",
+      },
+    ] as const) {
       const result = classifyCrewSupervision(
         input({
           execution: [
             { taskId: "task", threadId: worker, state, detail: null, needsAttention: true },
           ],
+          ...(request
+            ? { inputRequests: [{ threadId: worker, requestId: "question", ...request }] }
+            : {}),
         }),
       );
       expect(result.attention[0]).toMatchObject({
         kind: state,
-        responsibility: "human",
-        actor: { kind: "human" },
+        responsibility,
+        actor,
+        underway: false,
         action: { kind: "open-thread", threadId: worker, focus: state },
       });
+      if (request && state === "input")
+        expect(result.attention[0]).toMatchObject({
+          requestId: "question",
+          action: { requestId: "question" },
+        });
     }
     const active = classifyCrewSupervision(input());
     expect(active.initiatives[0]?.next).toMatchObject({
@@ -95,6 +144,58 @@ describe("Crew supervision", () => {
       running: 1,
       milestonesAccepted: 0,
     });
+    const starting = classifyCrewSupervision(
+      input({
+        execution: [
+          {
+            taskId: "task",
+            threadId: worker,
+            state: "starting",
+            detail: null,
+            needsAttention: false,
+          },
+        ],
+        coordinatorExecution: { threadId: coordinator, state: "starting", detail: null },
+      }),
+    );
+    expect.soft(starting.items.find((item) => item.threadId === worker)).toMatchObject({
+      label: "Worker starting",
+      underway: false,
+      actor: { kind: "agent", threadId: worker },
+    });
+    expect.soft(starting.items.find((item) => item.threadId === coordinator)).toMatchObject({
+      label: "Coordinator starting",
+      underway: false,
+    });
+    expect.soft(starting.initiatives[0]?.progress).toMatchObject({ running: 0, starting: 1 });
+    expect(starting.initiatives[0]?.resume.prerequisites).toContainEqual({
+      kind: "wait-worker",
+      threadId: worker,
+    });
+    expect(starting.handover.prerequisites).toEqual(
+      expect.arrayContaining([
+        { kind: "wait-worker", threadId: worker },
+        { kind: "stop-coordinator", threadId: coordinator },
+      ]),
+    );
+    for (const state of ["working", "waiting"] as const) {
+      const ongoing = classifyCrewSupervision(
+        input({
+          execution: [
+            { taskId: "task", threadId: worker, state, detail: null, needsAttention: false },
+          ],
+          coordinatorExecution: { threadId: coordinator, state, detail: null },
+        }),
+      );
+      expect(ongoing.items.find((item) => item.threadId === worker)).toMatchObject({
+        label: state === "waiting" ? "Waiting for ongoing work" : "Worker running",
+        underway: true,
+      });
+      expect(ongoing.items.find((item) => item.threadId === coordinator)).toMatchObject({
+        label: state === "waiting" ? "Waiting for ongoing work" : "Coordinator running",
+        underway: true,
+      });
+    }
     const reviewTask = task({
       status: "review",
       submission: {
@@ -133,6 +234,20 @@ describe("Crew supervision", () => {
       underway: true,
       actor: { kind: "agent", threadId: coordinator },
     });
+    expect
+      .soft(
+        classifyCrewSupervision({
+          ...reviewing,
+          reviewAssignments: [
+            { ...assignment, execution: { ...assignment.execution, state: "starting" } },
+          ],
+        }).attention.find((item) => item.kind === "review"),
+      )
+      .toMatchObject({
+        responsibility: "crew",
+        underway: false,
+        actor: { kind: "agent", threadId: coordinator },
+      });
     expect(
       classifyCrewSupervision({
         ...reviewing,
@@ -209,6 +324,20 @@ describe("Crew supervision", () => {
       kind: "stopping",
       label: "Stopping workers…",
       underway: true,
+    });
+    const starting = classifyCrewSupervision({
+      ...running,
+      execution: running.execution.map((execution) => ({
+        ...execution,
+        state: "starting" as const,
+      })),
+    });
+    expect(starting.initiatives[0]?.pause.state).toBe("stopping");
+    expect(starting.attention[0]).toMatchObject({
+      kind: "stopping",
+      label: "Stopping workers…",
+      underway: false,
+      lastKnownState: "starting",
     });
     for (const status of ["pending", "failed"] as const) {
       const result = classifyCrewSupervision({
