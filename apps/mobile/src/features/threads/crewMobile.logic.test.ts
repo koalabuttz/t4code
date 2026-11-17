@@ -11,6 +11,8 @@ import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { makeRawThreadShell, makeThreadShellFixture } from "../../test-fixtures";
 import {
   mobileCrewArtifactWorkspace,
+  mobileCrewDraftAfterSave,
+  mobileCrewMessageDeliveries,
   mobileCrewRecipients,
   mobileCrewSupervision,
 } from "./crewMobile.logic";
@@ -62,6 +64,76 @@ const data = (): TeamworkReadResult => ({
 });
 
 describe("mobile Crew source adaptation", () => {
+  it("clears only an unchanged saved quiet note and preserves in-flight edits or unconfirmed sends", () => {
+    const submitted = { text: "Original note", recipients: [worker], intent: "note" as const };
+    expect(mobileCrewDraftAfterSave(submitted, submitted, true)).toEqual({
+      ...submitted,
+      text: "",
+    });
+    for (const current of [
+      { ...submitted, text: "New note typed during save" },
+      { ...submitted, intent: "ask" as const },
+      { ...submitted, recipients: [coordinator] },
+    ]) {
+      expect(mobileCrewDraftAfterSave(current, submitted, true)).toBe(current);
+    }
+    for (const saved of [false, undefined]) {
+      expect(mobileCrewDraftAfterSave(submitted, submitted, saved)).toBe(submitted);
+    }
+    const question = { ...submitted, intent: "ask" as const };
+    expect(mobileCrewDraftAfterSave(question, question, true)).toBe(question);
+  });
+
+  it("correlates each recipient's delivery to its board revision rather than their latest project message", () => {
+    const projectId = ProjectId.make("project-test");
+    const entry = {
+      id: "question-one",
+      revision: 7,
+      initiativeId: "one",
+      text: "First question",
+      recipients: [worker, coordinator],
+      authorThreadId: null,
+      createdAt: "2026-11-17T00:00:00Z",
+    };
+    const matching = {
+      id: `${projectId}:7:0`,
+      threadId: worker,
+      kind: "message" as const,
+      status: "failed" as const,
+    };
+    const deliveries: TeamworkReadResult["deliveries"] = [
+      { ...matching, id: `${projectId}:8:0`, status: "delivered" },
+      { ...matching, id: `${projectId}:70:0`, status: "pending" },
+      { ...matching, id: "other-project:7:0", status: "delivered" },
+      { ...matching, id: `${projectId}:7:1`, kind: "stop" },
+      matching,
+    ];
+    expect(mobileCrewMessageDeliveries(projectId, entry, deliveries)).toEqual([
+      { threadId: worker, delivery: matching },
+      { threadId: coordinator, delivery: null },
+    ]);
+    const secondInitiativeMessage = {
+      ...entry,
+      id: "question-two",
+      initiativeId: "two",
+      revision: 8,
+    };
+    expect(
+      mobileCrewMessageDeliveries(projectId, secondInitiativeMessage, deliveries)[0]?.delivery,
+    ).toEqual(deliveries[0]);
+    expect(
+      mobileCrewMessageDeliveries(projectId, { ...entry, revision: undefined }, deliveries),
+    ).toEqual([
+      { threadId: worker, delivery: null },
+      { threadId: coordinator, delivery: null },
+    ]);
+    for (const status of ["pending", "delivered", "failed", "cancelled"] as const) {
+      const delivery = { ...matching, status };
+      expect(mobileCrewMessageDeliveries(projectId, entry, [delivery])[0]?.delivery).toEqual(
+        delivery,
+      );
+    }
+  });
   it("takes question identity and human-only ownership only from the current shell request", () => {
     for (const userOnly of [false, true]) {
       const source = makeRawThreadShell({

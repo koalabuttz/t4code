@@ -28,6 +28,7 @@ import {
   type ProjectId,
   type ThreadId,
   type TeamworkAction,
+  type TeamworkSnapshot,
 } from "@t3tools/contracts";
 import type { CrewPrerequisite, CrewSupervisionItem } from "@t3tools/shared/crewSupervision";
 import { crewDeliveryNotice } from "@t3tools/shared/crewArtifacts";
@@ -52,6 +53,8 @@ import { useRetryEnvironment } from "../connection/useRetryEnvironment";
 import { appAtomRegistry } from "../../state/atom-registry";
 import {
   mobileCrewArtifactWorkspace,
+  mobileCrewDraftAfterSave,
+  mobileCrewMessageDeliveries,
   mobileCrewRecipients,
   mobileCrewSupervision,
 } from "./crewMobile.logic";
@@ -109,6 +112,8 @@ export function TeamworkSheet({
   const [brief, setBrief] = useAtom(crewDraftBrief(projectKey));
   const [mode, setMode] = useAtom(crewDraftMode(projectKey));
   const [draft, setDraft] = useAtom(crewMessageDraft(projectKey));
+  const [messageNotice, setMessageNotice] = useState<string | null>(null);
+  const [lastMessageId, setLastMessageId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [knowledgeId, setKnowledgeId] = useState<string | null>(null);
@@ -159,7 +164,7 @@ export function TeamworkSheet({
     const releases = ids.map((id) => threadFamilies.mount(appAtomRegistry, environmentId, id));
     return () => releases.forEach((release) => release());
   }, [environmentId, familyIds]);
-  const act = async (action: TeamworkAction) => {
+  const act = async (action: TeamworkAction, commandId = CommandId.make(uuidv4())) => {
     if (!state || busy || !canEdit || freshness !== "current") return false;
     setBusy(true);
     setError(null);
@@ -167,7 +172,7 @@ export function TeamworkSheet({
       environmentId,
       input: {
         projectId,
-        commandId: CommandId.make(uuidv4()),
+        commandId,
         expectedRevision: state.revision,
         action,
       },
@@ -396,6 +401,79 @@ export function TeamworkSheet({
   );
   const recipients = initiative && state ? mobileCrewRecipients(state, initiative.id, threads) : [];
   const validRecipients = draft.recipients.filter((id) => recipients.includes(id));
+  const renderBoardMessage = (message: TeamworkSnapshot["board"][number]) => {
+    const messageInitiative = state?.initiatives.find((item) => item.id === message.initiativeId);
+    const deliveries = mobileCrewMessageDeliveries(
+      projectId,
+      message,
+      query.data?.deliveries ?? [],
+    );
+    return (
+      <View key={message.id} className="gap-2 rounded-2xl bg-secondary p-4">
+        <AppText className="font-t3-semibold">
+          {message.initiativeId === null
+            ? "Project crew"
+            : (messageInitiative?.title ?? "Initiative unavailable")}
+        </AppText>
+        <AppText>
+          {message.recipients.length ? "Asked crew" : "Quiet note"} ·{" "}
+          {message.authorThreadId ? threadName(message.authorThreadId) : "You"} ·{" "}
+          {message.createdAt}
+        </AppText>
+        <AppText selectable>{message.text}</AppText>
+        {message.recipients.length === 0 ? (
+          <AppText>No agent notification requested.</AppText>
+        ) : (
+          <>
+            <AppText>
+              Recorded delivery for this message. Delivery does not confirm an answer.
+            </AppText>
+            {deliveries.map(({ threadId: recipient, delivery }) => (
+              <View key={recipient} className="gap-2">
+                <AppText>
+                  {threadName(recipient)}:{" "}
+                  {delivery === null
+                    ? "Delivery details are unavailable in the current history window."
+                    : delivery.status === "pending"
+                      ? "Delivery pending"
+                      : delivery.status === "delivered"
+                        ? "Delivered; answer not confirmed"
+                        : delivery.status === "failed"
+                          ? "Delivery failed"
+                          : "Delivery cancelled"}
+                </AppText>
+                {delivery?.status === "failed" && (
+                  <>
+                    <Button
+                      label="Retry this message delivery"
+                      disabled={disabled || messageInitiative?.status !== "active"}
+                      onPress={() => void act({ type: "delivery.retry", id: delivery.id })}
+                    />
+                    {messageInitiative?.status !== "active" && (
+                      <AppText>
+                        Delivery retry requires an active initiative. Resume explicitly before
+                        notifying its crew.
+                      </AppText>
+                    )}
+                    {messageInitiative && messageInitiative.status !== "active" && (
+                      <Button
+                        label="Review this initiative's resume prerequisites"
+                        onPress={() => {
+                          setSelected(messageInitiative.id);
+                          go("recovery");
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+              </View>
+            ))}
+          </>
+        )}
+      </View>
+    );
+  };
+  const lastMessage = state?.board.find((message) => message.id === lastMessageId);
   const composer = initiative && (
     <View className="gap-3">
       <AppText className="text-lg font-t3-semibold">Quick response</AppText>
@@ -477,15 +555,39 @@ export function TeamworkSheet({
         }
         onPress={async () => {
           if (
-            await act({
+            disabled ||
+            !draft.text.trim() ||
+            (draft.intent === "ask" &&
+              (initiative.status !== "active" ||
+                validRecipients.length === 0 ||
+                validRecipients.length !== draft.recipients.length))
+          )
+            return;
+          const submitted = draft;
+          const messageId = CommandId.make(uuidv4());
+          setLastMessageId(messageId);
+          setMessageNotice(
+            submitted.intent === "ask"
+              ? "Saving question and queueing delivery…"
+              : "Saving quiet note…",
+          );
+          const saved = await act(
+            {
               type: "board.post",
               initiativeId: initiative.id,
-              text: draft.text,
-              recipients: draft.intent === "ask" ? validRecipients : [],
-            })
-          ) {
-            if (draft.intent === "note") setDraft({ ...draft, text: "" });
-          }
+              text: submitted.text,
+              recipients: submitted.intent === "ask" ? validRecipients : [],
+            },
+            messageId,
+          );
+          setDraft((current) => mobileCrewDraftAfterSave(current, submitted, saved));
+          setMessageNotice(
+            saved
+              ? submitted.intent === "ask"
+                ? "Question saved for delivery. Your draft is retained; delivery is not an answer."
+                : "Note saved quietly; no agent turn was started."
+              : "Could not confirm the save. Your draft is retained; check the board before retrying.",
+          );
         }}
       />
       {draft.intent === "ask" && (
@@ -495,31 +597,20 @@ export function TeamworkSheet({
             instead of sending it twice.
           </AppText>
           <Button label="Clear message draft" onPress={() => setDraft({ ...draft, text: "" })} />
-          {query.data?.deliveries
-            .filter(
-              (delivery) =>
-                delivery.kind === "message" && validRecipients.includes(delivery.threadId),
-            )
-            .filter(
-              (delivery, index, deliveries) =>
-                deliveries.findIndex((candidate) => candidate.threadId === delivery.threadId) ===
-                index,
-            )
-            .map((delivery) => (
-              <View key={delivery.id} className="gap-2">
-                <AppText>
-                  Latest recorded message delivery to {threadName(delivery.threadId)}:{" "}
-                  {delivery.status}. Delivery is not an answer.
-                </AppText>
-                {delivery.status === "failed" && (
-                  <Button
-                    label="Retry recorded message delivery"
-                    disabled={disabled || initiative.status !== "active"}
-                    onPress={() => void act({ type: "delivery.retry", id: delivery.id })}
-                  />
-                )}
-              </View>
-            ))}
+        </>
+      )}
+      {messageNotice && <AppText accessibilityLiveRegion="polite">{messageNotice}</AppText>}
+      {lastMessageId && page !== "board" && (
+        <>
+          {lastMessage ? (
+            renderBoardMessage(lastMessage)
+          ) : (
+            <AppText>
+              This message is not in the current board window. Check messages or history for its
+              saved result.
+            </AppText>
+          )}
+          <Button label="View messages and their delivery" onPress={() => go("board")} />
         </>
       )}
     </View>
@@ -1109,39 +1200,8 @@ export function TeamworkSheet({
                   (message) =>
                     message.initiativeId === initiative?.id || message.initiativeId === null,
                 )
-                .map((message) => (
-                  <View key={message.id} className="gap-2 rounded-2xl bg-secondary p-4">
-                    <AppText>
-                      {message.recipients.length ? "Asked crew" : "Quiet note"} ·{" "}
-                      {message.authorThreadId
-                        ? (threads.find((thread) => thread.id === message.authorThreadId)?.title ??
-                          "Crew")
-                        : "You"}
-                    </AppText>
-                    <AppText selectable>{message.text}</AppText>
-                  </View>
-                ))}
-              <AppText className="font-t3-semibold">Delivery status</AppText>
-              <AppText>
-                Delivered means the request reached the agent. Read its conversation for the answer.
-              </AppText>
-              {query.data?.deliveries.map((delivery) => (
-                <View key={delivery.id} className="gap-2">
-                  <AppText>
-                    {delivery.kind} to{" "}
-                    {threads.find((thread) => thread.id === delivery.threadId)?.title ??
-                      delivery.threadId}
-                    : {delivery.status}
-                  </AppText>
-                  {delivery.status === "failed" && (
-                    <Button
-                      label={`Retry failed ${delivery.kind}`}
-                      disabled={disabled}
-                      onPress={() => void act({ type: "delivery.retry", id: delivery.id })}
-                    />
-                  )}
-                </View>
-              ))}
+                .reverse()
+                .map(renderBoardMessage)}
             </>
           )}
           {page === "knowledge" && (

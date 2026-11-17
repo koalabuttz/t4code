@@ -1,7 +1,39 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { crewMessageDraft } from "@t3tools/client-runtime/state/crew";
 import type { TeamworkReadResult, TeamworkSnapshot, ThreadId } from "@t3tools/contracts";
+import type { Atom } from "effect/reactivity";
 import { crewTaskExecution } from "@t3tools/shared/crewExecution";
 import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
+
+type MessageDraft = Atom.Type<ReturnType<typeof crewMessageDraft>>;
+
+export function mobileCrewDraftAfterSave(
+  current: MessageDraft,
+  submitted: MessageDraft,
+  saved: boolean | undefined,
+) {
+  return saved && submitted.intent === "note" && current === submitted
+    ? { ...current, text: "" }
+    : current;
+}
+
+export function mobileCrewMessageDeliveries(
+  projectId: TeamworkSnapshot["projectId"],
+  entry: TeamworkSnapshot["board"][number],
+  deliveries: TeamworkReadResult["deliveries"],
+) {
+  return entry.recipients.map((threadId) => ({
+    threadId,
+    delivery:
+      deliveries.find(
+        (delivery) =>
+          delivery.kind === "message" &&
+          delivery.threadId === threadId &&
+          entry.revision !== undefined &&
+          delivery.id.startsWith(`${projectId}:${entry.revision}:`),
+      ) ?? null,
+  }));
+}
 
 export function mobileCrewSupervision(
   data: TeamworkReadResult,
