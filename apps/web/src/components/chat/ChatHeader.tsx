@@ -58,6 +58,7 @@ interface ChatHeaderProps {
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
   onFindInThread?: ((threadRef: ScopedThreadRef) => void) | undefined;
+  crewConversation?: boolean;
 }
 
 function resolveRenameCommit(input: {
@@ -83,6 +84,7 @@ export const ChatHeader = memo(function ChatHeader({
   onNewThreadInProject,
   onOpenProjectSettings,
   onFindInThread,
+  crewConversation,
 }: ChatHeaderProps) {
   const activeProjectName = activeProject?.isScratch ? "No project" : activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
@@ -400,12 +402,11 @@ export const ChatHeader = memo(function ChatHeader({
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
       {isServerThread ? <GuestShareIndicator threadRef={activeThreadRef} /> : null}
-      {isServerThread && activeProject ? (
+      {isServerThread && activeProject && !crewConversation ? (
         <TeamworkButton
           environmentId={activeThreadEnvironmentId}
           projectId={activeProject.id}
           threadId={activeThreadId}
-          onOpenThread={onOpenThread}
         />
       ) : null}
     </div>

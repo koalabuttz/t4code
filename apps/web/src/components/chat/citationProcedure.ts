@@ -151,6 +151,7 @@ interface CitedHistoryKey {
   readonly environmentId: AssistantCitationRequest["citation"]["environmentId"];
   readonly threadId: AssistantCitationRequest["citation"]["threadId"];
   readonly messageId: AssistantCitationRequest["citation"]["messageId"];
+  readonly reportFailure: boolean;
 }
 
 function waitForSettledThread(
@@ -185,7 +186,7 @@ function waitForSettledThread(
  * Plain-object keys compare structurally, so one activation is one procedure.
  */
 const citedHistoryAtom = Atom.family(
-  ({ key, environmentId, threadId, messageId }: CitedHistoryKey) => {
+  ({ key, environmentId, threadId, messageId, reportFailure }: CitedHistoryKey) => {
     const ref = { environmentId, threadId };
     const threadAtom = environmentThreadDetails.quietThreadAtom(ref);
     const historyAtom = environmentThreadDetails.historyAtom(ref);
@@ -219,7 +220,7 @@ const citedHistoryAtom = Atom.family(
         },
       }).then((outcome) => {
         if (outcome._tag === "aborted") return;
-        if (outcome._tag === "failed") {
+        if (outcome._tag === "failed" && reportFailure) {
           toastManager.add({
             type: "warning",
             title: outcome.title,
@@ -236,14 +237,19 @@ const citedHistoryAtom = Atom.family(
 const NO_CITED_HISTORY_ATOM = Atom.make<CitedHistory>({ _tag: "loading" });
 
 export function useCitedHistory(request: AssistantCitationRequest | null): CitedHistory {
-  return useAtomValue(
+  return useCitedMessageHistory(
     request === null
-      ? NO_CITED_HISTORY_ATOM
-      : citedHistoryAtom({
+      ? null
+      : {
           key: request.key,
           environmentId: request.citation.environmentId,
           threadId: request.citation.threadId,
           messageId: request.citation.messageId,
-        }),
+          reportFailure: true,
+        },
   );
+}
+
+export function useCitedMessageHistory(source: CitedHistoryKey | null): CitedHistory {
+  return useAtomValue(source === null ? NO_CITED_HISTORY_ATOM : citedHistoryAtom(source));
 }
