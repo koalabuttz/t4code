@@ -1,0 +1,62 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'koalabuttz/t4code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Fetch upstream
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags https://github.com/pingdotgg/t3code.git +refs/heads/main:refs/remotes/upstream/main
+      - name: Prepare update without overwriting fork changes
+        id: merge
+        run: node .github/scripts/sync-upstream.cjs
+      - name: Open the update for manual review and run CI
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SYNC_UPDATED: ${{ steps.merge.outputs.updated }}
+          SYNC_EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          existing=$(gh pr list --head automation/upstream-sync --base main --state open --json number --jq '.[0].number // empty')
+          if [ -z "$existing" ]; then
+            cat > "$RUNNER_TEMP/upstream-sync-body.md" <<'BODY'
+          Merge the latest upstream main while preserving this fork's Crew and Albedo changes.
+
+          CI is dispatched explicitly because updates pushed by GITHUB_TOKEN do not trigger push workflows. Review the changes and merge manually after the required Check passes. Conflicts stop the sync without pushing; resolve them on this branch or rerun after updating main.
+
+          Created by the daily upstream sync workflow.
+          BODY
+            gh pr create --base main --head automation/upstream-sync --title 'chore: sync upstream main' --body-file "$RUNNER_TEMP/upstream-sync-body.md"
+          fi
+          if [ "$SYNC_UPDATED" = true ] || [ -z "$existing" ] || [ "$SYNC_EVENT" = workflow_dispatch ]; then
+            gh workflow run ci.yml --ref automation/upstream-sync
+          fi
+      - name: Explain a failed sync
+        if: failure()
+        run: echo 'Sync failed. Inspect the failing step; main was not changed. Resolve conflicts or restore workflow permissions, then run Sync upstream again.' >> "$GITHUB_STEP_SUMMARY"
