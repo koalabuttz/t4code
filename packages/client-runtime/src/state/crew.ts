@@ -1,11 +1,72 @@
 import {
   isProviderNativeSubagentThread,
+  type MessageId,
   type ScopedProjectRef,
   type ThreadId,
 } from "@t3tools/contracts";
+import type {
+  CrewConsultation,
+  CrewConversationPage,
+  CrewConversationQuery,
+  CrewHandoff,
+} from "@t3tools/contracts/crewConversation";
+import { sameCrewProject } from "@t3tools/shared/crewConversation";
 import { Atom, type AtomRegistry } from "effect/reactivity";
 import { scopedProjectKey } from "../environment/scoped.ts";
 import type { EnvironmentThreadShell } from "./models.ts";
+
+export function crewHandoffMessageId(
+  handoff: Pick<CrewHandoff, "origin" | "explanation">,
+  visibleMessageIds: readonly MessageId[],
+) {
+  return visibleMessageIds.includes(handoff.explanation.messageId)
+    ? handoff.explanation.messageId
+    : visibleMessageIds.includes(handoff.origin.messageId)
+      ? handoff.origin.messageId
+      : null;
+}
+
+export async function readCrewTimelineMetadata(
+  scope: ScopedProjectRef,
+  threadId: ThreadId,
+  messageIds: readonly MessageId[],
+  read: (query: CrewConversationQuery) => Promise<CrewConversationPage>,
+  signal: AbortSignal,
+) {
+  const consultations = new Map<string, CrewConsultation>();
+  const handoffs = new Map<string, CrewHandoff>();
+  const ids = [...new Set(messageIds)].sort();
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const batch = ids.slice(offset, offset + 100);
+    for (const collection of ["consultations", "handoffs"] as const) {
+      let cursor: string | undefined;
+      do {
+        signal.throwIfAborted();
+        const page = await read({
+          scope,
+          threadId,
+          collection,
+          messageIds: batch,
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+        });
+        signal.throwIfAborted();
+        if (!sameCrewProject(page.scope, scope))
+          throw new Error("The exchange belongs to another project.");
+        for (const record of page.consultations) consultations.set(record.id, record);
+        for (const record of page.handoffs) handoffs.set(record.id, record);
+        if (page.nextCursor !== null && cursor !== undefined && page.nextCursor <= cursor)
+          throw new Error("The exchange page could not be advanced.");
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor !== undefined);
+    }
+  }
+  return {
+    consultations: [...consultations.values()],
+    handoffs: [...handoffs.values()],
+    messageIds: ids,
+  };
+}
 
 export function crewLiveFreshness(
   connected: boolean,

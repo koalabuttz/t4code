@@ -1,6 +1,10 @@
 import { useNavigation } from "@react-navigation/native";
 import { scopedProjectKey } from "@t3tools/client-runtime/environment";
-import { crewDraftBrief, crewSelectedInitiative } from "@t3tools/client-runtime/state/crew";
+import {
+  crewDraftBrief,
+  crewSelectedInitiative,
+  crewHandoffMessageId,
+} from "@t3tools/client-runtime/state/crew";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { AuthOrchestrationReadScope, type MessageId, type ThreadId } from "@t3tools/contracts";
 import type {
@@ -36,6 +40,7 @@ import {
   useCrewHumanAttention,
   useCrewProject,
   useCrewRead,
+  useCrewTimelineMetadata,
 } from "./use-crew-project";
 
 export type CrewChatRoute = {
@@ -95,16 +100,7 @@ function useCrewChatModel(
   );
   const navigation = useNavigation();
   const controls = useCrewControls(scope, snapshot?.revision, freshness === "current");
-  const consultations = useCrewCollection(active ? scope : null, {
-    collection: "consultations",
-    threadId: thread.id,
-    limit: 100,
-  });
-  const handoffs = useCrewCollection(active ? scope : null, {
-    collection: "handoffs",
-    threadId: thread.id,
-    limit: 100,
-  });
+  const metadata = useCrewTimelineMetadata(active ? scope : null, thread.id, snapshot?.revision);
   const attention = useCrewCollection(active && !route.coordinator ? scope : null, {
     collection: "attention",
     ...(route.coordinator ? {} : { threadId: thread.id }),
@@ -113,7 +109,7 @@ function useCrewChatModel(
   const exchange = useMemo(() => {
     const byOrigin = new Map<MessageId, CrewConsultation[]>();
     const returns = new Map<string, CrewConsultation>();
-    for (const consultation of consultations.data?.consultations ?? []) {
+    for (const consultation of metadata.data?.consultations ?? []) {
       if (
         !sameCrewConversation(consultation.origin.conversation, conversation) ||
         !sameCrewProject(consultation.destination, conversation)
@@ -126,18 +122,21 @@ function useCrewChatModel(
         returns.set(`${consultation.deliveryId}:return`, consultation);
     }
     const routes = new Map<MessageId, CrewHandoff[]>();
-    for (const handoff of handoffs.data?.handoffs ?? []) {
+    for (const handoff of metadata.data?.handoffs ?? []) {
       if (
         !sameCrewConversation(handoff.origin.conversation, conversation) ||
+        !sameCrewConversation(handoff.explanation.conversation, conversation) ||
         !sameCrewProject(handoff.destination, conversation)
       )
         continue;
-      const items = routes.get(handoff.origin.messageId) ?? [];
+      const messageId = crewHandoffMessageId(handoff, metadata.data?.messageIds ?? []);
+      if (!messageId) continue;
+      const items = routes.get(messageId) ?? [];
       items.push(handoff);
-      routes.set(handoff.origin.messageId, items);
+      routes.set(messageId, items);
     }
     return { byOrigin, returns, routes };
-  }, [conversation, consultations.data, handoffs.data]);
+  }, [conversation, metadata.data]);
   const initiatives = snapshot?.initiatives ?? [];
   const actionInitiative =
     initiatives.findLast((initiative) => initiative.status === "active") ??
@@ -196,6 +195,7 @@ function useCrewChatModel(
     freshness,
     controls,
     exchange,
+    onVisibleMessages: metadata.onVisibleMessages,
     requests: humanAttention.requests,
     requestsComplete: !humanAttention.checking && humanAttention.nextCursor === null,
     inbox,
@@ -205,7 +205,9 @@ function useCrewChatModel(
     pauseOrRecover,
     threadName,
     available,
-    queryError: consultations.error ?? handoffs.error ?? attention.error ?? humanAttention.error,
+    queryError: metadata.error ?? attention.error ?? humanAttention.error,
+    metadataError: metadata.error,
+    refreshMetadata: metadata.refresh,
     deliveries: query.data?.deliveries ?? [],
     openExchange: (kind: "handoffs" | "consultations", id: string) => {
       Keyboard.dismiss();
@@ -255,6 +257,9 @@ export function CrewChatStatus() {
         <AppText accessibilityRole="alert" numberOfLines={2}>
           {status ?? "Crew activity is unavailable."}
         </AppText>
+      )}
+      {chat.metadataError && (
+        <Button label="Retry exchanges" size="compact" onPress={chat.refreshMetadata} />
       )}
       {route.coordinator && (stop || plan) && (
         <Button

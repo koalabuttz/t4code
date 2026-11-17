@@ -5,6 +5,7 @@ import {
   type CrewProjectScope,
 } from "@t3tools/contracts/crewConversation";
 import type { MessageId, TeamworkSnapshot, ThreadId } from "@t3tools/contracts";
+import { crewHandoffMessageId } from "@t3tools/client-runtime/state/crew";
 import { sameCrewConversation, sameCrewProject } from "@t3tools/shared/crewConversation";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
@@ -164,10 +165,11 @@ export function crewChatExchanges(
   threadId: ThreadId,
   consultations: readonly CrewConsultation[],
   handoffs: readonly CrewHandoff[],
+  visibleMessageIds?: readonly MessageId[],
 ) {
   const byOrigin = new Map<MessageId, CrewConsultation[]>();
   const byReturn = new Map<string, CrewConsultation>();
-  const byExplanation = new Map<MessageId, CrewHandoff>();
+  const byHandoffMessage = new Map<MessageId, CrewHandoff>();
   for (const consultation of consultations) {
     const { origin, destination, progress } = consultation;
     if (
@@ -190,10 +192,13 @@ export function crewChatExchanges(
       sameCrewProject(handoff.explanation.conversation, scope) &&
       sameCrewProject(handoff.destination, scope)
     ) {
-      byExplanation.set(handoff.explanation.messageId, handoff);
+      const messageId = visibleMessageIds
+        ? crewHandoffMessageId(handoff, visibleMessageIds)
+        : handoff.explanation.messageId;
+      if (messageId) byHandoffMessage.set(messageId, handoff);
     }
   }
-  return { byOrigin, byReturn, byExplanation };
+  return { byOrigin, byReturn, byHandoffMessage };
 }
 
 const decodeReturnSource = Schema.decodeUnknownOption(Schema.fromJsonString(CrewMessageRef));

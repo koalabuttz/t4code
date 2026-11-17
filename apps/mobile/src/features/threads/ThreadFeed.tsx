@@ -48,7 +48,11 @@ import {
 } from "./worktree-setup-card";
 import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
-import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
+import {
+  useViewabilityAmount,
+  type LegendListRef,
+  type OnViewableItemsChangedInfo,
+} from "@legendapp/list/react-native";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
 import {
@@ -3571,6 +3575,22 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const setupDetailsOpen = setupDetailsThreadId === props.threadId && !!props.worktreeSetup;
   const openSetupDetails = () => setSetupDetailsThreadId(props.threadId);
   const crewChat = useCrewChat();
+  const reportCrewMessages = crewChat?.onVisibleMessages;
+  const visibleCrewMessages = useRef<readonly MessageId[]>([]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Publish the list's current visibility when asynchronous Crew discovery enables metadata lookup.
+  useEffect(() => {
+    reportCrewMessages?.(visibleCrewMessages.current);
+  }, [reportCrewMessages]);
+  const handleCrewViewability = useCallback(
+    ({ viewableItems }: OnViewableItemsChangedInfo<GroupedThreadFeedRow>) => {
+      const ids = viewableItems.flatMap(({ item }) =>
+        item.type === "message" ? [item.message.id] : [],
+      );
+      visibleCrewMessages.current = ids;
+      reportCrewMessages?.(ids);
+    },
+    [reportCrewMessages],
+  );
   const isCrewChat = crewChat !== null;
   const crewReturnMessages = useMemo(
     () =>
@@ -4195,6 +4215,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             extraData={listAppearanceData}
             renderItem={renderItem}
             viewabilityConfig={THREAD_MEDIA_VIEWABILITY_CONFIG}
+            onViewableItemsChanged={handleCrewViewability}
             keyExtractor={(entry) => entry.id}
             getItemType={(entry) => {
               // Same container as the live fold that replaces it.

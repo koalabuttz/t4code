@@ -590,6 +590,12 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
     const projectId = input.scope.projectId;
     yield* deps.authorize(projectId, actor);
     const state = yield* deps.load(projectId);
+    if (
+      input.messageIds !== undefined &&
+      (input.threadId === undefined ||
+        (input.collection !== "consultations" && input.collection !== "handoffs"))
+    )
+      return yield* fail("Select a conversation and its consultation or handoff messages.");
     if (actor !== null && actor !== state.coordinatorThreadId) {
       yield* participating(state, actor);
       if (input.threadId !== actor)
@@ -599,6 +605,7 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
         );
     }
     const limit = input.limit ?? 40;
+    const messageIds = input.messageIds === undefined ? null : yield* encodeState(input.messageIds);
     const rows = yield* sql<{
       id: string;
       payload_json: string;
@@ -606,7 +613,18 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
       WHERE project_id = ${projectId} AND collection = ${input.collection} AND id > ${input.cursor ?? ""}
       AND (${input.id ?? null} IS NULL OR id = ${input.id ?? null})
       AND (${input.threadId ?? null} IS NULL OR thread_id = ${input.threadId ?? null}
-        OR json_extract(payload_json, '$.origin.conversation.threadId') = ${input.threadId ?? null}) ORDER BY id LIMIT ${limit + 1}`;
+        OR json_extract(payload_json, '$.origin.conversation.threadId') = ${input.threadId ?? null})
+      AND (${messageIds} IS NULL OR (
+        json_extract(payload_json, '$.origin.conversation.environmentId') = ${input.scope.environmentId}
+        AND json_extract(payload_json, '$.origin.conversation.projectId') = ${projectId}
+        AND json_extract(payload_json, '$.origin.conversation.threadId') = ${input.threadId ?? null}
+        AND (json_extract(payload_json, '$.origin.messageId') IN (SELECT value FROM json_each(${messageIds}))
+          OR (${input.collection} = 'handoffs'
+            AND json_extract(payload_json, '$.explanation.conversation.environmentId') = ${input.scope.environmentId}
+            AND json_extract(payload_json, '$.explanation.conversation.projectId') = ${projectId}
+            AND json_extract(payload_json, '$.explanation.conversation.threadId') = ${input.threadId ?? null}
+            AND json_extract(payload_json, '$.explanation.messageId') IN (SELECT value FROM json_each(${messageIds}))))))
+      ORDER BY id LIMIT ${limit + 1}`;
     const entries = yield* Effect.forEach(rows.slice(0, limit), (row) =>
       decodeJson(row.payload_json),
     );

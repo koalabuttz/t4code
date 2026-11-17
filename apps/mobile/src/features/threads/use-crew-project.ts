@@ -1,7 +1,14 @@
 import { useAtomValue } from "@effect/atom-react";
-import { crewLiveFreshness } from "@t3tools/client-runtime/state/crew";
+import { crewLiveFreshness, readCrewTimelineMetadata } from "@t3tools/client-runtime/state/crew";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import { CommandId, TeamworkError, type TeamworkAction, type ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  TeamworkError,
+  type TeamworkAction,
+  type ThreadId,
+  type MessageId,
+  type ScopedProjectRef,
+} from "@t3tools/contracts";
 import { sameCrewProject } from "@t3tools/shared/crewConversation";
 import * as Schema from "effect/Schema";
 import type {
@@ -10,7 +17,9 @@ import type {
   CrewConversationQuery,
   CrewProjectScope,
 } from "@t3tools/contracts/crewConversation";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
+import { appAtomRegistry } from "../../state/atom-registry";
 
 import { uuidv4 } from "../../lib/uuid";
 import { useEnvironmentQuery } from "../../state/query";
@@ -25,6 +34,102 @@ import {
 } from "./crewMobile.logic";
 
 const isTeamworkError = Schema.is(TeamworkError);
+
+export function useCrewTimelineMetadata(
+  scope: ScopedProjectRef | null,
+  threadId: ThreadId | null,
+  revision: number | undefined,
+) {
+  const environmentId = scope?.environmentId;
+  const projectId = scope?.projectId;
+  const [selection, setSelection] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const onVisibleMessages = useCallback(
+    (messageIds: readonly MessageId[]) => {
+      if (!environmentId || !projectId || !threadId) return;
+      setSelection(
+        JSON.stringify({
+          scope: { environmentId, projectId },
+          threadId,
+          messageIds: [...new Set(messageIds)].sort(),
+        }),
+      );
+    },
+    [environmentId, projectId, threadId],
+  );
+  const selected = selection
+    ? (JSON.parse(selection) as {
+        scope: ScopedProjectRef;
+        threadId: ThreadId;
+        messageIds: MessageId[];
+      })
+    : null;
+  const key =
+    selected &&
+    selected.scope.environmentId === environmentId &&
+    selected.scope.projectId === projectId &&
+    selected.threadId === threadId &&
+    selected.messageIds.length > 0 &&
+    revision !== undefined
+      ? JSON.stringify({ ...selected, revision, refreshVersion })
+      : null;
+  const [result, setResult] = useState<{
+    selection: string;
+    data: Awaited<ReturnType<typeof readCrewTimelineMetadata>> | null;
+    error: string | null;
+  } | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch metadata for the list's visible messages and cancel obsolete scoped requests.
+  useEffect(() => {
+    if (!key || !selection) return;
+    const target = JSON.parse(key) as {
+      scope: ScopedProjectRef;
+      threadId: ThreadId;
+      messageIds: MessageId[];
+    };
+    const controller = new AbortController();
+    void readCrewTimelineMetadata(
+      target.scope,
+      target.threadId,
+      target.messageIds,
+      async (input) => {
+        const page = await executeAtomQuery(
+          appAtomRegistry,
+          serverEnvironment.crewConversations({
+            environmentId: target.scope.environmentId,
+            input,
+          }),
+          {
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(6_000)]),
+            reportFailure: false,
+            refresh: true,
+          },
+        );
+        if (page._tag === "Failure") throw squashAtomCommandFailure(page);
+        return page.value;
+      },
+      controller.signal,
+    ).then(
+      (data) => {
+        if (!controller.signal.aborted) setResult({ selection, data, error: null });
+      },
+      () => {
+        if (!controller.signal.aborted)
+          setResult({
+            selection,
+            data: null,
+            error: "Conversation exchanges could not be loaded.",
+          });
+      },
+    );
+    return () => controller.abort();
+  }, [key, selection]);
+  return {
+    data: key && result?.selection === selection ? result.data : null,
+    error: key && result?.selection === selection ? result.error : null,
+    onVisibleMessages,
+    refresh: () => setRefreshVersion((version) => version + 1),
+  };
+}
 
 export function useCrewRead(scope: CrewProjectScope | null) {
   return useEnvironmentQuery(

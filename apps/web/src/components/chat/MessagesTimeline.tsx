@@ -27,6 +27,7 @@ import { useStableCallback } from "~/hooks/useStableCallback";
 
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const EMPTY_PENDING_APPROVALS: ReadonlyArray<PendingApproval> = [];
+const CREW_VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 0 };
 const EMPTY_RESPONDING_REQUEST_IDS: TimelineRowSharedState["respondingRequestIds"] = [];
 
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
@@ -49,6 +50,7 @@ import {
   LegendList,
   type LegendListRef,
   type MaintainScrollAtEndOptions,
+  type OnViewableItemsChangedInfo,
 } from "@legendapp/list/react";
 import { type PendingApproval, type TimelineEntry } from "../../session-logic";
 import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
@@ -77,7 +79,7 @@ import { type AssistantCitationRequest } from "./AssistantCitationSource";
 import { useAssistantCitationTarget } from "./useAssistantCitationTarget";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { resolveCitationPhase, type CitedHistory } from "./citationProcedure";
-import { CrewTimelineMessage } from "../teamwork/CrewTimeline";
+import { CrewTimelineMessage, useCrewTimelineVisibility } from "../teamwork/CrewTimeline";
 import {
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
@@ -420,6 +422,21 @@ const ConversationTimeline = memo(function ConversationTimeline({
   topFadeEnabled = false,
   historyControls,
 }: MessagesTimelineProps) {
+  const reportCrewMessages = useCrewTimelineVisibility();
+  const visibleCrewMessages = useRef<readonly MessageId[]>([]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Publish the list's current visibility when asynchronous Crew discovery enables metadata lookup.
+  useEffect(() => {
+    reportCrewMessages?.(visibleCrewMessages.current);
+  }, [reportCrewMessages]);
+  const handleCrewViewability = useStableCallback(
+    ({ viewableItems }: OnViewableItemsChangedInfo<MessagesTimelineRow>) => {
+      const ids = viewableItems.flatMap(({ item }) =>
+        item.kind === "message" ? [item.message.id] : [],
+      );
+      visibleCrewMessages.current = ids;
+      reportCrewMessages?.(ids);
+    },
+  );
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   // Snapshot restore positions on identity changes; ongoing scroll writes must not move them.
   // Find open at the opening is part of the snapshot: opening find later
@@ -1436,6 +1453,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
             <LegendList<MessagesTimelineRow>
               ref={setTimelineList}
               data={rows}
+              viewabilityConfig={CREW_VIEWABILITY_CONFIG}
+              onViewableItemsChanged={handleCrewViewability}
               extraData={listExtraData}
               keyExtractor={keyExtractor}
               getItemType={getItemType}

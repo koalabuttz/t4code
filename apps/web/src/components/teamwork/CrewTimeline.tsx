@@ -1,4 +1,4 @@
-import { createContext, use, useEffect, useState, type ReactNode } from "react";
+import { createContext, use, type ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useAtom } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
@@ -7,15 +7,14 @@ import {
   type ScopedProjectRef,
   type TeamworkReadResult,
   type ThreadId,
+  type MessageId,
 } from "@t3tools/contracts";
 import type {
   CrewConsultation,
-  CrewConversationPage,
   CrewHandoff,
   CrewMessageRef,
 } from "@t3tools/contracts/crewConversation";
 import { scopedProjectKey } from "@t3tools/client-runtime/environment";
-import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import { assistantCitationRoute } from "../../lib/assistantCitationNavigation";
 import {
   useQuietThreadProjection,
@@ -24,8 +23,6 @@ import {
 } from "../../state/entities";
 import type { TimelineEntry } from "../../session-logic";
 import { useCitedMessageHistory } from "../chat/citationProcedure";
-import { appAtomRegistry } from "../../rpc/atomRegistry";
-import { serverEnvironment } from "../../state/server";
 import { Button } from "../ui/button";
 import type { ChatMessage } from "../../types";
 import {
@@ -39,6 +36,7 @@ import {
   useCrewCollection,
   useCrewConversationMutation,
   useCrewProject,
+  useCrewTimelineMetadata,
 } from "./crewChatState";
 
 type DeliveryStatus = TeamworkReadResult["deliveries"][number]["status"];
@@ -49,87 +47,14 @@ const CrewTimelineContext = createContext<{
   exchanges: ReturnType<typeof crewChatExchanges>;
   deliveries: ReadonlyMap<string, DeliveryStatus>;
   returnedMessages: ReadonlySet<string>;
+  onVisibleMessages: (ids: readonly MessageId[]) => void;
 } | null>(null);
 const expandedCrewAnswers = Atom.family((_threadKey: string) =>
   Atom.make<readonly string[]>([]).pipe(Atom.keepAlive),
 );
 
-function useDeferredReturnRecords(
-  scope: ScopedProjectRef | null,
-  threadId: ThreadId | null,
-  page: CrewConversationPage | null,
-  deliveries: ReadonlyMap<string, DeliveryStatus>,
-) {
-  const included = new Set(
-    page?.consultations.map((consultation) => `${consultation.deliveryId}:return`),
-  );
-  const wanted = [...deliveries]
-    .filter(
-      ([id, status]) =>
-        scope &&
-        id.startsWith(`crew:${scope.projectId}:`) &&
-        id.endsWith(":return") &&
-        (status === "pending" || status === "failed") &&
-        !included.has(id),
-    )
-    .map(([id]) => id)
-    .sort();
-  const key =
-    scope && threadId && page?.nextCursor && wanted.length > 0
-      ? JSON.stringify({ scope, threadId, cursor: page.nextCursor, wanted })
-      : null;
-  const [recovered, setRecovered] = useState<{
-    key: string;
-    records: readonly CrewConsultation[];
-  } | null>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Search bounded pages only for known outstanding return deliveries, and cancel when the conversation changes.
-  useEffect(() => {
-    if (!key) return;
-    const target = JSON.parse(key) as {
-      scope: ScopedProjectRef;
-      threadId: ThreadId;
-      cursor: string;
-      wanted: string[];
-    };
-    const controller = new AbortController();
-    const remaining = new Set(target.wanted);
-    const records: CrewConsultation[] = [];
-    void (async () => {
-      let cursor: string | null = target.cursor;
-      while (cursor && remaining.size > 0 && !controller.signal.aborted) {
-        const currentCursor: string = cursor;
-        const result = await executeAtomQuery(
-          appAtomRegistry,
-          serverEnvironment.crewConversations({
-            environmentId: target.scope.environmentId,
-            input: {
-              scope: target.scope,
-              collection: "consultations",
-              threadId: target.threadId,
-              limit: 100,
-              cursor: currentCursor,
-            },
-          }),
-          {
-            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(6_000)]),
-            reportFailure: false,
-          },
-        );
-        if (result._tag === "Failure") break;
-        for (const record of result.value.consultations) {
-          if (
-            record.origin.conversation.threadId === target.threadId &&
-            remaining.delete(`${record.deliveryId}:return`)
-          )
-            records.push(record);
-        }
-        cursor = result.value.nextCursor === currentCursor ? null : result.value.nextCursor;
-      }
-      if (!controller.signal.aborted) setRecovered({ key, records });
-    })();
-    return () => controller.abort();
-  }, [key]);
-  return recovered?.key === key ? (recovered?.records ?? []) : [];
+export function useCrewTimelineVisibility() {
+  return use(CrewTimelineContext)?.onVisibleMessages;
 }
 
 export function CrewTimeline({
@@ -143,23 +68,21 @@ export function CrewTimeline({
   entries: readonly TimelineEntry[];
   children: ReactNode;
 }) {
-  const filter = threadId ? { threadId } : {};
-  const consultations = useCrewCollection(threadId ? scope : null, "consultations", filter);
-  const handoffs = useCrewCollection(threadId ? scope : null, "handoffs", filter);
-  const { query } = useCrewProject(scope);
+  const { query, snapshot } = useCrewProject(scope);
+  const metadata = useCrewTimelineMetadata(scope, threadId, snapshot?.revision);
   const deliveries = new Map(
     query.data?.deliveries
       .filter((delivery) => delivery.threadId === threadId && delivery.kind === "message")
       .map((delivery) => [delivery.id, delivery.status]),
   );
-  const recovered = useDeferredReturnRecords(scope, threadId, consultations.data, deliveries);
   const exchanges =
     scope && threadId
       ? crewChatExchanges(
           scope,
           threadId,
-          [...(consultations.data?.consultations ?? []), ...recovered],
-          handoffs.data?.handoffs ?? [],
+          metadata.data?.consultations ?? [],
+          metadata.data?.handoffs ?? [],
+          metadata.data?.messageIds ?? [],
         )
       : null;
   const returnsToCheck = new Set<string>();
@@ -174,6 +97,7 @@ export function CrewTimeline({
           threadId,
           exchanges,
           deliveries,
+          onVisibleMessages: metadata.onVisibleMessages,
           returnedMessages: new Set(
             returnsToCheck.size === 0
               ? []
@@ -188,7 +112,19 @@ export function CrewTimeline({
           ),
         }
       : null;
-  return <CrewTimelineContext value={value}>{children}</CrewTimelineContext>;
+  return (
+    <CrewTimelineContext value={value}>
+      {metadata.error ? (
+        <div role="status" className="flex items-center gap-2 px-3 text-xs text-muted-foreground">
+          <p>{metadata.error}</p>
+          <Button size="xs" variant="outline" onClick={metadata.refresh}>
+            Retry exchanges
+          </Button>
+        </div>
+      ) : null}
+      {children}
+    </CrewTimelineContext>
+  );
 }
 
 export function CrewTimelineMessage({
@@ -220,7 +156,7 @@ export function CrewTimelineMessage({
         {children}
       </CrewHistoricalReturn>
     );
-  const handoff = exchanges.byExplanation.get(message.id);
+  const handoff = exchanges.byHandoffMessage.get(message.id);
   const origins = exchanges.byOrigin.get(message.id);
   return (
     <>

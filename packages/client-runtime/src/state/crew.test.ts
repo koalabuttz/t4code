@@ -1,4 +1,5 @@
-import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import { CommandId, EnvironmentId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { CrewConsultation, CrewConversationPage } from "@t3tools/contracts/crewConversation";
 import { AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 import { scopedProjectKey } from "../environment/index.ts";
@@ -6,6 +7,7 @@ import { v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { scopeThreadShell } from "./models.ts";
 import {
   crewCandidateThread,
+  crewHandoffMessageId,
   crewDraftBrief,
   crewDraftMode,
   crewDraftTitle,
@@ -20,12 +22,94 @@ import {
   crewSelectedView,
   prepareCrewEntry,
   readCrewCommand,
+  readCrewTimelineMetadata,
   resolveCrewCoordinator,
 } from "./crew.ts";
 
 const project = { environmentId: EnvironmentId.make("env-a"), projectId: v2ThreadShell.projectId };
 const origin = scopeThreadShell(project.environmentId, v2ThreadShell);
 const other = { ...origin, id: ThreadId.make("other") };
+
+it("loads visible exchanges across bounded selections and pages, rejects other scopes and abandons obsolete reads", async () => {
+  const records = Array.from({ length: 205 }, (_, index): CrewConsultation => ({
+    id: String(index).padStart(3, "0"),
+    origin: {
+      conversation: { ...project, threadId: origin.id },
+      messageId: MessageId.make(`question-${index}`),
+      runId: null,
+      actor: "user",
+      sender: null,
+    },
+    destination: { ...project, threadId: other.id },
+    deliveryId: CommandId.make(`delivery-${index}`),
+    context: { sources: [], attachments: [], replyTo: null },
+    replyTo: null,
+    progress: { state: "queued" },
+    createdAt: "2026-11-17T00:00:00Z",
+    updatedAt: "2026-11-17T00:00:00Z",
+  }));
+  const empty: CrewConversationPage = {
+    scope: project,
+    revision: 1,
+    consultations: [],
+    handoffs: [],
+    attention: [],
+    workstreams: [],
+    taskLinks: [],
+    nextCursor: null,
+  };
+  const ids = records.map((record) => record.origin.messageId);
+  const handoff = { origin: records[0]!.origin, explanation: records[1]!.origin };
+  expect(crewHandoffMessageId(handoff, ids)).toBe(handoff.explanation.messageId);
+  expect(crewHandoffMessageId(handoff, [handoff.origin.messageId])).toBe(handoff.origin.messageId);
+  expect(crewHandoffMessageId(handoff, [])).toBeNull();
+  const result = await readCrewTimelineMetadata(
+    project,
+    origin.id,
+    [...ids, ids[0]!],
+    async (query) => {
+      expect(query.messageIds?.length).toBeLessThanOrEqual(100);
+      if (query.collection !== "consultations") return empty;
+      const matching = records.filter(
+        (record) =>
+          query.messageIds?.includes(record.origin.messageId) && record.id > (query.cursor ?? ""),
+      );
+      const selected = matching.slice(0, 50);
+      return {
+        ...empty,
+        consultations: selected,
+        nextCursor: matching.length > 50 ? selected.at(-1)!.id : null,
+      };
+    },
+    new AbortController().signal,
+  );
+  expect(result.consultations.sort((a, b) => a.id.localeCompare(b.id))).toEqual(records);
+  await expect(
+    readCrewTimelineMetadata(
+      project,
+      origin.id,
+      ids.slice(0, 1),
+      async () => ({ ...empty, scope: { ...project, environmentId: EnvironmentId.make("other") } }),
+      new AbortController().signal,
+    ),
+  ).rejects.toThrow("another project");
+  const controller = new AbortController();
+  let reads = 0;
+  await expect(
+    readCrewTimelineMetadata(
+      project,
+      origin.id,
+      ids,
+      async () => {
+        reads++;
+        controller.abort();
+        return { ...empty, consultations: records.slice(0, 1), nextCursor: records[0]!.id };
+      },
+      controller.signal,
+    ),
+  ).rejects.toThrow();
+  expect(reads).toBe(1);
+});
 
 it("uses received live subscription data while waiting for the next update", () => {
   const live = { data: { revision: 7 }, error: null, isSuccess: true, isPending: true };

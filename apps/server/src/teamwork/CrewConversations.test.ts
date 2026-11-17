@@ -17,6 +17,7 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
@@ -523,6 +524,143 @@ it.effect(
         "failed",
       );
       assert.equal((yield* teams.read(projectId)).snapshot.initiatives[0]?.status, "paused");
+      const sql = yield* SqlClient.SqlClient;
+      const route = (yield* teams.conversationQuery({
+        scope,
+        collection: "handoffs",
+        id: "route-api",
+      })).handoffs[0]!;
+      const visibleQuestion = MessageId.make("visible-question");
+      const visibleExplanation = MessageId.make("visible-explanation");
+      for (let index = 0; index < 103; index++) {
+        const id = `history-${String(index).padStart(3, "0")}`;
+        const record = {
+          ...(index === 101 ? answered : index === 102 ? consultation : followed),
+          id,
+          deliveryId: CommandId.make(`crew:${projectId}:${id}`),
+          origin: { ...source, messageId: index >= 100 ? visibleQuestion : MessageId.make(id) },
+        };
+        yield* sql`INSERT INTO project_crew_conversations (project_id, collection, id, thread_id, payload_json)
+          VALUES (${projectId}, 'consultations', ${id}, ${worker}, ${JSON.stringify(record)})`;
+        const handoffRecord = {
+          ...route,
+          id,
+          origin: { ...route.origin, messageId: MessageId.make(id) },
+          explanation: {
+            ...route.explanation,
+            messageId: index === 102 ? visibleExplanation : MessageId.make(id),
+          },
+        };
+        yield* sql`INSERT INTO project_crew_conversations (project_id, collection, id, thread_id, payload_json)
+          VALUES (${projectId}, 'handoffs', ${id}, ${worker}, ${JSON.stringify(handoffRecord)})`;
+      }
+      const failedReturnId = `crew:${projectId}:history-101:return`;
+      yield* sql`INSERT INTO project_teamwork_outbox (id, project_id, revision, thread_id, kind, status, payload_json)
+        VALUES (${failedReturnId}, ${projectId}, 1, ${coordinator}, 'message', 'failed', '{}')`;
+      assert.isFalse(messages.has(MessageId.make(failedReturnId)));
+      assert.equal(
+        (yield* teams.read(projectId)).deliveries.find((delivery) => delivery.id === failedReturnId)
+          ?.status,
+        "failed",
+      );
+      const ordinary = yield* teams.conversationQuery({
+        scope,
+        collection: "consultations",
+        threadId: coordinator,
+        limit: 100,
+      });
+      assert.equal(ordinary.consultations.length, 100);
+      assert.isNotNull(ordinary.nextCursor);
+      assert.isFalse(ordinary.consultations.some((record) => record.id === "history-101"));
+      const selected = { messageIds: [visibleQuestion] };
+      const visible = yield* teams.conversationQuery({
+        scope,
+        collection: "consultations",
+        threadId: coordinator,
+        ...selected,
+        limit: 100,
+      });
+      assert.deepEqual(
+        visible.consultations.map((record) => [record.id, record.progress.state]),
+        [
+          ["history-100", "queued"],
+          ["history-101", "answered"],
+          ["history-102", "delivered"],
+        ],
+      );
+      assert.isNull(visible.nextCursor);
+      const selectedPage = yield* teams.conversationQuery({
+        scope,
+        collection: "consultations",
+        threadId: coordinator,
+        ...selected,
+        limit: 1,
+      });
+      assert.equal(selectedPage.nextCursor, "history-100");
+      const nextSelectedPage = yield* teams.conversationQuery({
+        scope,
+        collection: "consultations",
+        threadId: coordinator,
+        ...selected,
+        limit: 100,
+        cursor: selectedPage.nextCursor!,
+      });
+      assert.deepEqual(
+        nextSelectedPage.consultations.map((record) => record.id),
+        ["history-101", "history-102"],
+      );
+      const visibleHandoffs = yield* teams.conversationQuery({
+        scope,
+        collection: "handoffs",
+        threadId: worker,
+        messageIds: [visibleExplanation],
+      });
+      assert.deepEqual(
+        visibleHandoffs.handoffs.map((record) => record.id),
+        ["history-102"],
+      );
+      assert.deepEqual(visibleHandoffs.handoffs[0]?.ownership, route.ownership);
+      const wrongThreadSelection = yield* teams.conversationQuery({
+        scope,
+        collection: "consultations",
+        threadId: worker,
+        ...selected,
+      });
+      assert.deepEqual(wrongThreadSelection.consultations, []);
+      for (const invalid of [
+        { scope, collection: "consultations" as const, ...selected },
+        { scope, collection: "attention" as const, threadId: coordinator, ...selected },
+        { scope, collection: "consultations" as const, threadId: coordinator, messageIds: [] },
+        {
+          scope,
+          collection: "consultations" as const,
+          threadId: coordinator,
+          messageIds: Array.from({ length: 101 }, () => visibleQuestion),
+        },
+      ]) {
+        assert.isTrue(Result.isFailure(yield* Effect.result(teams.conversationQuery(invalid))));
+      }
+      assert.isTrue(
+        Result.isFailure(
+          yield* Effect.result(
+            teams.conversationQuery(
+              { scope, collection: "consultations", threadId: coordinator, ...selected },
+              worker,
+            ),
+          ),
+        ),
+      );
+      const exactSelected = yield* teams.conversationQuery({
+        scope,
+        collection: "consultations",
+        threadId: coordinator,
+        ...selected,
+        id: "history-101",
+      });
+      assert.deepEqual(
+        exactSelected.consultations.map((record) => record.id),
+        ["history-101"],
+      );
     }).pipe(
       Effect.provide(
         Teamwork.layer.pipe(
@@ -628,7 +766,7 @@ it.effect(
               }),
             ),
           ),
-          Layer.provide(Sqlite.layerMemory),
+          Layer.provideMerge(Sqlite.layerMemory),
         ),
       ),
     );

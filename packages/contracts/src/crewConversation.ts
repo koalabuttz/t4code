@@ -272,6 +272,9 @@ export const CrewConversationQuery = Schema.Struct({
   ]),
   threadId: Schema.optional(ThreadId),
   id: Schema.optional(Id),
+  messageIds: Schema.optional(
+    Schema.Array(MessageId).check(Schema.isMinLength(1), Schema.isMaxLength(100)),
+  ),
   cursor: Schema.optional(TrimmedNonEmptyString),
   limit: Schema.optional(NonNegativeInt.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
 });

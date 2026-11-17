@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { crewLiveFreshness } from "@t3tools/client-runtime/state/crew";
+import { crewLiveFreshness, readCrewTimelineMetadata } from "@t3tools/client-runtime/state/crew";
 import {
   createEnvironmentRpcSubscriptionAtomFamily,
   executeAtomQuery,
@@ -13,6 +13,7 @@ import {
   WS_METHODS,
   isProviderNativeSubagentThread,
   type ScopedProjectRef,
+  type MessageId,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -32,6 +33,99 @@ import { useEnvironmentShellStatus } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
 
 export type CrewDestination = "chat" | "threads" | "results" | "settings";
+
+export function useCrewTimelineMetadata(
+  scope: ScopedProjectRef | null,
+  threadId: ThreadId | null,
+  revision: number | undefined,
+) {
+  const environmentId = scope?.environmentId;
+  const projectId = scope?.projectId;
+  const [selection, setSelection] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const onVisibleMessages = (messageIds: readonly MessageId[]) => {
+    if (!environmentId || !projectId || !threadId) return;
+    setSelection(
+      JSON.stringify({
+        scope: { environmentId, projectId },
+        threadId,
+        messageIds: [...new Set(messageIds)].sort(),
+      }),
+    );
+  };
+  const selected = selection
+    ? (JSON.parse(selection) as {
+        scope: ScopedProjectRef;
+        threadId: ThreadId;
+        messageIds: MessageId[];
+      })
+    : null;
+  const key =
+    selected &&
+    selected.scope.environmentId === environmentId &&
+    selected.scope.projectId === projectId &&
+    selected.threadId === threadId &&
+    selected.messageIds.length > 0 &&
+    revision !== undefined
+      ? JSON.stringify({ ...selected, revision, refreshVersion })
+      : null;
+  const [result, setResult] = useState<{
+    selection: string;
+    data: Awaited<ReturnType<typeof readCrewTimelineMetadata>> | null;
+    error: string | null;
+  } | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch metadata for the list's visible messages and cancel obsolete scoped requests.
+  useEffect(() => {
+    if (!key || !selection) return;
+    const target = JSON.parse(key) as {
+      scope: ScopedProjectRef;
+      threadId: ThreadId;
+      messageIds: MessageId[];
+    };
+    const controller = new AbortController();
+    void readCrewTimelineMetadata(
+      target.scope,
+      target.threadId,
+      target.messageIds,
+      async (input) => {
+        const page = await executeAtomQuery(
+          appAtomRegistry,
+          serverEnvironment.crewConversations({
+            environmentId: target.scope.environmentId,
+            input,
+          }),
+          {
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(6_000)]),
+            reportFailure: false,
+            refresh: true,
+          },
+        );
+        if (page._tag === "Failure") throw squashAtomCommandFailure(page);
+        return page.value;
+      },
+      controller.signal,
+    ).then(
+      (data) => {
+        if (!controller.signal.aborted) setResult({ selection, data, error: null });
+      },
+      () => {
+        if (!controller.signal.aborted)
+          setResult({
+            selection,
+            data: null,
+            error: "Conversation exchanges could not be loaded.",
+          });
+      },
+    );
+    return () => controller.abort();
+  }, [key, selection]);
+  return {
+    data: key && result?.selection === selection ? result.data : null,
+    error: key && result?.selection === selection ? result.error : null,
+    onVisibleMessages,
+    refresh: () => setRefreshVersion((version) => version + 1),
+  };
+}
 export type CrewSettingsSection = "project" | "crew" | "memory" | "advanced";
 
 declare module "@tanstack/react-router" {
