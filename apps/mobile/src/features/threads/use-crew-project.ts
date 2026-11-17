@@ -122,7 +122,7 @@ export function useCrewControls(
     saving.current = true;
     setBusy(true);
     setError(null);
-    try {
+    const saved = await (async () => {
       const result = await execute();
       if (result._tag === "Success") {
         settled();
@@ -132,10 +132,13 @@ export function useCrewControls(
       if (isTeamworkError(failure) && failure.reason !== "storage") settled();
       setError(failure instanceof Error ? failure.message : "Could not save the project change.");
       return false;
-    } finally {
-      saving.current = false;
-      setBusy(false);
-    }
+    })().catch((failure: unknown) => {
+      setError(failure instanceof Error ? failure.message : "Could not save the project change.");
+      return false;
+    });
+    saving.current = false;
+    setBusy(false);
+    return saved;
   };
   return {
     error,

@@ -30,6 +30,7 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import { CREW_CONVERSATION_REQUIRED_SCOPES } from "@t3tools/contracts/crewConversation";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Layer from "effect/Layer";
@@ -45,7 +46,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.outpostAttachment]: AuthOrchestrationReadScope,
   [WS_METHODS.teamworkSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.teamworkHistory]: AuthOrchestrationReadScope,
-  [WS_METHODS.crewConversationQuery]: AuthOrchestrationReadScope,
+  [WS_METHODS.crewConversationQuery]: CREW_CONVERSATION_REQUIRED_SCOPES.query,
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: AuthOrchestrationReadScope,

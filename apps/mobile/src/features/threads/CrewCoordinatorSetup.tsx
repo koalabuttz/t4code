@@ -97,7 +97,7 @@ export function CrewCoordinatorSetup({
     inFlight.current = true;
     setCreating(true);
     setError(null);
-    try {
+    await (async () => {
       const shellAtom = environmentThreadShells.threadShellAtom({ environmentId, threadId });
       if (!useExisting && appAtomRegistry.get(shellAtom) === null) {
         if (!canCreate || !usableModel || !modelSelection) return;
@@ -180,10 +180,14 @@ export function CrewCoordinatorSetup({
       }
       if (!(await controls.act({ type: "coordinator.set", threadId }, current.revision)))
         query.refresh();
-    } finally {
-      setCreating(false);
-      inFlight.current = false;
-    }
+    })().catch((failure: unknown) => {
+      setError(
+        failure instanceof Error ? failure.message : "Could not establish the project coordinator.",
+      );
+      query.refresh();
+    });
+    setCreating(false);
+    inFlight.current = false;
   };
   return (
     <ScrollView contentContainerClassName="gap-4 p-5" contentInsetAdjustmentBehavior="never">
