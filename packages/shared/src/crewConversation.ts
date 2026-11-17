@@ -310,6 +310,7 @@ export function observeCrewAttention(
   };
 }
 
+// Response authority grants no task ownership; services resolve provenance and access from canonical state.
 export function canAgentAnswerCrewAttention(
   attention: CrewAttention,
   target: {
@@ -320,6 +321,7 @@ export function canAgentAnswerCrewAttention(
 ): boolean {
   const pending = attention.pendingRequest;
   return (
+    attention.reason !== "approval" &&
     pending !== null &&
     pending.responder === "authorized-agent" &&
     sameCrewConversation(attention.source.conversation, target.conversation) &&

@@ -433,8 +433,11 @@ describe("Crew conversation state", () => {
     expect(canAgentAnswerCrewAttention(pending, target)).toBe(false);
     const answerable = {
       ...pending,
+      reason: "question" as const,
       pendingRequest: { ...pending.pendingRequest, responder: "authorized-agent" as const },
     };
+    const approval = decodeAttention({ ...answerable, reason: "approval" });
+    expect(canAgentAnswerCrewAttention(approval, target)).toBe(false);
     expect(canAgentAnswerCrewAttention(answerable, target)).toBe(true);
     expect(canAgentAnswerCrewAttention(answerable, { ...target, requestId: "different" })).toBe(
       false,
