@@ -38,6 +38,7 @@ import { decideTeamwork, emptyTeamwork } from "./decide.ts";
 import { crewContext } from "./context.ts";
 import { CrewArtifacts } from "./CrewArtifacts.ts";
 import { makeCrewConversations } from "./CrewConversations.ts";
+import { reconcileLegacyCrewWorkstreams } from "./CrewWorkstreamUpgrade.ts";
 import {
   CrewWorkstream,
   CrewWorkstreamTaskLink,
@@ -418,6 +419,7 @@ const make = Effect.gen(function* () {
     });
   }, Effect.mapError(storageError));
 
+  yield* reconcileLegacyCrewWorkstreams();
   const conversations = yield* makeCrewConversations({
     environmentId,
     threads,
