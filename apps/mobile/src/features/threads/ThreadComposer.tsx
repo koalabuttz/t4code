@@ -32,6 +32,7 @@ import {
 } from "@t3tools/shared/usageLimits";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import { prepareCrewEntry, readCrewCommand } from "@t3tools/client-runtime/state/crew";
+import { useCrewChat } from "./CrewChat";
 import { appAtomRegistry } from "../../state/atom-registry";
 import type { ReactNode } from "react";
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
@@ -468,6 +469,7 @@ function ComposerSurface(props: {
 export const THREAD_COMPOSER_BOTTOM_GUTTER = 6;
 
 export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps) {
+  const crewChat = useCrewChat();
   const project = useProject(scopeProjectRef(props.environmentId, props.selectedThread.projectId));
   const { themeVariables: materialTheme } = useAppearancePreferences();
   const composerPanel = materialTheme["--color-composer-panel"];
@@ -647,6 +649,10 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     offersSideChat: props.offersSideChat === true,
     onCrew: props.serverConfig?.environment.capabilities.projectTeamwork
       ? () => {
+          if (crewChat?.route.coordinator) {
+            crewChat.go("threads");
+            return;
+          }
           prepareCrewEntry(
             appAtomRegistry,
             {
@@ -786,6 +792,11 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       props.serverConfig?.environment.capabilities.projectTeamwork &&
       draftAtSend.attachments.length === 0
     ) {
+      if (crewChat?.route.coordinator) {
+        onChangeDraftMessage(crewCommand.brief);
+        inFlightThreadIdsRef.current.delete(threadKey);
+        return;
+      }
       prepareCrewEntry(
         appAtomRegistry,
         {

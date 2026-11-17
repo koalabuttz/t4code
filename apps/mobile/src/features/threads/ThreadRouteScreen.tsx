@@ -6,10 +6,13 @@ import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTu
 import { useWorktreeSetup } from "./use-worktree-setup";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { AppBar } from "../../components/ui/AppBar";
+import { AppText } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
 import {
   StackActions,
   useNavigation,
   useRoute,
+  type RouteProp,
   type StaticScreenProps,
 } from "@react-navigation/native";
 import {
@@ -85,6 +88,8 @@ import {
 import type { ThreadDetailScreenProps } from "./ThreadDetailScreen";
 import { ThreadScreenBinding, ThreadScreenFallback, ThreadScreenHost } from "./ThreadScreenHost";
 import { CrewConversationReturn } from "./CrewConversationReturn";
+import type { CrewRequestTarget } from "./CrewChat";
+import { openCrewPage } from "./crewProjectNavigation";
 import type { CrewPage } from "./TeamworkSheet";
 import { draftRouteIdentity } from "./thread-route-state";
 import { NewTaskDraftRouteScreen, type NewTaskDraftRouteParams } from "./NewTaskDraftRouteScreen";
@@ -146,7 +151,14 @@ const RECONNECT_ERROR_DELAY_MS = 5_000;
 const InspectorHeaderShownContext = createContext(false);
 
 function ThreadRouteFallbackLayout(props: { readonly children: ReactNode }) {
-  const goBack = useWorkspaceBackNavigation();
+  const route = useRoute<RouteProp<ReactNavigation.RootParamList, "Thread">>();
+  const goBack = useWorkspaceBackNavigation(
+    Boolean(
+      route.params?.crewCoordinatorProjectId ??
+      route.params?.crewSourceProjectId ??
+      route.params?.crewProjectId,
+    ),
+  );
   const inspectorHeaderShown = use(InspectorHeaderShownContext);
   return (
     <ThreadScreenFallback
@@ -177,6 +189,9 @@ type ThreadRouteScreenRouteProps = StaticScreenProps<{
   readonly prompt?: string | string[];
   readonly crewProjectId?: string;
   readonly crewPage?: CrewPage;
+  readonly crewCoordinatorProjectId?: string;
+  readonly crewSourceProjectId?: string;
+  readonly crewRequest?: CrewRequestTarget;
 }>;
 
 interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
@@ -263,7 +278,11 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
 }
 
 function LiveThreadRouteController(props: ThreadRouteScreenProps) {
-  useAndroidWorkspaceBack();
+  const crewProject =
+    props.route.params?.crewCoordinatorProjectId ??
+    props.route.params?.crewSourceProjectId ??
+    props.route.params?.crewProjectId;
+  useAndroidWorkspaceBack(crewProject !== undefined);
   const connectionsReady = useConnectionsReady();
   const { connectionState } = useRemoteConnectionStatus();
   const { selectedThread } = useThreadSelection();
@@ -312,6 +331,16 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
   }
 
   if (selectedThread !== null && selectedThreadKey === routeThreadKey) {
+    if (
+      crewProject &&
+      (selectedThread.projectId !== crewProject || selectedThread.deletedAt !== null)
+    ) {
+      return (
+        <ThreadRouteFallbackLayout>
+          <AppText className="p-5">The source conversation is unavailable in this project.</AppText>
+        </ThreadRouteFallbackLayout>
+      );
+    }
     // ThreadRouteContent draws its own inspector header so it can show the sync status.
     return (
       <InspectorHeaderShownContext value={props.inspectorPresentation !== undefined}>
@@ -343,6 +372,7 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
 
   if (
     routeName === "Thread" &&
+    !crewProject &&
     !props.inspectorPresentation &&
     threadRouteOpensDraft({
       connectionState: routeConnectionState,
@@ -350,6 +380,30 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
     })
   ) {
     return <UnavailableThreadDraftRedirect environmentId={environmentId} />;
+  }
+
+  if (crewProject) {
+    return (
+      <ThreadRouteFallbackLayout>
+        <AppText className="p-5">This project conversation is unavailable.</AppText>
+        {props.route.params?.crewCoordinatorProjectId && (
+          <Button
+            label="Open coordinator recovery"
+            onPress={() =>
+              openCrewPage(
+                navigation,
+                {
+                  environmentId,
+                  projectId: ProjectId.make(crewProject),
+                },
+                "recovery",
+              )
+            }
+          />
+        )}
+        <Button label="Return to origin" onPress={() => navigation.goBack()} />
+      </ThreadRouteFallbackLayout>
+    );
   }
 
   return withInspectorHeader(
@@ -403,7 +457,18 @@ function ThreadRouteContent(
   const composer = useThreadComposerState({ startSideChat });
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
-  const requests = useSelectedThreadRequests();
+  const focusRequest = props.route.params?.crewRequest;
+  const exactRequestPending =
+    !focusRequest ||
+    selectedThreadDetail?.runtimeRequests.some(
+      (request) =>
+        request.id === focusRequest.requestId &&
+        request.status === "pending" &&
+        selectedThreadDetail.nodes.some(
+          (node) => node.id === request.nodeId && node.runId === focusRequest.runId,
+        ),
+    ) === true;
+  const requests = useSelectedThreadRequests(focusRequest?.requestId, exactRequestPending);
   useThreadStatusAnnouncements({
     threadKey:
       selectedThread === null || isProviderNativeSubagentThread(selectedThread.source)
@@ -1029,6 +1094,21 @@ function ThreadRouteContent(
 
       <>
         <ThreadScreenBinding
+          crewRoute={
+            serverConfig?.environment.capabilities.projectTeamwork &&
+            !props.inspectorPresentation &&
+            !isProviderNativeSubagentThread(selectedThread.source) &&
+            selectedThreadProject
+              ? {
+                  projectTitle: selectedThreadProject.title,
+                  coordinator:
+                    props.route.params?.crewCoordinatorProjectId === selectedThread.projectId,
+                  source: props.route.params?.crewSourceProjectId === selectedThread.projectId,
+                  focusRequest,
+                  exactRequestPending,
+                }
+              : undefined
+          }
           header={
             props.inspectorPresentation ? null : (
               <ThreadHeader

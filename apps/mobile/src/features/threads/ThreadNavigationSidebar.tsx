@@ -45,6 +45,7 @@ import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { requestThreadMessageJump } from "./threadMessageJump";
 import { useThreadListSearchMatches } from "./useThreadListSearchMatches";
 import { useHomeListOptions } from "../home/home-list-options";
+import { useProjectListSelection } from "../home/use-project-list-selection";
 import {
   buildHomeListFilterMenuItems,
   homeListFilterEnvironments,
@@ -193,6 +194,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     key: scope.key,
     label: scope.title,
   }));
+  const selectProject = useProjectListSelection(projectScopes, setSelectedProjectKey);
   const projectTitleByProjectKey = useMemo(
     () =>
       new Map(
@@ -547,7 +549,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
           selectedEnvironmentId: options.selectedEnvironmentId,
           selectedProjectKey,
           onEnvironmentChange: setSelectedEnvironmentId,
-          onProjectChange: setSelectedProjectKey,
+          onProjectChange: selectProject,
         }),
       }}
       sidebar={{

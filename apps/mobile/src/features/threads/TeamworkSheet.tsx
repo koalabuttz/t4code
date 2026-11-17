@@ -52,6 +52,7 @@ import { CrewLimits, CrewMilestone, CrewTaskArtifact } from "./CrewVerification"
 import { environmentThreadShells, threadFamilies } from "../../state/threads";
 import { useRetryEnvironment } from "../connection/useRetryEnvironment";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { openCrewPage } from "./crewProjectNavigation";
 import {
   mobileCrewArtifactWorkspace,
   mobileCrewDraftAfterSave,
@@ -118,10 +119,12 @@ export function TeamworkSheet({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [knowledgeId, setKnowledgeId] = useState<string | null>(null);
+  const [editingKnowledge, setEditingKnowledge] = useState(false);
   const [knowledgeTitle, setKnowledgeTitle] = useState("");
   const [knowledgeText, setKnowledgeText] = useState("");
   const scroll = useRef<ScrollViewInstance>(null);
-  const scrollPosition = useRef(appAtomRegistry.get(crewScrollOffset(projectKey)));
+  const scrollAtom = crewScrollOffset(`native:${projectKey}:${page}`);
+  const scrollPosition = useRef(appAtomRegistry.get(scrollAtom));
   const restoredScroll = useRef(false);
   const state = query.data?.snapshot;
   const freshness = crewLiveFreshness(connected, query);
@@ -186,7 +189,6 @@ export function TeamworkSheet({
   const supports = (capability: "archive" | "submissions" | "context" | "artifacts") =>
     query.data?.capabilities?.includes(capability) ?? false;
   const go = (next: CrewPage) => {
-    appAtomRegistry.set(crewScrollOffset(projectKey), 0);
     if (
       [
         "overview",
@@ -214,7 +216,7 @@ export function TeamworkSheet({
     if (!canReadThreads) return;
     if (item?.initiativeId) setSelected(item.initiativeId);
     else if (initiative) setSelected(initiative.id);
-    appAtomRegistry.set(crewScrollOffset(projectKey), scrollPosition.current);
+    appAtomRegistry.set(scrollAtom, scrollPosition.current);
     if (item?.taskId) setSelectedTask(item.taskId);
     setReturnContext({
       threadId: id,
@@ -653,12 +655,13 @@ export function TeamworkSheet({
     <ScrollView
       ref={scroll}
       key={page}
-      contentInsetAdjustmentBehavior="automatic"
+      contentInsetAdjustmentBehavior={embedded ? "never" : "automatic"}
       contentContainerClassName="gap-5 px-5 pb-10 pt-4"
       keyboardShouldPersistTaps="handled"
       scrollEventThrottle={200}
       onScroll={(event) => {
         scrollPosition.current = event.nativeEvent.contentOffset.y;
+        appAtomRegistry.set(scrollAtom, Math.max(0, scrollPosition.current));
       }}
       onContentSizeChange={() => {
         if (state && !restoredScroll.current) {
@@ -691,13 +694,10 @@ export function TeamworkSheet({
       {!canEdit && <AppText>Read-only access</AppText>}
       {page !== "overview" && (
         <Button
-          label="Crew overview"
+          label="Project chat"
           onPress={() => {
-            appAtomRegistry.set(crewScrollOffset(projectKey), 0);
             setView("overview");
-            navigation.dispatch(
-              StackActions.popTo("Crew", { environmentId, projectId, page: "overview" }),
-            );
+            openCrewPage(navigation, target);
           }}
         />
       )}
@@ -1094,13 +1094,38 @@ export function TeamworkSheet({
                     onPress={() => openThread(task.ownerThreadId!)}
                   />
                 )}
+                {task.submission?.threadId && task.submission.threadId !== task.ownerThreadId && (
+                  <Button
+                    label="Open submitting conversation"
+                    disabled={
+                      !canReadThreads ||
+                      !threads.some(
+                        (thread) =>
+                          thread.id === task.submission?.threadId && thread.deletedAt === null,
+                      )
+                    }
+                    onPress={() => openThread(task.submission!.threadId!)}
+                  />
+                )}
+                {task.submission && (
+                  <AppText selectable>
+                    Source workspace ·{" "}
+                    {mobileCrewArtifactWorkspace(
+                      task.submission.threadId,
+                      threads,
+                      project?.workspaceRoot ?? null,
+                    ) ?? "Unavailable on this connection"}
+                  </AppText>
+                )}
                 <CrewTaskArtifact
                   key={`artifact:${task.id}:${task.submission?.revision}`}
                   task={task}
                   environmentId={environmentId}
                   projectId={projectId}
                   artifactsEnabled={supports("artifacts")}
-                  onOpenContent={contentOpener(task.submission?.threadId ?? task.ownerThreadId)}
+                  onOpenContent={contentOpener(
+                    task.submission ? task.submission.threadId : task.ownerThreadId,
+                  )}
                 />
                 {task.evidence && <AppText selectable>{task.evidence}</AppText>}
                 {task.status === "review" && (
@@ -1212,14 +1237,39 @@ export function TeamworkSheet({
                 <View key={entry.id} className="gap-2 rounded-2xl bg-secondary p-4">
                   <AppText className="font-t3-semibold">{entry.title}</AppText>
                   <AppText selectable>{entry.text}</AppText>
+                  {entry.excluded && <AppText>Excluded from future context</AppText>}
+                  {entry.sourceThreadId && (
+                    <Button
+                      label="Open knowledge source"
+                      disabled={!canReadThreads}
+                      onPress={() => openThread(entry.sourceThreadId!)}
+                    />
+                  )}
                   <Button
                     label="Correct knowledge"
                     disabled={disabled}
                     onPress={() => {
+                      setEditingKnowledge(true);
                       setKnowledgeId(entry.id);
                       setKnowledgeTitle(entry.title);
                       setKnowledgeText(entry.text);
                     }}
+                  />
+                  <Button
+                    label={
+                      entry.excluded ? "Include in future context" : "Exclude from future context"
+                    }
+                    disabled={disabled}
+                    onPress={() =>
+                      void act({
+                        type: "knowledge.save",
+                        id: entry.id,
+                        title: entry.title,
+                        text: entry.text,
+                        sourceTaskId: entry.sourceTaskId,
+                        excluded: !entry.excluded,
+                      })
+                    }
                   />
                   <Button
                     label="Forget knowledge"
@@ -1228,50 +1278,67 @@ export function TeamworkSheet({
                   />
                 </View>
               ))}
-              <AppTextInput
-                accessibilityLabel="Knowledge title"
-                placeholder="Knowledge title"
-                value={knowledgeTitle}
-                onChangeText={setKnowledgeTitle}
-                maxLength={160}
-              />
-              <AppTextInput
-                accessibilityLabel="Knowledge text"
-                placeholder="Fact or decision"
-                value={knowledgeText}
-                onChangeText={setKnowledgeText}
-                multiline
-                maxLength={12000}
-              />
-              <Button
-                label={knowledgeId ? "Save correction" : "Remember"}
-                disabled={disabled || !knowledgeTitle.trim() || !knowledgeText.trim()}
-                onPress={async () => {
-                  if (
-                    await act({
-                      type: "knowledge.save",
-                      id: knowledgeId ?? uuidv4(),
-                      title: knowledgeTitle,
-                      text: knowledgeText,
-                      sourceTaskId: null,
-                    })
-                  ) {
-                    setKnowledgeId(null);
-                    setKnowledgeTitle("");
-                    setKnowledgeText("");
-                  }
-                }}
-              />
-              {knowledgeId && (
+              {!editingKnowledge && (
                 <Button
-                  label="Cancel correction"
+                  label="Save a quiet project note"
+                  disabled={disabled}
                   onPress={() => {
                     setKnowledgeId(null);
                     setKnowledgeTitle("");
                     setKnowledgeText("");
+                    setEditingKnowledge(true);
                   }}
                 />
               )}
+              {editingKnowledge && (
+                <>
+                  <AppTextInput
+                    accessibilityLabel="Knowledge title"
+                    placeholder="Knowledge title"
+                    value={knowledgeTitle}
+                    onChangeText={setKnowledgeTitle}
+                    maxLength={160}
+                  />
+                  <AppTextInput
+                    accessibilityLabel="Knowledge text"
+                    placeholder="Fact or decision"
+                    value={knowledgeText}
+                    onChangeText={setKnowledgeText}
+                    multiline
+                    maxLength={12000}
+                  />
+                  <Button
+                    label={knowledgeId ? "Save correction" : "Save note"}
+                    disabled={disabled || !knowledgeTitle.trim() || !knowledgeText.trim()}
+                    onPress={async () => {
+                      if (
+                        await act({
+                          type: "knowledge.save",
+                          id: knowledgeId ?? uuidv4(),
+                          title: knowledgeTitle,
+                          text: knowledgeText,
+                          sourceTaskId: null,
+                        })
+                      ) {
+                        setKnowledgeId(null);
+                        setKnowledgeTitle("");
+                        setKnowledgeText("");
+                        setEditingKnowledge(false);
+                      }
+                    }}
+                  />
+                  <Button
+                    label="Cancel"
+                    onPress={() => {
+                      setKnowledgeId(null);
+                      setKnowledgeTitle("");
+                      setKnowledgeText("");
+                      setEditingKnowledge(false);
+                    }}
+                  />
+                </>
+              )}
+              <Button label="Received context" onPress={() => go("context")} />
             </>
           )}
           {page === "context" &&

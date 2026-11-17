@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   EnvironmentId,
+  CommandId,
+  MessageId,
   ProjectId,
   RuntimeRequestId,
   ThreadId,
@@ -15,7 +17,10 @@ import {
   mobileCrewMessageDeliveries,
   mobileCrewRecipients,
   mobileCrewSupervision,
+  mobileCrewReturnedAnswer,
+  mobileCrewWorkstreamGroups,
 } from "./crewMobile.logic";
+import type { CrewConsultation } from "@t3tools/contracts/crewConversation";
 
 const worker = ThreadId.make("worker");
 const coordinator = ThreadId.make("coordinator");
@@ -64,6 +69,130 @@ const data = (): TeamworkReadResult => ({
 });
 
 describe("mobile Crew source adaptation", () => {
+  it("attributes only the exact delivered return in the originating conversation", () => {
+    const conversation = {
+      environmentId: EnvironmentId.make("env"),
+      projectId: ProjectId.make("project-test"),
+      threadId: ThreadId.make("origin"),
+    };
+    const destination = { ...conversation, threadId: ThreadId.make("specialist") };
+    const question = {
+      conversation,
+      messageId: MessageId.make("question"),
+      runId: null,
+      actor: "user" as const,
+      sender: null,
+    };
+    const response = {
+      ...question,
+      conversation: destination,
+      messageId: MessageId.make("answer"),
+      actor: "agent" as const,
+    };
+    const now = "2026-11-17T00:00:00Z";
+    const consultation = {
+      id: "example",
+      origin: question,
+      destination,
+      deliveryId: CommandId.make("exact-delivery"),
+      context: { replyTo: null, sources: [], attachments: [] },
+      replyTo: null,
+      progress: {
+        state: "answered",
+        exchange: {
+          request: { ...question, conversation: destination },
+          response,
+          responseId: response.messageId,
+        },
+      },
+      createdAt: now,
+      updatedAt: now,
+    } satisfies CrewConsultation;
+    const text =
+      "Crew consultation example answered. From specialist. Canonical source: {}\nThe answer.";
+    const returned = { id: "exact-delivery:return", text, senderThreadId: destination.threadId };
+
+    expect(mobileCrewReturnedAnswer(conversation, consultation, returned)).toBe("The answer.");
+    expect(mobileCrewReturnedAnswer(destination, consultation, returned)).toBeNull();
+    expect(
+      mobileCrewReturnedAnswer(
+        { ...conversation, environmentId: EnvironmentId.make("other") },
+        consultation,
+        returned,
+      ),
+    ).toBeNull();
+    expect(
+      mobileCrewReturnedAnswer(conversation, consultation, { ...returned, id: "old:return" }),
+    ).toBeNull();
+    expect(
+      mobileCrewReturnedAnswer(conversation, consultation, {
+        ...returned,
+        senderThreadId: conversation.threadId,
+      }),
+    ).toBeNull();
+    expect(
+      mobileCrewReturnedAnswer(
+        conversation,
+        { ...consultation, progress: { state: "queued" } },
+        returned,
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps a replacement under its linked workstream and treats offline execution as unconfirmed", () => {
+    const initial = data();
+    const scope = {
+      environmentId: EnvironmentId.make("environment-test"),
+      projectId: initial.snapshot.projectId,
+    };
+    const replacement = ThreadId.make("replacement");
+    const original = makeThreadShellFixture({ id: worker, ...scope });
+    const working = presentThreadShell(
+      scope.environmentId,
+      makeRawThreadShell({ id: replacement, status: "running" }),
+    );
+    const read = {
+      ...initial,
+      snapshot: { ...initial.snapshot, tasks: [task({ ownerThreadId: replacement })] },
+    };
+    const workstream = { ...scope, threadId: worker };
+    const input = {
+      scope,
+      workstreams: [
+        {
+          conversation: workstream,
+          title: "Android",
+          status: "open" as const,
+          linkedAt: "2026-11-17T00:00:00Z",
+          updatedAt: "2026-11-17T00:00:00Z",
+        },
+      ],
+      links: [{ workstream, taskId: "work", initiativeId: "one" }],
+      threads: [original, working],
+      supervision: mobileCrewSupervision(read, [original, working], "current"),
+      freshness: "current" as const,
+      search: "andROid",
+    };
+    expect(mobileCrewWorkstreamGroups(input)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "Working",
+          rows: [
+            expect.objectContaining({
+              workstream: expect.objectContaining({ conversation: workstream }),
+            }),
+          ],
+        }),
+      ]),
+    );
+    const unconfirmed = mobileCrewWorkstreamGroups({ ...input, freshness: "disconnected" });
+    expect(unconfirmed[0]?.rows[0]?.detail).toBe("Execution is unconfirmed");
+    expect(
+      mobileCrewWorkstreamGroups({ ...input, search: "Desktop" }).every(
+        (group) => group.rows.length === 0,
+      ),
+    ).toBe(true);
+  });
   it("clears only an unchanged saved quiet note and preserves in-flight edits or unconfirmed sends", () => {
     const submitted = { text: "Original note", recipients: [worker], intent: "note" as const };
     expect(mobileCrewDraftAfterSave(submitted, submitted, true)).toEqual({

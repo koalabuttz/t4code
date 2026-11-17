@@ -21,6 +21,7 @@ import {
 import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import { HomeScreen } from "./HomeScreen";
 import { useHomeListOptions } from "./home-list-options";
+import { useProjectListSelection } from "./use-project-list-selection";
 import {
   runWhenHomeCovered,
   useAtomValueWhileVisible,
@@ -143,6 +144,7 @@ export function HomeRouteScreen() {
   );
   const selectedProjectKey =
     resolveHomeProjectFilterScope(projectScopes, projects, listOptions)?.key ?? null;
+  const selectProject = useProjectListSelection(projectScopes, setSelectedProjectKey);
 
   if (layout.usesSplitView && !nativePrimaryColumn) {
     return (
@@ -174,7 +176,7 @@ export function HomeRouteScreen() {
               selectedEnvironmentId,
               selectedProjectKey,
               onEnvironmentChange: setSelectedEnvironmentId,
-              onProjectChange: setSelectedProjectKey,
+              onProjectChange: selectProject,
             }),
           }}
         />
@@ -196,7 +198,7 @@ export function HomeRouteScreen() {
           onRenameThread={renameThread}
           onRegenerateThreadTitle={regenerateThreadTitle}
           onEnvironmentChange={setSelectedEnvironmentId}
-          onProjectChange={setSelectedProjectKey}
+          onProjectChange={selectProject}
           onOpenSettings={() => selectTab("settings")}
           onSearchQueryChange={setSearchQuery}
           onSelectThread={handleSelectThread}

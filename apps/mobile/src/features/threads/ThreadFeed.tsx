@@ -1,5 +1,7 @@
 import { toServerClock } from "@t3tools/client-runtime/clock";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
+import { crewScrollOffset } from "@t3tools/client-runtime/state/crew";
+import { CrewChatMessage, useCrewChat } from "./CrewChat";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -3598,6 +3600,19 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     onHeaderMaterialVisibilityChange?.(visible);
   };
   const feedThreadKey = scopedThreadKey(props.environmentId, props.threadId);
+  const crewChat = useCrewChat();
+  const crewScroll = crewChat ? crewScrollOffset(`native-chat:${feedThreadKey}`) : null;
+  const [initialCrewPosition, setInitialCrewPosition] = useState(() => ({
+    key: feedThreadKey,
+    offset: crewScroll ? appAtomRegistry.get(crewScroll) : 0,
+  }));
+  if (initialCrewPosition.key !== feedThreadKey) {
+    setInitialCrewPosition({
+      key: feedThreadKey,
+      offset: crewScroll ? appAtomRegistry.get(crewScroll) : 0,
+    });
+  }
+  const initialCrewOffset = crewScroll ? initialCrewPosition.offset : 0;
   const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
   const [landedListKey, setLandedListKey] = useState<string | null>(null);
   // LegendList reports ready, and shows its rows, while rows measured during its initial scroll can
@@ -3624,6 +3639,15 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       event.nativeEvent.contentOffset.y + (usesNativeAutomaticInsets ? barInset : 0) > 6,
     );
     handleMetricsChange();
+    if (crewScroll && focused && !settling) {
+      const state = listRef.current?.getState();
+      if (state) {
+        appAtomRegistry.set(
+          crewScroll,
+          state.isAtEnd ? 0 : Math.max(0, event.nativeEvent.contentOffset.y) + 1,
+        );
+      }
+    }
   };
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the list's end state to report it to the parent
   useLayoutEffect(() => {
@@ -3994,6 +4018,56 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }
   }, [textSizeKey, contentWidth, hasHtmlRenders, listRef]);
 
+  const renderMessageRow = (info: { item: GroupedThreadFeedRow; index: number }) =>
+    renderFeedEntry(info, {
+      userMessageGrouping: info.item.userMessageGrouping,
+      formatMessageTime,
+      environmentId: props.environmentId,
+      dispatchingMessageId: props.dispatchingMessageId,
+      pendingFoldMessageId,
+      setupFoldRowId,
+      worktreeSetup: props.worktreeSetup,
+      setupDetailsOpen,
+      onOpenSetupDetails: openSetupDetails,
+      onEditPendingMessage: props.onEditPendingMessage,
+      onUseArtifactTemplate: props.onUseArtifactTemplate,
+      threadId: props.threadId,
+      copiedRowId,
+      expandedWorkRows,
+      workRowSizing,
+      workGroupScrollPositions,
+      terminalAssistantMessageIds,
+      unsettledTurnId,
+      compactionLabelsByEntryId,
+      failedRunIds,
+      onCopyWorkRow,
+      onToggleWorkGroup,
+      onToggleWorkRow,
+      onToggleTurnFold,
+      onOpenTurnDiff,
+      onPressPreview,
+      onPlaybackStart: onInlinePlaybackStart,
+      markdownLinkHandlers,
+      renderMarkdownImage,
+      renderViewedImage,
+      renderReasoning,
+      iconSubtleColor,
+      replyActionSize,
+      screenColor,
+      userBubbleColor,
+      markdownStyles,
+      reviewCommentColors,
+      reviewCommentBubbleWidth,
+      themeAppearance,
+      duoColumns,
+      userBubbleMaxWidth,
+      markdownContentWidth,
+      contentWidth,
+      threadTitle: props.threadTitle,
+      skills: props.skills,
+      workspaceRoot: props.workspaceRoot,
+      workflowOpening,
+    });
   const renderItem = (info: { item: GroupedThreadFeedRow; index: number }) => (
     <DisclosureRow
       key={info.item.id}
@@ -4027,55 +4101,11 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               iconColor={iconSubtleColor}
             />
           ) : null}
-          {renderFeedEntry(info, {
-            userMessageGrouping: info.item.userMessageGrouping,
-            formatMessageTime,
-            environmentId: props.environmentId,
-            dispatchingMessageId: props.dispatchingMessageId,
-            pendingFoldMessageId,
-            setupFoldRowId,
-            worktreeSetup: props.worktreeSetup,
-            setupDetailsOpen,
-            onOpenSetupDetails: openSetupDetails,
-            onEditPendingMessage: props.onEditPendingMessage,
-            onUseArtifactTemplate: props.onUseArtifactTemplate,
-            threadId: props.threadId,
-            copiedRowId,
-            expandedWorkRows,
-            workRowSizing,
-            workGroupScrollPositions,
-            terminalAssistantMessageIds,
-            unsettledTurnId,
-            compactionLabelsByEntryId,
-            failedRunIds,
-            onCopyWorkRow,
-            onToggleWorkGroup,
-            onToggleWorkRow,
-            onToggleTurnFold,
-            onOpenTurnDiff,
-            onPressPreview,
-            onPlaybackStart: onInlinePlaybackStart,
-            markdownLinkHandlers,
-            renderMarkdownImage,
-            renderViewedImage,
-            renderReasoning,
-            iconSubtleColor,
-            replyActionSize,
-            screenColor,
-            userBubbleColor,
-            markdownStyles,
-            reviewCommentColors,
-            reviewCommentBubbleWidth,
-            themeAppearance,
-            duoColumns,
-            userBubbleMaxWidth,
-            markdownContentWidth,
-            contentWidth,
-            threadTitle: props.threadTitle,
-            skills: props.skills,
-            workspaceRoot: props.workspaceRoot,
-            workflowOpening,
-          })}
+          {crewChat && info.item.type === "message" ? (
+            <CrewChatMessage entry={info.item}>{renderMessageRow(info)}</CrewChatMessage>
+          ) : (
+            renderMessageRow(info)
+          )}
           {props.worktreeSetup && info.index === setupAnchorIndex ? (
             <WorktreeSetupCard
               key={props.threadId}
@@ -4170,7 +4200,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             scrollToOverflowEnabled
             estimatedItemSize={180}
             alignItemsAtEnd
-            initialScrollAtEnd
+            initialScrollAtEnd={initialCrewOffset === 0}
+            {...(initialCrewOffset > 0 ? { initialScrollOffset: initialCrewOffset - 1 } : {})}
             onReady={() => {
               setLoadedListKey(feedThreadKey);
               reportMetrics(true);

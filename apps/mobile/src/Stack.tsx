@@ -555,7 +555,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
     }),
     Crew: createNativeStackScreen({
       screen: CrewRouteScreen,
-      linking: "projects/:environmentId/:projectId/crew",
+      linking: "projects/:environmentId/:projectId/crew/:page?",
       options: pageRoute({ title: "Project crew" }),
     }),
     Thread: createNativeStackScreen({

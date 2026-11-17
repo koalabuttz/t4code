@@ -212,11 +212,13 @@ import { ThreadGuestShareBar } from "./ThreadGuestShareBar";
 import { ThreadSideChatsRow } from "./ThreadSideChatsRow";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-scroll-position";
+import { CrewChatStatus, type CrewChatRoute, useCrewChat } from "./CrewChat";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
 import type { OrchestrationV2ProviderSession } from "@t3tools/contracts";
 
 export interface ThreadDetailScreenProps {
+  readonly crewRoute?: CrewChatRoute | undefined;
   readonly header?: React.ReactNode;
   readonly draftMode?: {
     /** viewportHeight excludes the composer so draft chrome can resize it without feedback. */
@@ -407,6 +409,7 @@ function ThreadDetailBody(
   },
 ) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
+  const crewChat = useCrewChat();
   const { layout } = useAdaptiveWorkspaceLayout();
   const deviceType = useDeviceType();
   const workspace = useWorkspaceTabs();
@@ -1621,6 +1624,7 @@ function ThreadDetailBody(
                     keyboardShouldPersistTaps="handled"
                     nestedScrollEnabled
                   >
+                    <CrewChatStatus />
                     {props.queuedRunEdit !== null ? (
                       <Animated.View
                         className="shrink-0"
@@ -1827,7 +1831,11 @@ function ThreadDetailBody(
                             ? props.activePendingApproval.supportsFeedback
                               ? "Send feedback to decline this request"
                               : "Send a message to decline and redirect the agent"
-                            : "Ask anything"
+                            : crewChat?.route.coordinator
+                              ? "Message your project"
+                              : crewChat?.workstream
+                                ? "Message this work thread"
+                                : "Ask anything"
                         }
                         contentMaxWidth={contentMaxWidth}
                         draftControls={props.draftMode?.controls(draftViewportHeight)}

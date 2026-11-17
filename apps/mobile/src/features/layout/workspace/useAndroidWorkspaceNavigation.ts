@@ -3,17 +3,18 @@ import { useCallback } from "react";
 import { BackHandler, Keyboard, Platform } from "react-native";
 import { returnToAndroidWorkspaceList } from "../../../lib/android-workspace-navigation";
 
-export function useWorkspaceBackNavigation() {
+export function useWorkspaceBackNavigation(preserveStack = false) {
   const navigation = useNavigation();
   return () => {
-    if (Platform.OS === "android") returnToAndroidWorkspaceList(navigation);
+    if (preserveStack && navigation.canGoBack()) navigation.goBack();
+    else if (Platform.OS === "android") returnToAndroidWorkspaceList(navigation);
     else if (navigation.canGoBack()) navigation.goBack();
     else navigation.dispatch(StackActions.replace("Home"));
   };
 }
 
-export function useAndroidWorkspaceBack() {
-  const goBack = useWorkspaceBackNavigation();
+export function useAndroidWorkspaceBack(preserveStack = false) {
+  const goBack = useWorkspaceBackNavigation(preserveStack);
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS !== "android") return;

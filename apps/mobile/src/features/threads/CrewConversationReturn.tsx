@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { StackActions, useNavigation } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import { scopedProjectKey } from "@t3tools/client-runtime/environment";
 import { crewReturnContext } from "@t3tools/client-runtime/state/crew";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import type { CrewPage } from "./TeamworkSheet";
+import { openCrewPage } from "./crewProjectNavigation";
 
 export function CrewConversationReturn({
   environmentId,
@@ -35,9 +36,10 @@ export function CrewConversationReturn({
       )}
       <Button
         label="Return to Crew"
-        onPress={() =>
-          navigation.dispatch(StackActions.popTo("Crew", { environmentId, projectId, page }))
-        }
+        onPress={() => {
+          if (navigation.canGoBack()) navigation.goBack();
+          else openCrewPage(navigation, { environmentId, projectId }, page);
+        }}
       />
     </View>
   );
