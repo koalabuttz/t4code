@@ -1,6 +1,57 @@
-import type { OrchestrationV2ThreadShell, TeamworkSnapshot } from "@t3tools/contracts";
+import type {
+  OrchestrationV2ThreadShell,
+  ScopedProjectRef,
+  TeamworkSnapshot,
+  ThreadId,
+} from "@t3tools/contracts";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { crewTaskExecution } from "@t3tools/shared/crewExecution";
 import type { CrewPrerequisite } from "@t3tools/shared/crewSupervision";
+
+export function crewMessageRecipients(input: {
+  snapshot: TeamworkSnapshot;
+  initiativeId: string | null;
+  project: ScopedProjectRef;
+  threads: readonly Pick<
+    EnvironmentThreadShell,
+    "id" | "environmentId" | "projectId" | "deletedAt"
+  >[];
+  selected: readonly ThreadId[];
+}) {
+  const { snapshot, initiativeId, selected } = input;
+  const available = new Set(
+    input.threads
+      .filter(
+        (thread) =>
+          thread.environmentId === input.project.environmentId &&
+          thread.projectId === input.project.projectId &&
+          thread.deletedAt === null,
+      )
+      .map((thread) => thread.id),
+  );
+  const members = [
+    ...new Map(
+      [
+        ...(snapshot.coordinatorThreadId
+          ? [{ id: snapshot.coordinatorThreadId, label: "Project coordinator" }]
+          : []),
+        ...snapshot.tasks
+          .filter((task) => task.initiativeId === initiativeId && task.ownerThreadId !== null)
+          .map((task) => ({ id: task.ownerThreadId!, label: task.title })),
+      ]
+        .filter((member) => available.has(member.id))
+        .map((member) => [member.id, member]),
+    ).values(),
+  ];
+  const recipients = selected.filter((id) => members.some((member) => member.id === id));
+  const invalidRecipients = selected.filter((id) => !members.some((member) => member.id === id));
+  return {
+    members,
+    recipients,
+    invalidRecipients,
+    canAsk: recipients.length > 0 && invalidRecipients.length === 0,
+  };
+}
 
 export function crewSupervisionFacts(
   snapshot: TeamworkSnapshot,

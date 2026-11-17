@@ -1,13 +1,21 @@
 import { useState } from "react";
 import { useAtom } from "@effect/atom-react";
 import { crewMessageDraft } from "@t3tools/client-runtime/state/crew";
-import type { TeamworkAction, TeamworkReadResult, TeamworkSnapshot } from "@t3tools/contracts";
+import { scopedProjectKey } from "@t3tools/client-runtime/environment";
+import type {
+  ScopedProjectRef,
+  TeamworkAction,
+  TeamworkReadResult,
+  TeamworkSnapshot,
+} from "@t3tools/contracts";
+import { crewMessageRecipients } from "./crewPanel.logic";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 
 export function CrewCommunication({
   state,
-  projectKey,
+  project,
+  threads,
   initiativeId,
   deliveries,
   disabled,
@@ -15,45 +23,36 @@ export function CrewCommunication({
   onResume,
 }: {
   state: TeamworkSnapshot;
-  projectKey: string;
+  project: ScopedProjectRef;
+  threads: Parameters<typeof crewMessageRecipients>[0]["threads"];
   initiativeId: string | null;
   deliveries: TeamworkReadResult["deliveries"];
   disabled: boolean;
   act: (action: TeamworkAction) => Promise<boolean>;
   onResume: () => void;
 }) {
-  const [draft, setDraft] = useAtom(crewMessageDraft(projectKey));
+  const [draft, setDraft] = useAtom(crewMessageDraft(scopedProjectKey(project)));
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const active =
     state.initiatives.find((initiative) => initiative.id === initiativeId)?.status === "active";
-  const members = [
-    ...new Map(
-      [
-        ...(state.coordinatorThreadId
-          ? [{ id: state.coordinatorThreadId, label: "Project coordinator" }]
-          : []),
-        ...state.tasks
-          .filter((task) => task.initiativeId === initiativeId && task.ownerThreadId !== null)
-          .map((task) => ({ id: task.ownerThreadId!, label: task.title })),
-      ].map((member) => [member.id, member]),
-    ).values(),
-  ];
-  const recipients = draft.recipients.filter((id) => members.some((member) => member.id === id));
+  const { members, recipients, invalidRecipients, canAsk } = crewMessageRecipients({
+    snapshot: state,
+    initiativeId,
+    project,
+    threads,
+    selected: draft.recipients,
+  });
   const asking = draft.intent === "ask";
+  const sendDisabled =
+    disabled || sending || !draft.text.trim() || (asking && (!active || !canAsk));
   return (
     <section aria-label="Crew communication" className="space-y-3">
       <form
         className="space-y-3"
         onSubmit={async (event) => {
           event.preventDefault();
-          if (
-            disabled ||
-            sending ||
-            !draft.text.trim() ||
-            (asking && (!active || !recipients.length))
-          )
-            return;
+          if (sendDisabled) return;
           setSending(true);
           setNotice(asking ? "Saving request and queueing delivery…" : "Saving note…");
           const saved = await act({
@@ -124,8 +123,8 @@ export function CrewCommunication({
                     setDraft({
                       ...draft,
                       recipients: event.target.checked
-                        ? [...recipients, member.id]
-                        : recipients.filter((id) => id !== member.id),
+                        ? [...draft.recipients, member.id]
+                        : draft.recipients.filter((id) => id !== member.id),
                     })
                   }
                 />
@@ -133,13 +132,35 @@ export function CrewCommunication({
               </label>
             ))}
             {!members.length && (
-              <p className="text-sm">Choose a coordinator or assign a worker before asking.</p>
-            )}
-            {draft.recipients.length !== recipients.length && (
               <p className="text-sm">
-                Some saved recipients are no longer participants. Choose current recipients before
-                sending.
+                No current participant conversation is available. Choose an available coordinator or
+                worker before asking.
               </p>
+            )}
+            {invalidRecipients.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm">
+                  Unavailable saved recipients:{" "}
+                  {invalidRecipients
+                    .map((id) =>
+                      id === state.coordinatorThreadId
+                        ? "Project coordinator"
+                        : (state.tasks.find((task) => task.ownerThreadId === id)?.title ?? id),
+                    )
+                    .join(", ")}
+                  . Their conversations are missing, deleted, outside this project/environment, or
+                  no longer participating. Remove them before asking; your draft is retained.
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={sending}
+                  onClick={() => setDraft({ ...draft, recipients })}
+                >
+                  Remove unavailable recipients
+                </Button>
+              </div>
             )}
           </fieldset>
         )}
@@ -155,17 +176,7 @@ export function CrewCommunication({
           </div>
         )}
         <div className="flex gap-2">
-          <Button
-            type="submit"
-            size="sm"
-            disabled={
-              disabled ||
-              sending ||
-              !draft.text.trim() ||
-              (asking &&
-                (!active || !recipients.length || recipients.length !== draft.recipients.length))
-            }
-          >
+          <Button type="submit" size="sm" disabled={sendDisabled}>
             {sending ? "Saving…" : asking ? "Send request" : "Save note quietly"}
           </Button>
           <Button

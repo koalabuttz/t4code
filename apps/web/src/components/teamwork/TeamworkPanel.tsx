@@ -626,11 +626,7 @@ export function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread
                     {["paused", "completed", "cancelled"].includes(initiative.status) && (
                       <Button
                         size="sm"
-                        disabled={
-                          disabled ||
-                          !initiative.approved ||
-                          (summary?.resume.prerequisites.length ?? 0) > 0
-                        }
+                        disabled={disabled || !initiative.approved}
                         onClick={() =>
                           void act({
                             type: "initiative.status",
@@ -701,6 +697,11 @@ export function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread
                             <li key={label}>{label}</li>
                           ))}
                         </ul>
+                        <p>
+                          These concerns reflect last known client facts. Resume or reopen asks the
+                          server to validate current workers and stop deliveries; unavailable
+                          execution is not confirmed stopped.
+                        </p>
                       </div>
                     )}
                   <section className="space-y-2" aria-label="Coordinator handover">
@@ -741,8 +742,7 @@ export function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread
                           (thread) =>
                             thread.id === handoverThreadId &&
                             isCrewCoordinatorCandidate({ environmentId, projectId }, thread),
-                        ) ||
-                        supervision.handover.prerequisites.length > 0
+                        )
                       }
                       onClick={() =>
                         handoverThreadId &&
@@ -751,6 +751,11 @@ export function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread
                     >
                       Hand over to selected conversation
                     </Button>
+                    <p className="text-xs">
+                      Handover asks the server to validate current execution and stop deliveries.
+                      Missing or deleted previous conversations can be recovered without claiming
+                      they are stopped.
+                    </p>
                     {(!handoverThreadId || handoverThreadId === state.coordinatorThreadId) && (
                       <p className="text-xs">
                         Choose a different eligible project conversation under Setup to hand over.
@@ -1095,7 +1100,8 @@ export function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread
       {tab === "board" && (
         <CrewCommunication
           state={state}
-          projectKey={projectKey}
+          project={{ environmentId, projectId }}
+          threads={threads}
           initiativeId={initiative?.id ?? null}
           deliveries={query.data?.deliveries ?? []}
           disabled={disabled}

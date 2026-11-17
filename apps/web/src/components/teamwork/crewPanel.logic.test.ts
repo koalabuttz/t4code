@@ -1,5 +1,6 @@
 import {
   ProjectId,
+  EnvironmentId,
   RuntimeRequestId,
   ThreadId,
   type TeamworkSnapshot,
@@ -8,7 +9,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import { expect, it } from "vite-plus/test";
 import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
-import { crewSupervisionFacts } from "./crewPanel.logic";
+import { crewMessageRecipients, crewSupervisionFacts } from "./crewPanel.logic";
 
 const workerId = ThreadId.make("worker");
 const coordinatorId = ThreadId.make("coordinator");
@@ -166,4 +167,70 @@ it("leaves missing and deleted execution uncertain and does not assign a submitt
   });
   expect(result.clear).toBe(false);
   expect(result.initiatives[0]?.progress.running).toBeNull();
+});
+
+it("offers only current scoped participants and rejects a draft with any unavailable recipient", () => {
+  const { snapshot, task } = fixture();
+  const environmentId = EnvironmentId.make("environment");
+  const project = { environmentId, projectId: snapshot.projectId };
+  const coordinator = { ...project, id: coordinatorId, deletedAt: null };
+  const worker = { ...project, id: workerId, deletedAt: null };
+  const completed = { ...snapshot, tasks: [{ ...task, status: "done" as const }] };
+  const read = (
+    threads: Parameters<typeof crewMessageRecipients>[0]["threads"],
+    selected = [coordinatorId, workerId],
+  ) =>
+    crewMessageRecipients({
+      snapshot: completed,
+      initiativeId: "goal",
+      project,
+      threads,
+      selected,
+    });
+  expect(read([coordinator, worker])).toMatchObject({
+    recipients: [coordinatorId, workerId],
+    invalidRecipients: [],
+    canAsk: true,
+  });
+  expect(read([coordinator, worker]).members.map((member) => member.id)).toEqual([
+    coordinatorId,
+    workerId,
+  ]);
+  for (const threads of [
+    [worker],
+    [{ ...coordinator, deletedAt: "2026-11-17T00:00:00Z" }, worker],
+    [{ ...coordinator, environmentId: EnvironmentId.make("other-environment") }, worker],
+    [{ ...coordinator, projectId: ProjectId.make("other-project") }, worker],
+  ]) {
+    const result = read(threads);
+    expect(result.members.map((member) => member.id)).toEqual([workerId]);
+    expect(result).toMatchObject({
+      recipients: [workerId],
+      invalidRecipients: [coordinatorId],
+      canAsk: false,
+    });
+  }
+  for (const threads of [
+    [coordinator],
+    [coordinator, { ...worker, deletedAt: "2026-11-17T00:00:00Z" }],
+    [coordinator, { ...worker, environmentId: EnvironmentId.make("other-environment") }],
+    [coordinator, { ...worker, projectId: ProjectId.make("other-project") }],
+  ]) {
+    const result = read(threads);
+    expect(result.members.map((member) => member.id)).toEqual([coordinatorId]);
+    expect(result).toMatchObject({
+      recipients: [coordinatorId],
+      invalidRecipients: [workerId],
+      canAsk: false,
+    });
+  }
+  const unassigned = ThreadId.make("not-a-participant");
+  expect(
+    read([coordinator, worker, { ...project, id: unassigned, deletedAt: null }], [unassigned]),
+  ).toMatchObject({ recipients: [], invalidRecipients: [unassigned], canAsk: false });
+  expect(read([coordinator, worker], [])).toMatchObject({
+    recipients: [],
+    invalidRecipients: [],
+    canAsk: false,
+  });
 });
