@@ -15,6 +15,10 @@
       "types": "./src/crewHistory.ts",
       "import": "./src/crewHistory.ts"
     },
+    "./crewConversation": {
+      "types": "./src/crewConversation.ts",
+      "import": "./src/crewConversation.ts"
+    },
     "./crewExecution": {
       "types": "./src/crewExecution.ts",
       "import": "./src/crewExecution.ts"
