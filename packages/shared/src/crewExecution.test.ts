@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { ThreadId } from "@t3tools/contracts";
 import { crewTaskExecution } from "./crewExecution.ts";
 
