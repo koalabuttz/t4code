@@ -3,6 +3,7 @@ import type { StaticScreenProps } from "@react-navigation/native";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "../../components/ui/AppText";
 import { useProject } from "../../state/entities";
 import { serverEnvironment } from "../../state/server";
@@ -18,13 +19,14 @@ export function CrewRouteScreen({
 }>) {
   const environmentId = EnvironmentId.make(route.params.environmentId);
   const projectId = ProjectId.make(route.params.projectId);
+  const insets = useSafeAreaInsets();
   const project = useProject(scopeProjectRef(environmentId, projectId));
   const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   if (!project) return <AppText>Project unavailable on this connection.</AppText>;
   if (!config?.environment.capabilities.projectTeamwork)
     return <AppText>This server does not support Crew.</AppText>;
   return (
-    <View className="flex-1">
+    <View className="flex-1" style={{ paddingTop: insets.top }}>
       <AppText className="px-5 pt-4 text-lg font-t3-semibold">{project.title} · Crew</AppText>
       <TeamworkSheet
         key={route.params.page ?? "overview"}

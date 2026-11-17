@@ -1095,7 +1095,7 @@ export function TeamworkSheet({
                   />
                 )}
                 <CrewTaskArtifact
-                  key={`${task.id}:${task.submission?.revision}`}
+                  key={`artifact:${task.id}:${task.submission?.revision}`}
                   task={task}
                   environmentId={environmentId}
                   projectId={projectId}
@@ -1105,7 +1105,7 @@ export function TeamworkSheet({
                 {task.evidence && <AppText selectable>{task.evidence}</AppText>}
                 {task.status === "review" && (
                   <Review
-                    key={`${task.id}:${task.submission?.revision}`}
+                    key={`review:${task.id}:${task.submission?.revision}`}
                     disabled={disabled || (supports("submissions") && !task.submission)}
                     onReview={(decision, evidence) =>
                       act({
