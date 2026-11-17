@@ -10,9 +10,11 @@ import { appAtomRegistry } from "../../rpc/atomRegistry";
 export function CrewWorkerStatus({
   environmentId,
   task,
+  attention,
 }: {
   environmentId: EnvironmentId;
   task: TeamworkTask;
+  attention?: boolean;
 }) {
   const worker = useQuietThreadShell(
     task.ownerThreadId === null ? null : scopeThreadRef(environmentId, task.ownerThreadId),
@@ -40,7 +42,7 @@ export function CrewWorkerStatus({
   return (
     <div className="space-y-1 text-sm" aria-label="Worker execution">
       <p>
-        {execution.needsAttention ? "Needs attention · " : ""}
+        {(attention ?? execution.needsAttention) ? "Needs attention · " : ""}
         {crewExecutionLabels[execution.state]}
       </p>
       {execution.detail && <p className="text-xs text-muted-foreground">{execution.detail}</p>}
