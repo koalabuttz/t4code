@@ -31,8 +31,7 @@ import {
   isUsageLimitsCommand,
 } from "@t3tools/shared/usageLimits";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
-import { crewDraftBrief, readCrewCommand } from "@t3tools/client-runtime/state/crew";
-import { scopedProjectKey } from "@t3tools/client-runtime/environment";
+import { prepareCrewEntry, readCrewCommand } from "@t3tools/client-runtime/state/crew";
 import { appAtomRegistry } from "../../state/atom-registry";
 import type { ReactNode } from "react";
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
@@ -647,11 +646,21 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     ...(props.onFreshSession === undefined ? {} : { onFreshSession: props.onFreshSession }),
     offersSideChat: props.offersSideChat === true,
     onCrew: props.serverConfig?.environment.capabilities.projectTeamwork
-      ? () =>
+      ? () => {
+          prepareCrewEntry(
+            appAtomRegistry,
+            {
+              environmentId: props.environmentId,
+              projectId: props.selectedThread.projectId,
+            },
+            { threadId: props.selectedThread.id },
+          );
           navigation.navigate("Crew", {
             environmentId: props.environmentId,
             projectId: props.selectedThread.projectId,
-          })
+            originThreadId: props.selectedThread.id,
+          });
+        }
       : undefined,
   });
   const voiceInput = useVoiceInputController({
@@ -777,20 +786,20 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       props.serverConfig?.environment.capabilities.projectTeamwork &&
       draftAtSend.attachments.length === 0
     ) {
-      appAtomRegistry.set(
-        crewDraftBrief(
-          scopedProjectKey({
-            environmentId: props.environmentId,
-            projectId: props.selectedThread.projectId,
-          }),
-        ),
-        crewCommand.brief,
+      prepareCrewEntry(
+        appAtomRegistry,
+        {
+          environmentId: props.environmentId,
+          projectId: props.selectedThread.projectId,
+        },
+        { threadId: props.selectedThread.id, brief: crewCommand.brief },
       );
       onChangeDraftMessage("");
       inFlightThreadIdsRef.current.delete(threadKey);
       navigation.navigate("Crew", {
         environmentId: props.environmentId,
         projectId: props.selectedThread.projectId,
+        originThreadId: props.selectedThread.id,
       });
       return;
     }

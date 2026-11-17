@@ -247,7 +247,7 @@ import { toastManager } from "../ui/toast";
 import { BuildingIcon, PlayIcon, ReplyIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { scopedProjectKey } from "@t3tools/client-runtime/environment";
-import { crewDraftBrief, readCrewCommand } from "@t3tools/client-runtime/state/crew";
+import { prepareCrewEntry, readCrewCommand } from "@t3tools/client-runtime/state/crew";
 import { useAtomValue } from "@effect/atom-react";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { serverEnvironment } from "../../state/server";
@@ -1976,6 +1976,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
         if (applied) {
           setComposerHighlightedItemId(null);
+          prepareCrewEntry(
+            appAtomRegistry,
+            { environmentId, projectId: activeProjectId },
+            {
+              threadId: activeThreadId,
+            },
+          );
           void navigate({
             to: "/projects/$projectKey/crew",
             params: { projectKey: scopedProjectKey({ environmentId, projectId: activeProjectId }) },
@@ -2250,7 +2257,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ) {
       event?.preventDefault();
       const projectKey = scopedProjectKey({ environmentId, projectId: activeProjectId });
-      appAtomRegistry.set(crewDraftBrief(projectKey), crewCommand.brief);
+      prepareCrewEntry(
+        appAtomRegistry,
+        { environmentId, projectId: activeProjectId },
+        {
+          threadId: activeThreadId,
+          brief: crewCommand.brief,
+        },
+      );
       applyPromptReplacement(0, promptRef.current.length, "", {
         expectedText: promptRef.current,
         focusEditorAfterReplace: false,

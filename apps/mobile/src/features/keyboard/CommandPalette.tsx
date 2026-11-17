@@ -1,4 +1,6 @@
 import { LegendList, type LegendListRef } from "@legendapp/list/react-native";
+import { prepareCrewEntry } from "@t3tools/client-runtime/state/crew";
+import { appAtomRegistry } from "../../state/atom-registry";
 import { useAtomValue } from "@effect/atom-react";
 import { uuidv4 } from "../../lib/uuid";
 import { useNavigation } from "@react-navigation/native";
@@ -413,11 +415,23 @@ export function CommandPalette(props: {
         kind: "action",
         title: `Open crew in ${project.title}`,
         searchTerms: ["crew", "swarm", "team", "coordinator", "knowledge"],
-        run: () =>
+        run: () => {
+          const originThreadId =
+            activeThread?.environmentId === project.environmentId &&
+            activeThread.projectId === project.id
+              ? activeThread.id
+              : undefined;
+          prepareCrewEntry(
+            appAtomRegistry,
+            { environmentId: project.environmentId, projectId: project.id },
+            { threadId: originThreadId },
+          );
           navigation.navigate("Crew", {
             environmentId: project.environmentId,
             projectId: project.id,
-          }),
+            ...(originThreadId ? { originThreadId } : {}),
+          });
+        },
       });
     }
     const projectItems: CommandPaletteItem[] = [

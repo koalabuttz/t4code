@@ -1,4 +1,6 @@
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
+import { prepareCrewEntry } from "@t3tools/client-runtime/state/crew";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
@@ -1512,6 +1514,12 @@ function OpenCommandPaletteDialog(props: {
       title: "Open project crew",
       icon: <UserPlusIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
+        if (
+          activeThread?.environmentId === contextualProjectRef.environmentId &&
+          activeThread.projectId === contextualProjectRef.projectId
+        ) {
+          prepareCrewEntry(appAtomRegistry, contextualProjectRef, { threadId: activeThread.id });
+        }
         await navigate({
           to: "/projects/$projectKey/crew",
           params: { projectKey: scopedProjectKey(contextualProjectRef) },
