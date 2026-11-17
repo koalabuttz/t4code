@@ -31,6 +31,9 @@ import {
   isUsageLimitsCommand,
 } from "@t3tools/shared/usageLimits";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
+import { crewDraftBrief, readCrewCommand } from "@t3tools/client-runtime/state/crew";
+import { scopedProjectKey } from "@t3tools/client-runtime/environment";
+import { appAtomRegistry } from "../../state/atom-registry";
 import type { ReactNode } from "react";
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import { I18nManager, Keyboard, Platform, View, type ViewStyle } from "react-native";
@@ -643,6 +646,13 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     modelProviders: props.serverConfig?.providers,
     ...(props.onFreshSession === undefined ? {} : { onFreshSession: props.onFreshSession }),
     offersSideChat: props.offersSideChat === true,
+    onCrew: props.serverConfig?.environment.capabilities.projectTeamwork
+      ? () =>
+          navigation.navigate("Crew", {
+            environmentId: props.environmentId,
+            projectId: props.selectedThread.projectId,
+          })
+      : undefined,
   });
   const voiceInput = useVoiceInputController({
     ownerKey: composerDraftKey,
@@ -761,6 +771,29 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     inFlightThreadIdsRef.current.add(threadKey);
     await inputRef.current?.flushPendingInput();
     const draftAtSend = getComposerDraftSnapshot(composerDraftKey);
+    const crewCommand = readCrewCommand(draftAtSend.text);
+    if (
+      crewCommand &&
+      props.serverConfig?.environment.capabilities.projectTeamwork &&
+      draftAtSend.attachments.length === 0
+    ) {
+      appAtomRegistry.set(
+        crewDraftBrief(
+          scopedProjectKey({
+            environmentId: props.environmentId,
+            projectId: props.selectedThread.projectId,
+          }),
+        ),
+        crewCommand.brief,
+      );
+      onChangeDraftMessage("");
+      inFlightThreadIdsRef.current.delete(threadKey);
+      navigation.navigate("Crew", {
+        environmentId: props.environmentId,
+        projectId: props.selectedThread.projectId,
+      });
+      return;
+    }
     const stillSendable = () => {
       const draft = getComposerDraftSnapshot(composerDraftKey);
       return (

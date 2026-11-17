@@ -20,7 +20,7 @@ import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { projectEnvironment } from "../../state/projects";
-import { useThreadShells } from "../../state/entities";
+import { useThreadShells, useServerConfigs } from "../../state/entities";
 import { appAtomRegistry } from "../../state/atom-registry";
 import {
   clearComposerDraft,
@@ -146,6 +146,8 @@ function ProjectOverviewContent(props: {
   const [draftName, setDraftName] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const threads = useThreadShells();
+  const navigation = useNavigation();
+  const serverConfigs = useServerConfigs();
   const allMembers = props.group.members.map((member) => member.project);
   const removableEnvironments = useEnvironmentsWithScope(allMembers, AuthOrchestrationOperateScope);
   const canRemoveGroup = props.members.every((member) =>
@@ -304,6 +306,23 @@ function ProjectOverviewContent(props: {
 
   return (
     <>
+      {props.members
+        .filter(
+          (member) =>
+            serverConfigs.get(member.environmentId)?.environment.capabilities.projectTeamwork,
+        )
+        .map((member) => (
+          <Button
+            key={`${member.environmentId}:${member.id}`}
+            label={`Open crew · ${member.title}`}
+            onPress={() =>
+              navigation.navigate("Crew", {
+                environmentId: member.environmentId,
+                projectId: member.id,
+              })
+            }
+          />
+        ))}
       <View className="flex-row items-center gap-4 px-2">
         <ProjectFavicon
           environmentId={representative.environmentId}

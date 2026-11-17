@@ -55,6 +55,13 @@ export const ServerProviderUsageLimits = Schema.Struct({
       }),
     ),
   ),
+  accountLabel: Schema.optional(TrimmedNonEmptyString),
+  monthlySpend: Schema.optional(
+    Schema.Struct({
+      amount: Schema.NullOr(Schema.Number.check(Schema.isFinite())),
+      currency: TrimmedNonEmptyString,
+    }),
+  ),
   /** A $0 monthly spend cap has no percentage, so it cannot be a window. */
   zeroSpendCap: Schema.optional(Schema.Boolean),
   credentialFingerprint: Schema.optional(TrimmedNonEmptyString),
@@ -96,6 +103,7 @@ export const UsageLimitSourceKind = Schema.Literals([
   "zai-coding",
   "zai-api",
   "abliteration",
+  "anthropic",
 ]);
 export type UsageLimitSourceKind = typeof UsageLimitSourceKind.Type;
 

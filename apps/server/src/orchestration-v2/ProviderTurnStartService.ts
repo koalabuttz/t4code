@@ -54,6 +54,7 @@ import {
   latestNativeContextUsage,
 } from "@t3tools/provider-core/server/handoffBudget";
 import { deliverContextHandoffs, withInlineContext } from "./ContextHandoffDelivery.ts";
+import * as CrewContext from "../teamwork/CrewContextService.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -169,6 +170,7 @@ export const layer: Layer.Layer<
   never,
   | EventSink.EventSinkV2
   | ContextHandoffService.ContextHandoffServiceV2
+  | CrewContext.CrewContextService
   | IdAllocator.IdAllocatorV2
   | FileSystem.FileSystem
   | Path.Path
@@ -188,6 +190,7 @@ export const layer: Layer.Layer<
     const eventSink = yield* EventSink.EventSinkV2;
     const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
+    const crewContext = yield* CrewContext.CrewContextService;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -1719,13 +1722,33 @@ export const layer: Layer.Layer<
           ],
         });
       });
+      const crewInput = {
+        projectId: projection.thread.projectId,
+        threadId: projection.thread.id,
+        query: userText,
+      };
+      const initialCrewPacket =
+        goalCommand || isCompactionCommandMessage(providerMessage) || manualResume
+          ? null
+          : yield* crewContext.prepare({ ...crewInput, allowance: 8000 });
       const startWithHandoffs = Effect.fn("ProviderTurnStartService.startWithHandoffs")(
         function* (turnInput: Parameters<typeof session.startTurn>[0], compact = false) {
+          let packet = compact || goalCommand || turnInput.resume ? null : initialCrewPacket;
+          const availableBudget = packet === null ? undefined : yield* budget;
+          if (
+            packet !== null &&
+            availableBudget !== undefined &&
+            packet.bytes > availableBudget / 2
+          )
+            packet = yield* crewContext.prepare({
+              ...crewInput,
+              allowance: Math.floor(availableBudget / 2),
+            });
           const delivery = yield* deliverContextHandoffs({
             handoffs: [...effectiveHandoffs, ...retryHandoff],
             deferInline: compact || goalCommand,
             providerThread: runningProviderThread,
-            budget,
+            budget: packet === null ? budget : Math.max(0, (availableBudget ?? 0) - packet.bytes),
             alreadyDeliveredItemIds: deliveredItemIds,
             ...(session.injectHistory === undefined
               ? {}
@@ -1745,7 +1768,7 @@ export const layer: Layer.Layer<
             sideChatHandoff === undefined || compact || goalCommand
               ? ""
               : sideChatHandoff.summaryText;
-          const context = [delivery.context, sideChatContext, restartNote]
+          const context = [delivery.context, sideChatContext, restartNote, packet?.text ?? ""]
             .filter((part) => part !== "")
             .join("\n\n");
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;
@@ -1781,6 +1804,14 @@ export const layer: Layer.Layer<
             ),
           );
           // After provider acceptance, failed delivery bookkeeping must not stop live ingestion.
+          if (packet !== null)
+            yield* crewContext
+              .record(projection.thread.projectId, run.id, packet)
+              .pipe(
+                Effect.catchCause(() =>
+                  Effect.logWarning("Failed to record accepted Crew context", { runId: run.id }),
+                ),
+              );
           const nativeThreadId = runningProviderThread.nativeThreadRef?.nativeId;
           yield* Effect.forEach(
             [
@@ -1824,6 +1855,7 @@ export const layer: Layer.Layer<
         retryHandoff.length === 0 &&
         sideChatHandoff === undefined &&
         restartNote === "" &&
+        initialCrewPacket === null &&
         !noteContinuation
           ? session
           : makeDeliverySession(session, startWithHandoffs);

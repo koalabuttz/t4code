@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, UsageLimitSourceId } from "@t3tools/contracts";
 import { page, userEvent } from "vite-plus/test/browser";
 import { describe, expect, it, vi } from "vite-plus/test";
 import "~/index.css";
@@ -50,6 +50,12 @@ describe("AddUsageLimitSourceDialog", () => {
       url: "https://api.abliteration.ai",
       kind: "abliteration",
     },
+    {
+      service: "Claude API",
+      id: "anthropic-platform.claude.com",
+      url: "https://platform.claude.com",
+      kind: "anthropic",
+    },
   ])(
     "adds $service with the correct endpoint and credential",
     async ({ service, id, url, kind }) => {
@@ -72,9 +78,12 @@ describe("AddUsageLimitSourceDialog", () => {
         await userEvent.type(page.getByLabelText("Management key"), "old-service-secret");
         await page.getByRole("combobox", { name: "Service" }).click();
         await page.getByRole("option", { name: service, exact: true }).click();
-        await expect.element(page.getByLabelText("API key")).toHaveValue("");
+        const credential = page.getByLabelText(
+          kind === "anthropic" ? "Console session key" : "API key",
+        );
+        await expect.element(credential).toHaveValue("");
         await expect.element(page.getByRole("button", { name: "Add source" })).toBeDisabled();
-        await userEvent.type(page.getByLabelText("API key"), "secret-key{Enter}");
+        await userEvent.type(credential, "secret-key{Enter}");
       }
 
       expect(updateSettings).toHaveBeenCalledOnce();
@@ -90,4 +99,40 @@ describe("AddUsageLimitSourceDialog", () => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
     },
   );
+  it("renews a Console session on its existing source and clears the organization override", async () => {
+    updateSettings.mockClear();
+    await using _screen = await render(
+      <AddUsageLimitSourceDialog
+        open
+        onOpenChange={() => {}}
+        environmentId={EnvironmentId.make("local")}
+        environmentLabel="Local"
+        sources={{}}
+        initialSource={{
+          id: UsageLimitSourceId.make("existing"),
+          config: {
+            kind: "anthropic",
+            url: "https://platform.claude.com",
+            enabled: true,
+            managementKey: "",
+            organizationId: "previous-org",
+          },
+        }}
+      />,
+    );
+    await expect.element(page.getByRole("combobox", { name: "Service" })).toBeDisabled();
+    await userEvent.clear(page.getByLabelText("Organization ID (optional)"));
+    await userEvent.type(page.getByLabelText("Console session key"), "new-session{Enter}");
+    expect(updateSettings).toHaveBeenCalledWith({
+      usageLimitSources: {
+        existing: {
+          kind: "anthropic",
+          label: "Claude API",
+          url: "https://platform.claude.com",
+          managementKey: "new-session",
+          enabled: true,
+        },
+      },
+    });
+  });
 });

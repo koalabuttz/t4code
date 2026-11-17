@@ -32,7 +32,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -68,37 +68,104 @@ const minimalPng = Uint8Array.from([
   ...pngChunk("IEND", 0),
 ]);
 
-it.effect.each([400, 500])(
+it.effect.each([400, 500, 503])(
   "retries a hub-rejected (%s) screenshot with simctl only on iOS 26 and older",
   (status) =>
     Effect.gen(function* () {
+      const body = status === 503 ? "private hub output".repeat(200) : "private hub output";
+      const diagnostic = body.slice(0, 2_000);
       const operations = makeDeviceHubOperations({
         hostId: LOCAL_DEVICE_HOST_ID,
         origin: "http://device.test",
         http: HttpClient.make((request) =>
-          Effect.succeed(
-            HttpClientResponse.fromWeb(request, new Response("private hub output", { status })),
-          ),
+          Effect.succeed(HttpClientResponse.fromWeb(request, new Response(body, { status }))),
         ),
         run: () => Effect.succeed({ code: 0, stdout: "iVBORw==", stderr: "" }),
         platformAvailable: () => Effect.succeed(false),
       });
-      const screenshot = (version: string) =>
+      const screenshot = (version: string, platform: "ios" | "android" = "ios") =>
         operations
           .screenshot({
             id: "phone",
             name: "Phone",
             version,
-            platform: "ios",
+            platform,
             booted: true,
             physical: false,
           })
           .pipe(Effect.result);
       expect(yield* screenshot("iOS 27.0")).toMatchObject({
-        failure: { _tag: "DeviceOperationError", reason: "hub_rejected" },
+        failure: {
+          _tag: "DeviceOperationError",
+          reason: "hub_rejected",
+          cause: { reason: { cause: { message: diagnostic } } },
+        },
       });
+      const android = yield* screenshot("Android 15", "android");
+      expect(android).toMatchObject({
+        failure: {
+          reason: "hub_rejected",
+          cause: { reason: { cause: { message: diagnostic } } },
+        },
+      });
+      if (android._tag === "Failure") {
+        expect(android.failure.message).not.toContain("private hub output");
+      }
       expect(yield* screenshot("iOS 26.3")).toMatchObject({
         success: new Uint8Array([137, 80, 78, 71]),
+      });
+    }),
+);
+
+it.effect.each(["stalled", "failed"] as const)(
+  "keeps a hub rejection when its diagnostic body is %s",
+  (bodyState) =>
+    Effect.gen(function* () {
+      const reading = yield* Deferred.make<void>();
+      const bodyError = new Error("diagnostic connection closed");
+      const operations = makeDeviceHubOperations({
+        hostId: LOCAL_DEVICE_HOST_ID,
+        origin: "http://device.test",
+        http: HttpClient.make((request) => {
+          const response = HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }));
+          Object.defineProperty(response, "stream", {
+            value: Stream.fromEffect(
+              Deferred.succeed(reading, undefined).pipe(
+                Effect.andThen(
+                  bodyState === "stalled"
+                    ? Effect.never
+                    : Effect.fail(
+                        new HttpClientError.HttpClientError({
+                          reason: new HttpClientError.DecodeError({
+                            request,
+                            response,
+                            cause: bodyError,
+                          }),
+                        }),
+                      ),
+                ),
+              ),
+            ),
+          });
+          return Effect.succeed(response);
+        }),
+        run: () => Effect.die("Android must not use the iOS fallback"),
+        platformAvailable: () => Effect.succeed(true),
+      });
+      const capture = yield* operations
+        .screenshot({
+          id: "emulator-5554",
+          name: "Android",
+          version: "15",
+          platform: "android",
+          booted: true,
+          physical: false,
+        })
+        .pipe(Effect.result, Effect.forkChild);
+      yield* Deferred.await(reading);
+      if (bodyState === "stalled") yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(capture)).toMatchObject({
+        failure: { reason: "hub_rejected" },
       });
     }),
 );

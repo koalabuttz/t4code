@@ -5,6 +5,7 @@ import {
   GitCommandError,
   OrchestrationV2AppThreadJson,
   OrchestrationV2ProviderSessionJson,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Schema from "effect/Schema";
@@ -18,7 +19,6 @@ import type {
   WorktreeCleanupRules,
   StorageCleanupReport,
   StorageCleanupReportEntry,
-  ThreadId,
 } from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import { resolveWorktreeT3Home } from "@t3tools/shared/devHome";
@@ -62,6 +62,7 @@ import { isLinkedWorktree, removeLinkedWorktree } from "./vcs/worktreeRemoval.ts
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { crewRetainsArtifacts } from "./teamwork/artifactRetention.ts";
 import { isNetworkPath } from "@t3tools/shared/path";
 
 const decodeCleanupThread = Schema.decodeUnknownEffect(
@@ -1222,6 +1223,8 @@ const make = Effect.gen(function* () {
         );
         if (!exists) return;
         if (deleted && !settings.worktreeOnDelete) return keep("no rules apply");
+        if (yield* crewRetainsArtifacts(members.map((member) => member.id)))
+          return keep("Crew still needs this worktree's evidence");
         if (members.length > 1 && worktreeOwner(members) === undefined)
           return keep(`shared by ${members.length} threads`);
         if (project === undefined) return keep("project is unavailable");
@@ -1316,6 +1319,8 @@ const make = Effect.gen(function* () {
             projections.getThreadShell(entry.threadId),
           );
           const latestGroup = latestShells.filter((shell) => shell !== null);
+          if (yield* crewRetainsArtifacts([thread.id, ...latestGroup.map((shell) => shell.id)]))
+            return "Crew still needs this worktree's evidence";
           const latestKeys = yield* Effect.forEach(latestGroup, (shell) =>
             shell.worktreePath === null ? Effect.succeed(null) : canonical(shell.worktreePath),
           );
@@ -1682,7 +1687,9 @@ const make = Effect.gen(function* () {
         )
     `.pipe(NodeSqliteClient.readOnly);
     const targets = new Map<string, Set<string>>();
+    const prefixOwners = new Map<string, ThreadId>();
     for (const row of rows) {
+      if (yield* crewRetainsArtifacts([ThreadId.make(row.threadId)])) continue;
       // Derive ownership from tombstones, never from absence in this database:
       // another T3 home can own refs in the same Git repository.
       const prefixes = [`refs/t3/checkpoints/${Base64Url.encode(row.threadId)}/turn/`];
@@ -1694,6 +1701,7 @@ const make = Effect.gen(function* () {
           })).slice(0, -1),
         );
       }
+      for (const prefix of prefixes) prefixOwners.set(prefix, ThreadId.make(row.threadId));
       // A worktree may already be gone; its refs live in the shared repository.
       for (const cwd of [row.cwd, row.worktreePath, row.workspaceRoot]) {
         if (cwd === null) continue;
@@ -1745,6 +1753,17 @@ const make = Effect.gen(function* () {
           );
         });
         if (refs.length === 0) return;
+        if (
+          yield* crewRetainsArtifacts([
+            ...new Set(
+              [...prefixes].flatMap((prefix) => {
+                const owner = prefixOwners.get(prefix);
+                return owner ? [owner] : [];
+              }),
+            ),
+          ])
+        )
+          return;
         yield* git.execute({
           operation: "StorageCleanup.deleteCheckpointRefs",
           cwd,

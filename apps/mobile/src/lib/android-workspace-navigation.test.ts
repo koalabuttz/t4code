@@ -1,9 +1,11 @@
 import * as NodeModule from "node:module";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  androidWorkspaceSettingsOpen,
   androidWorkspaceTabNavigationState,
   type AndroidWorkspaceNavigationTab,
 } from "../features/layout/workspace/android-workspace-tabs";
+import { settingsOpenIn } from "../features/settings/settings-navigation";
 import {
   linkedThreadStep,
   parentThreadIsBelow,
@@ -29,6 +31,7 @@ const options = {
   routeNames: [
     "Home",
     "Thread",
+    "Crew",
     "ThreadFiles",
     "ThreadTerminal",
     "GitOverview",
@@ -38,6 +41,7 @@ const options = {
     "Settings",
     "SettingsEnvironments",
     "SettingsAppearance",
+    "SettingsProjectOverview",
     "SettingsOpenSourceLicenses",
     "SettingsUsage",
     "SettingsUsageAccount",
@@ -256,5 +260,32 @@ describe("Android Settings tab", () => {
     const list = openTab(usage, "pullRequests");
     expect(names(list)).toEqual(["Home"]);
     expect(list.routes[0]?.key).toBe(previous.routes[0]?.key);
+
+    let project = apply(
+      openTab(previous, "settings"),
+      StackActions.push("SettingsProjectOverview"),
+    );
+    const projectRoute = project.routes.at(-1);
+    project = apply(
+      project,
+      StackActions.push("Crew", { environmentId: "environment-a", projectId: "project-a" }),
+    );
+    for (const name of ["Thread", "ThreadFiles"]) {
+      expect(settingsOpenIn(project.routes)).toBe(true);
+      expect(androidWorkspaceSettingsOpen(project)).toBe(true);
+      project = apply(project, StackActions.push(name, thread.params));
+    }
+    expect(settingsOpenIn(project.routes)).toBe(true);
+    expect(androidWorkspaceSettingsOpen(project)).toBe(true);
+    project = apply(project, StackActions.pop(3));
+    expect(project.routes.at(-1)?.key).toBe(projectRoute?.key);
+    expect(settingsOpenIn(project.routes)).toBe(true);
+    expect(settingsOpenIn(openTab(project, "threads").routes)).toBe(false);
+    expect(
+      settingsOpenIn(
+        apply(openTab(previous, "settings"), StackActions.push("Thread", thread.params)).routes,
+      ),
+    ).toBe(false);
+    expect(settingsOpenIn(apply(withThread(), StackActions.push("Crew")).routes)).toBe(false);
   });
 });

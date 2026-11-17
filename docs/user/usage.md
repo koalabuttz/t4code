@@ -125,6 +125,16 @@ Its balance lookup uses an undocumented Z.ai endpoint and may become unavailable
 changes. A failed lookup shows an error, never a zero balance. These sources do not change which
 account an agent uses.
 
+For **Claude API**, add a source using the `sessionKey` cookie from a signed-in
+`platform.claude.com` browser session. Find it in the browser's developer tools under
+**Application → Cookies** and copy only its value. This shows remaining API credit and
+the current month's spend in UTC; Claude subscription limits remain separate. API keys and
+Admin API keys cannot read this Console balance endpoint.
+
+If you have multiple API organizations, enter the intended organization's ID. Use **Update session**
+in Usage providers to replace an expired cookie or change that selection. The Console endpoints
+are undocumented and may change. An unavailable spend report does not hide a valid credit balance.
+
 ## Track subscription limits
 
 **Usage → Limits** pools every subscription account it can see per provider, so with several Codex

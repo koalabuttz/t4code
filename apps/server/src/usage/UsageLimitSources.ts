@@ -102,7 +102,10 @@ export const make = Effect.gen(function* () {
         return {
           ...base,
           accounts: [],
-          error: "No API key is available. Check the source's credential settings.",
+          error:
+            config.kind === "anthropic"
+              ? "No Claude Console session key is available. Check the source's credential settings."
+              : "No API key is available. Check the source's credential settings.",
         };
       }
       const result = yield* billingApi.read(config, managementKey).pipe(Effect.result);
@@ -110,7 +113,12 @@ export const make = Effect.gen(function* () {
         return {
           ...base,
           accounts: [],
-          error: "Could not refresh balance or quota. Check the API key and try again.",
+          error:
+            result.failure._tag === "ClaudeConsoleReadError"
+              ? result.failure.message
+              : config.kind === "anthropic"
+                ? "Could not refresh Claude API billing. Check the Console session key and try again."
+                : "Could not refresh balance or quota. Check the API key and try again.",
         };
       }
       return { ...base, accounts: [], usageLimits: result.success };

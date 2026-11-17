@@ -52,6 +52,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
   scopedThreadKey,
+  scopedProjectKey,
 } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
@@ -1272,6 +1273,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   ]
                 : []),
               { id: "project-settings", label: "Project settings", icon: "settings" },
+              ...(serverConfigs.get(group.environmentId)?.environment.capabilities.projectTeamwork
+                ? [{ id: "project-crew", label: "Project crew" }]
+                : []),
             ],
             position,
             source,
@@ -1279,6 +1283,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         );
         if (clicked._tag === "Failure") return;
         switch (clicked.value) {
+          case "project-crew":
+            void router.navigate({
+              to: "/projects/$projectKey/crew",
+              params: {
+                projectKey: scopedProjectKey(scopeProjectRef(group.environmentId, group.id)),
+              },
+            });
+            return;
           case "new-thread":
             startThreadInProjectFolder(group);
             return;

@@ -15,7 +15,7 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "node --watch --watch-path=src --watch-path=../../packages --watch-path=package.json src/bin.ts",
+    "dev": "nodemon --watch src --watch ../../packages --watch package.json --ext ts,tsx,js,mjs,cjs,json --ignore \"**/*.test.*\" --ignore \"**/*.testkit.*\" --signal SIGTERM --exec node src/bin.ts",
     "dev:built": "vp run dev",
     "build:bundle": "vp pack",
     "build:exe": "node scripts/cli.ts build-exe",
@@ -99,6 +99,7 @@
     "effect-acp": "workspace:*",
     "effect-codex-app-server": "workspace:*",
     "graphql": "16.14.1",
+    "nodemon": "3.1.14",
     "vite-plus": "catalog:"
   },
   "engines": {

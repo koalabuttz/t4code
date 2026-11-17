@@ -18,6 +18,9 @@ export function BillingSources({
     <View key={source.key} className="gap-3 rounded-xl border border-border-subtle p-4">
       <Text className="text-base font-t3-medium text-foreground">{source.label}</Text>
       <Text className="text-xs text-foreground-muted">{source.environments.join(", ")}</Text>
+      {source.limits?.accountLabel ? (
+        <Text className="text-xs text-foreground-muted">{source.limits.accountLabel}</Text>
+      ) : null}
       {source.error ? (
         <Text accessibilityRole="alert" className="text-sm text-foreground-muted">
           {source.error}
@@ -34,6 +37,14 @@ export function BillingSources({
           {formatUsageBalance(balance)} remaining
         </Text>
       ))}
+      {source.limits?.monthlySpend ? (
+        <Text className="text-sm text-foreground-muted">
+          This month (UTC):{" "}
+          {source.limits.monthlySpend.amount === null
+            ? "Spend unavailable"
+            : `${formatUsageBalance({ currency: source.limits.monthlySpend.currency, remaining: source.limits.monthlySpend.amount })} spent`}
+        </Text>
+      ) : null}
       {source.limits?.windows.map((window) => (
         <View key={window.id} className="gap-1">
           <View className="flex-row justify-between gap-3">

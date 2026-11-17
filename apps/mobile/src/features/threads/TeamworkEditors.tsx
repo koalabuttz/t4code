@@ -161,16 +161,19 @@ export function TeamworkTaskEditor({
 
 export function TeamworkBriefEditor({
   initiative,
+  supportsDependencies,
   disabled,
   act,
 }: Pick<EditorProps, "disabled" | "act"> & {
   initiative: TeamworkSnapshot["initiatives"][number];
+  supportsDependencies: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(initiative.title);
   const [brief, setBrief] = useState(initiative.brief);
   const [milestone, setMilestone] = useState("");
   const [criteria, setCriteria] = useState("");
+  const [dependencies, setDependencies] = useState<readonly string[]>([]);
   return (
     <View className="gap-2">
       <Button label="Edit brief and milestones" onPress={() => setOpen(!open)} />
@@ -220,6 +223,25 @@ export function TeamworkBriefEditor({
             multiline
             maxLength={12000}
           />
+          {supportsDependencies && initiative.milestones.length > 0 && (
+            <View className="gap-2">
+              <AppText>Wait for verified milestones</AppText>
+              {initiative.milestones.map((m) => (
+                <Button
+                  key={m.id}
+                  label={`${dependencies.includes(m.id) ? "✓ " : ""}${m.title}`}
+                  tone={dependencies.includes(m.id) ? "primary" : "secondary"}
+                  onPress={() =>
+                    setDependencies(
+                      dependencies.includes(m.id)
+                        ? dependencies.filter((id) => id !== m.id)
+                        : [...dependencies, m.id],
+                    )
+                  }
+                />
+              ))}
+            </View>
+          )}
           <Button
             label="Add milestone"
             disabled={disabled || !milestone.trim() || !criteria.trim()}
@@ -228,11 +250,18 @@ export function TeamworkBriefEditor({
                 await act({
                   type: "milestone.save",
                   initiativeId: initiative.id,
-                  milestone: { id: uuidv4(), title: milestone, criteria, accepted: false },
+                  milestone: {
+                    id: uuidv4(),
+                    title: milestone,
+                    criteria,
+                    accepted: false,
+                    ...(supportsDependencies ? { dependencies } : {}),
+                  },
                 })
               ) {
                 setMilestone("");
                 setCriteria("");
+                setDependencies([]);
               }
             }}
           />

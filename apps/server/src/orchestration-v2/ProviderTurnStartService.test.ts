@@ -21,6 +21,7 @@ import {
   ThreadId,
   ProjectId,
   type OrchestrationV2ThreadProjection,
+  type TeamworkContext,
   OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -57,6 +58,7 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
+import * as CrewContext from "../teamwork/CrewContextService.ts";
 import { withInlineContext } from "./ContextHandoffDelivery.ts";
 import * as EventSink from "./EventSink.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -159,6 +161,10 @@ function startWithMissingWorktree(
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(CrewContext.CrewContextService)({
+          prepare: () => Effect.succeed(null),
+          record: () => Effect.void,
+        }),
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({}),
         Layer.mock(EventSink.EventSinkV2)({ writeIfRunCurrent }),
         IdAllocator.layer,
@@ -390,6 +396,7 @@ it.each([
 
 function makeLocalCommandHarness(input: {
   readonly text: string;
+  readonly crewContext?: TeamworkContext;
   readonly manualContinuation?: boolean;
   readonly nativeResumeUnsupported?: boolean;
   readonly steeringRestart?: boolean;
@@ -440,6 +447,8 @@ function makeLocalCommandHarness(input: {
   };
 }) {
   const settledRuns: Array<string> = [];
+  const prepareCrewContext = vi.fn(() => Effect.succeed(input.crewContext ?? null));
+  const recordCrewContext = vi.fn(() => Effect.void);
   const now = DateTime.makeUnsafe("2026-09-04T12:00:00Z");
   const threadId = ThreadId.make("thread-native-account-command");
   const runId = RunId.make("run-native-account-command");
@@ -1084,7 +1093,7 @@ function makeLocalCommandHarness(input: {
           startTurn(ProviderAdapter.resumeTurnInput(input)),
   };
   const open = vi.fn(() =>
-    input.sideChat !== undefined
+    input.sideChat !== undefined || input.crewContext !== undefined
       ? Effect.succeed(sideChatSession as never)
       : input.interruptOpen === true
         ? Effect.interrupt
@@ -1120,7 +1129,7 @@ function makeLocalCommandHarness(input: {
       input: RunExecutionService.RunExecutionServiceV2StartRootRunInput,
     ) => Effect.Effect<void, RunExecutionService.RunExecutionServiceV2Error>
   >((runInput) =>
-    input.sideChat !== undefined
+    input.sideChat !== undefined || input.crewContext !== undefined
       ? (runInput.resume
           ? runInput.session.resumeTurn!({
               ...runInput,
@@ -1229,6 +1238,10 @@ function makeLocalCommandHarness(input: {
   const layer = ProviderTurnStart.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(CrewContext.CrewContextService)({
+          prepare: prepareCrewContext,
+          record: recordCrewContext,
+        }),
         Layer.mock(ContextHandoffService.ContextHandoffServiceV2)({
           prepareProviderHandoff: (handoff) =>
             input.sideChat?.nativeForkFrom === undefined
@@ -1319,6 +1332,8 @@ function makeLocalCommandHarness(input: {
   );
   return {
     layer,
+    prepareCrewContext,
+    recordCrewContext,
     interruptRun,
     settledRuns,
     getThreadRecords,
@@ -1355,6 +1370,41 @@ function makeLocalCommandHarness(input: {
     }).pipe(Effect.provide(layer)),
   };
 }
+
+effectIt.effect(
+  "supplies current Crew context to ordinary provider prompts and defers it for control commands",
+  () =>
+    Effect.gen(function* () {
+      const packet: TeamworkContext = {
+        revision: 42,
+        threadId: ThreadId.make("thread-native-account-command"),
+        text: "CURRENT_CREW_CONTEXT",
+        bytes: 20,
+        omitted: 0,
+        sources: [],
+      };
+      const ordinary = makeLocalCommandHarness({
+        text: "Continue the initiative",
+        crewContext: packet,
+      });
+      yield* ordinary.start;
+      expect(ordinary.startTurn.mock.calls[0]?.[0].message.text).toContain("CURRENT_CREW_CONTEXT");
+      expect(ordinary.startTurn.mock.calls[0]?.[0].message.text).toContain(
+        "Continue the initiative",
+      );
+      expect(ordinary.recordCrewContext).toHaveBeenCalledOnce();
+      for (const text of ["/compact", "/goal status"]) {
+        const control = makeLocalCommandHarness({
+          text,
+          previousMessages: ["Earlier work"],
+          crewContext: packet,
+        });
+        yield* control.start;
+        expect(control.prepareCrewContext).not.toHaveBeenCalled();
+        expect(control.recordCrewContext).not.toHaveBeenCalled();
+      }
+    }),
+);
 
 function layerStartEffectWorker(
   harness: ReturnType<typeof makeLocalCommandHarness>,

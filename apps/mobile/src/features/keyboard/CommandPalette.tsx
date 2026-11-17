@@ -405,6 +405,21 @@ export function CommandPalette(props: {
       );
     }
     const openProjects = projects.filter((project) => project.archivedAt == null);
+    for (const project of openProjects) {
+      if (!serverConfigs.get(project.environmentId)?.environment.capabilities.projectTeamwork)
+        continue;
+      actions.push({
+        key: `crew:${scopedProjectKey(project.environmentId, project.id)}`,
+        kind: "action",
+        title: `Open crew in ${project.title}`,
+        searchTerms: ["crew", "swarm", "team", "coordinator", "knowledge"],
+        run: () =>
+          navigation.navigate("Crew", {
+            environmentId: project.environmentId,
+            projectId: project.id,
+          }),
+      });
+    }
     const projectItems: CommandPaletteItem[] = [
       ...openProjects.filter((project) => project.pinnedAt != null),
       ...openProjects.filter((project) => project.pinnedAt == null),
@@ -481,6 +496,7 @@ export function CommandPalette(props: {
     projects,
     runCommand,
     savedConnectionsById,
+    serverConfigs,
     selectDetail,
     startTriage,
     threads,

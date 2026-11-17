@@ -21,6 +21,7 @@ import {
   ORCHESTRATION_V2_WS_METHODS,
   ScheduledTaskId,
   WS_METHODS,
+  OutpostError,
   type AuthSessionState,
   type PeerLinkSummary,
 } from "@t3tools/contracts";
@@ -32,7 +33,7 @@ import * as Layer from "effect/Layer";
 import { Atom, AtomRegistry, AsyncResult } from "effect/reactivity";
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { createCommandPermissions } from "./commandPermissions.ts";
-import { createEnvironmentRpcCommand } from "./runtime.ts";
+import { createEnvironmentRpcCommand, createEnvironmentRpcStreamCommand } from "./runtime.ts";
 import { AVAILABLE_CONNECTION_STATE, BearerConnectionTarget } from "../connection/model.ts";
 import { createPeerLinkEnvironmentAtoms } from "./peerLinks.ts";
 
@@ -175,31 +176,38 @@ describe("command permissions", () => {
     }),
   );
 
-  it.effect.each([WS_METHODS.serverCheckOtlpEndpoint, WS_METHODS.serverCheckSecretSource])(
-    "requires the destination settings grant for %s",
-    (method) =>
-      Effect.gen(function* () {
-        const registry = yield* setup;
-        const check = createCommandPermissions(runtime, method);
-        registry.set(sessions(env), AsyncResult.success(grant(true)));
-        expect(registry.get(check.permissionAtom(env))).toBe(false);
-        registry.set(
-          sessions(env),
-          AsyncResult.success({
-            ...grant(false),
-            scopes: [AuthSettingsWriteScope],
-            permissions: [AuthSettingsWriteScope],
-          }),
-        );
-        expect(registry.get(check.permissionAtom(env))).toBe(true);
-        yield* check.authorize(registry, env);
-      }),
+  it.effect.each([
+    WS_METHODS.serverCheckOtlpEndpoint,
+    WS_METHODS.serverCheckSecretSource,
+    WS_METHODS.outpostSave,
+    WS_METHODS.outpostRemove,
+    WS_METHODS.outpostTest,
+  ])("requires the destination settings grant for %s", (method) =>
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const check = createCommandPermissions(runtime, method);
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect(registry.get(check.permissionAtom(env))).toBe(false);
+      registry.set(
+        sessions(env),
+        AsyncResult.success({
+          ...grant(false),
+          scopes: [AuthSettingsWriteScope],
+          permissions: [AuthSettingsWriteScope],
+        }),
+      );
+      expect(registry.get(check.permissionAtom(env))).toBe(true);
+      yield* check.authorize(registry, env);
+    }),
   );
 
   it.effect.each([
     WS_METHODS.scheduledTasksDelete,
     ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
     WS_METHODS.teamworkMutate,
+    WS_METHODS.outpostAction,
+    WS_METHODS.outpostSurfaceDocument,
+    WS_METHODS.outpostSurfaceRequest,
   ])("uses the target grant for both availability and execution of %s", (method) =>
     Effect.gen(function* () {
       const registry = yield* setup;
@@ -281,6 +289,79 @@ describe("command permissions", () => {
     }
   });
 });
+
+it.effect.each(["cancel", "disconnect"])(
+  "authorizes surface streams and ends them once on %s",
+  (end) => {
+    const controller = new AbortController();
+    return Effect.gen(function* () {
+      const registry = yield* setup;
+      let started = 0;
+      let finalized = 0;
+      const client = {
+        [WS_METHODS.outpostSurfaceRequest]: () =>
+          Stream.suspend(() => {
+            started++;
+            return (
+              end === "disconnect"
+                ? Stream.fail(new OutpostError({ code: "connection" }))
+                : Stream.succeed({ type: "headers" as const, status: 200, headers: {} }).pipe(
+                    Stream.concat(Stream.never),
+                  )
+            ).pipe(
+              Stream.ensuring(
+                Effect.sync(() => {
+                  finalized++;
+                }),
+              ),
+            );
+          }),
+      };
+      const supervisor = {
+        target: new BearerConnectionTarget({
+          environmentId: env,
+          label: "Test",
+          connectionId: "test",
+        }),
+        session: yield* SubscriptionRef.make(Option.some({ client } as unknown as RpcSession)),
+      } as EnvironmentSupervisor["Service"];
+      const surfaceRuntime = Atom.runtime(
+        Layer.succeed(EnvironmentRegistry, {
+          runStream: (id, stream) => {
+            expect(id).toBe(env);
+            return Stream.provideService(stream, EnvironmentSupervisor, supervisor);
+          },
+        } as EnvironmentRegistry["Service"]),
+      );
+      const command = createEnvironmentRpcStreamCommand(surfaceRuntime, {
+        label: "test.surface",
+        tag: WS_METHODS.outpostSurfaceRequest,
+      });
+      const target = {
+        environmentId: env,
+        input: {
+          connectionId: "outpost",
+          sessionId: "session",
+          pluginName: "plugin",
+          surfaceId: "surface",
+          generation: "generation",
+          method: "POST" as const,
+          path: "/action",
+          headers: {},
+        },
+        signal: controller.signal,
+        onValue: () => controller.abort(),
+      };
+      registry.set(sessions(env), AsyncResult.success(grant(false)));
+      expect((yield* Effect.promise(() => command.run(registry, target)))._tag).toBe("Failure");
+      expect(started).toBe(0);
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect((yield* Effect.promise(() => command.run(registry, target)))._tag).toBe("Failure");
+      expect(started).toBe(1);
+      expect(finalized).toBe(1);
+    });
+  },
+);
 
 it.effect(
   "requires source control alone for git, and both grants when attaching a worktree to a thread",

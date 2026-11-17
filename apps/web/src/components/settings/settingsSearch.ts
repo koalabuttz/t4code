@@ -990,7 +990,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Usage providers",
     to: "/settings/providers",
     searchTerms: [
-      "usage sources CLIProxyAPI CLI proxy hub quota subscription limits management key add remove DeepSeek GLM Z.ai Abliteration API balance credits prepaid",
+      "usage sources CLIProxyAPI CLI proxy hub quota subscription limits management key add remove DeepSeek GLM Z.ai Abliteration Claude Anthropic API balance credits prepaid Console session spend",
     ],
     providerSettingsOnly: true,
   },
@@ -1337,6 +1337,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Environments",
     to: "/settings/connections",
     searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+  },
+  {
+    id: "outpost-fleets",
+    title: "Outpost fleets",
+    to: "/settings/connections",
+    searchTerms: ["polytoken sessions projects plugin surfaces stopped transcripts attachments"],
   },
   {
     id: "load-balancing",

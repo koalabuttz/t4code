@@ -106,6 +106,7 @@ export function buildComposerSlashCommandItems(input: {
   /** T3's `/clear` replaces the provider's, which would clear a session T3 still treats as live. */
   readonly offersFreshSession?: boolean;
   readonly offersSideChat?: boolean;
+  readonly offersCrew?: boolean;
   readonly selectedProviderStatus: Pick<ServerProvider, "driver" | "slashCommands"> | null;
 }): ComposerCommandItem[] {
   const query = input.query.toLowerCase();
@@ -124,6 +125,18 @@ export function buildComposerSlashCommandItems(input: {
   // Providers expand commands only at the start of a message. T3 commands
   // change local state and do not have this restriction, except `/clear`.
   if (!input.atMessageStart) return items;
+  if (input.offersCrew) {
+    for (const command of ["crew", "swarm"]) {
+      if (command.includes(query))
+        items.push({
+          id: `cmd:${command}`,
+          type: "slash-command",
+          command,
+          label: `/${command}`,
+          description: "Open project crew and start initiatives",
+        });
+    }
+  }
   if (input.offersSideChat) {
     for (const [command, description] of [
       ["side", "Ask a side question in a new side chat"],
@@ -151,6 +164,7 @@ export function buildComposerSlashCommandItems(input: {
   for (const command of input.selectedProviderStatus?.slashCommands ?? []) {
     if (!command.name.toLowerCase().includes(query)) continue;
     if (command.name === "clear" && input.offersFreshSession) continue;
+    if (input.offersCrew && ["crew", "swarm"].includes(command.name)) continue;
     if (command.name === "compact" && !input.hasCompactableConversation) continue;
     if (command.name === USAGE_LIMITS_COMMAND.name && input.offersUsageLimits && !input.hasThread) {
       continue;
@@ -261,6 +275,7 @@ export function useComposerCommandMenu({
   modelProviders,
   onFreshSession,
   offersSideChat = false,
+  onCrew,
 }: {
   readonly draftMessage: string;
   readonly ownerKey: string | null;
@@ -287,6 +302,7 @@ export function useComposerCommandMenu({
   readonly modelProviders?: ReadonlyArray<ServerProvider>;
   /** Arms a fresh session for the next message; absent where `/clear` is unavailable. */
   readonly onFreshSession?: () => void;
+  readonly onCrew?: (() => void) | undefined;
   readonly offersSideChat?: boolean;
 }) {
   const [localSelection, setLocalSelection] = useState(() => ({
@@ -394,6 +410,7 @@ export function useComposerCommandMenu({
         offersUsageLimits,
         offersFreshSession: onFreshSession !== undefined,
         offersSideChat,
+        offersCrew: onCrew !== undefined,
         selectedProviderStatus: selectedProviderStatus
           ? {
               ...selectedProviderStatus,
@@ -643,6 +660,10 @@ export function useComposerCommandMenu({
     }
     if (item.type === "slash-command" && item.command === "clear" && onFreshSession) {
       clearTriggerThen(onFreshSession);
+      return;
+    }
+    if (item.type === "slash-command" && ["crew", "swarm"].includes(item.command) && onCrew) {
+      clearTriggerThen(onCrew);
       return;
     }
     if (

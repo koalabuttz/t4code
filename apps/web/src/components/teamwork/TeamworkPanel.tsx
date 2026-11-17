@@ -1,6 +1,13 @@
 import { randomUUID } from "../../lib/utils";
-import { useState } from "react";
-import { useAtomValue } from "@effect/atom-react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useAtom, useAtomValue } from "@effect/atom-react";
+import {
+  crewDraftBrief,
+  crewSelectedInitiative,
+  crewSelectedView,
+} from "@t3tools/client-runtime/state/crew";
+import { scopedProjectKey } from "@t3tools/client-runtime/environment";
 import {
   CommandId,
   type EnvironmentId,
@@ -14,12 +21,19 @@ import {
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { serverEnvironment } from "../../state/server";
+import { useEnvironmentShellStatus } from "../../state/shell";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { openTeamworkDialog, teamworkDialogThreadAtom } from "./teamworkDialogState";
+import { CrewWorkerStatus } from "./CrewWorkerStatus";
+import { CrewHistory } from "./CrewHistory";
+import { CrewContextView } from "./CrewContextView";
+import { CrewArtifactStatus, CrewLimits, CrewMilestone } from "./CrewVerification";
+import { threadFamilies } from "../../state/threads";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
 import {
   Dialog,
   DialogPopup,
@@ -32,15 +46,18 @@ import {
 interface Props {
   environmentId: EnvironmentId;
   projectId: ProjectId;
-  threadId: ThreadId;
+  threadId: ThreadId | null;
   onOpenThread: (id: ThreadId) => void;
 }
 export function TeamworkButton(props: Props) {
+  const navigate = useNavigate();
   const openThread = useAtomValue(teamworkDialogThreadAtom);
   const open =
     openThread?.threadId === props.threadId && openThread.environmentId === props.environmentId;
   const setOpen = (value: boolean) =>
-    openTeamworkDialog(value ? scopeThreadRef(props.environmentId, props.threadId) : null);
+    openTeamworkDialog(
+      value && props.threadId ? scopeThreadRef(props.environmentId, props.threadId) : null,
+    );
   const config = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
   if (!config?.environment.capabilities.projectTeamwork) return null;
   return (
@@ -55,6 +72,19 @@ export function TeamworkButton(props: Props) {
             <DialogDescription>
               Coordinate work, review results, and retain what the project learns.
             </DialogDescription>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setOpen(false);
+                void navigate({
+                  to: "/projects/$projectKey/crew",
+                  params: { projectKey: scopedProjectKey(props) },
+                });
+              }}
+            >
+              Open workspace
+            </Button>
           </DialogHeader>
           <DialogPanel>
             {open ? (
@@ -73,49 +103,63 @@ export function TeamworkButton(props: Props) {
   );
 }
 
-function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Props) {
+export function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Props) {
   const query = useEnvironmentQuery(
     serverEnvironment.teamworkLive({ environmentId, input: { projectId } }),
   );
   const permission = useAtomValue(serverEnvironment.mutateTeamwork.permissionAtom(environmentId));
+  const connected = useEnvironmentShellStatus(environmentId) === "live";
   const mutate = useAtomCommand(serverEnvironment.mutateTeamwork, { reportFailure: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<"tasks" | "board" | "knowledge" | "roles" | "history">("tasks");
+  const projectKey = scopedProjectKey({ environmentId, projectId });
+  const [selected, setSelected] = useAtom(crewSelectedInitiative(projectKey));
+  const [selectedTab, setTab] = useAtom(crewSelectedView(projectKey));
+  const tab =
+    selectedTab === "context" && !query.data?.capabilities?.includes("context")
+      ? "tasks"
+      : selectedTab;
   const [title, setTitle] = useState("");
-  const [brief, setBrief] = useState("");
+  const [brief, setBrief] = useAtom(crewDraftBrief(projectKey));
   const [mode, setMode] = useState<"swarm" | "teamwork">("swarm");
   const state = query.data?.snapshot;
+  const coordinatorThreadId = state?.coordinatorThreadId;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Retain the coordinator's worker shells while its Crew view is open.
+  useEffect(() => {
+    if (coordinatorThreadId == null) return;
+    return threadFamilies.mount(appAtomRegistry, environmentId, coordinatorThreadId);
+  }, [environmentId, coordinatorThreadId]);
   const act = async (action: TeamworkAction) => {
-    if (!state || busy || !permission) return false;
+    if (!state || busy || !permission || !connected) return false;
     setBusy(true);
     setError(null);
-    try {
-      const result = await mutate({
-        environmentId,
-        input: {
-          projectId,
-          commandId: CommandId.make(randomUUID()),
-          expectedRevision: state.revision,
-          action,
-        },
-      });
-      if (result._tag === "Failure") {
-        const failure = squashAtomCommandFailure(result);
-        setError(failure instanceof Error ? failure.message : "Could not save this Crew change.");
-        return false;
-      }
-      return true;
-    } finally {
-      setBusy(false);
+    const result = await mutate({
+      environmentId,
+      input: {
+        projectId,
+        commandId: CommandId.make(randomUUID()),
+        expectedRevision: state.revision,
+        action,
+      },
+    });
+    setBusy(false);
+    if (result._tag === "Failure") {
+      const failure = squashAtomCommandFailure(result);
+      setError(failure instanceof Error ? failure.message : "Could not save this Crew change.");
+      return false;
     }
+    return true;
   };
   if (!state) return <p role="status">{query.error ?? "Loading crew…"}</p>;
   const initiative = state.initiatives.find((i) => i.id === selected) ?? state.initiatives.at(-1);
-  const disabled = busy || !permission;
+  const disabled = busy || !permission || !connected;
   return (
     <div className="space-y-5">
+      {!connected && (
+        <p role="status">
+          Disconnected. Crew changes will be available when this environment reconnects.
+        </p>
+      )}
       {(error || query.error) && (
         <p role="alert" className="text-destructive">
           {error ?? query.error}
@@ -139,7 +183,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
             Choose a thread to lead this project.
           </span>
         )}
-        {state.coordinatorThreadId !== threadId && (
+        {threadId !== null && state.coordinatorThreadId !== threadId && (
           <Button
             size="sm"
             variant="secondary"
@@ -149,8 +193,24 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
             Use this thread
           </Button>
         )}
+        {state.coordinatorThreadId && query.data?.capabilities?.includes("context") && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            onClick={() => void act({ type: "coordinator.pause" })}
+          >
+            Pause crew for handover
+          </Button>
+        )}
       </div>
-      <details open={state.initiatives.length === 0}>
+      {query.data?.capabilities?.includes("context") && (
+        <p className="text-xs text-muted-foreground">
+          To continue with a fresh coordinator, pause the crew, choose a conversation, and use that
+          thread. Assignments and reviews stay on the board. Resume initiatives explicitly.
+        </p>
+      )}
+      <details open={state.initiatives.length === 0 || brief.trim().length > 0}>
         <summary className="cursor-pointer text-sm font-medium">Start an initiative</summary>
         <form
           className="mt-3 space-y-3"
@@ -226,6 +286,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
               <InitiativeEditor
                 key={`${initiative.id}:${initiative.updatedAt}`}
                 initiative={initiative}
+                supportsDependencies={query.data?.capabilities?.includes("submissions") ?? false}
                 disabled={disabled}
                 act={act}
               />
@@ -278,6 +339,17 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
                     {initiative.status === "paused" ? "Resume" : "Reopen"}
                   </Button>
                 )}
+                {query.data?.capabilities?.includes("archive") &&
+                  ["completed", "cancelled"].includes(initiative.status) && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={disabled}
+                      onClick={() => void act({ type: "initiative.archive", id: initiative.id })}
+                    >
+                      Archive initiative
+                    </Button>
+                  )}
                 {!["completed", "cancelled"].includes(initiative.status) && (
                   <Button
                     size="sm"
@@ -313,50 +385,52 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
                   </Button>
                 )}
               </div>
+              {query.data?.capabilities?.includes("submissions") && (
+                <CrewLimits
+                  key={`${initiative.id}:${JSON.stringify(initiative.policy)}`}
+                  initiative={initiative}
+                  disabled={disabled}
+                  act={act}
+                />
+              )}
               {initiative.milestones.map((m) => (
-                <div
-                  key={m.id}
-                  className="flex items-center justify-between gap-3 rounded border p-3"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{m.title}</p>
-                    <p className="text-xs text-muted-foreground">{m.criteria}</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={disabled}
-                    onClick={() =>
-                      void act({
-                        type: "milestone.accept",
-                        initiativeId: initiative.id,
-                        id: m.id,
-                        accepted: !m.accepted,
-                      })
-                    }
-                  >
-                    {m.accepted ? "Reopen milestone" : "Accept milestone"}
-                  </Button>
-                </div>
+                <CrewMilestone
+                  key={`${initiative.id}:${m.id}:${m.accepted}`}
+                  initiative={initiative}
+                  milestone={m}
+                  disabled={disabled}
+                  requiresVerification={query.data?.capabilities?.includes("submissions") ?? false}
+                  act={act}
+                />
               ))}
             </>
           )}
         </div>
       )}
       <div className="flex flex-wrap gap-1" role="tablist" aria-label="Crew views">
-        {(["tasks", "board", "knowledge", "roles", "history"] as const).map((value) => (
-          <Button
-            key={value}
-            size="sm"
-            variant={tab === value ? "secondary" : "ghost"}
-            role="tab"
-            aria-selected={tab === value}
-            onClick={() => setTab(value)}
-          >
-            {value[0]!.toUpperCase() + value.slice(1)}
-          </Button>
-        ))}
+        {(["tasks", "conversations", "board", "knowledge", "context", "roles", "history"] as const)
+          .filter((value) => value !== "context" || query.data?.capabilities?.includes("context"))
+          .map((value) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={tab === value ? "secondary" : "ghost"}
+              role="tab"
+              aria-selected={tab === value}
+              onClick={() => setTab(value)}
+            >
+              {value[0]!.toUpperCase() + value.slice(1)}
+            </Button>
+          ))}
       </div>
+      {tab === "context" && query.data?.capabilities?.includes("context") && (
+        <CrewContextView
+          environmentId={environmentId}
+          state={state}
+          preview={query.data.context ?? null}
+          onOpenThread={onOpenThread}
+        />
+      )}
       {tab === "tasks" && (
         <div className="grid gap-3 md:grid-cols-2">
           {state.tasks
@@ -369,6 +443,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
                 </div>
                 <p className="whitespace-pre-wrap text-sm">{task.brief}</p>
                 <p className="text-sm text-muted-foreground">Accept when: {task.criteria}</p>
+                <CrewWorkerStatus environmentId={environmentId} task={task} />
                 {task.dependencies.length > 0 && (
                   <p className="text-xs">
                     Depends on:{" "}
@@ -397,11 +472,45 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
                     Review: {task.review.decision}. {task.review.evidence}
                   </p>
                 )}
+                {task.submission && (
+                  <p className="break-all text-xs text-muted-foreground">
+                    Submission {task.submission.revision} · {task.submission.artifact.kind}{" "}
+                    {task.submission.artifact.ref}
+                    {task.submission.artifact.path ? ` · ${task.submission.artifact.path}` : ""}
+                  </p>
+                )}
+                {task.submission && query.data?.capabilities?.includes("artifacts") && (
+                  <CrewArtifactStatus
+                    key={task.submission.revision}
+                    environmentId={environmentId}
+                    input={{ projectId, artifactTaskId: task.id }}
+                  />
+                )}
+                {task.status === "review" &&
+                  query.data?.capabilities?.includes("submissions") &&
+                  !task.submission && (
+                    <p className="text-sm">
+                      Ask the worker to resubmit an immutable artifact before reviewing this older
+                      result.
+                    </p>
+                  )}
                 {task.status === "review" && (
                   <ReviewForm
-                    disabled={disabled}
+                    disabled={
+                      disabled ||
+                      (query.data?.capabilities?.includes("submissions") === true &&
+                        !task.submission)
+                    }
                     onReview={(decision, evidence) =>
-                      act({ type: "task.review", id: task.id, decision, evidence })
+                      act({
+                        type: "task.review",
+                        id: task.id,
+                        decision,
+                        evidence,
+                        ...(task.submission
+                          ? { submissionRevision: task.submission.revision }
+                          : {}),
+                      })
                     }
                   />
                 )}
@@ -429,7 +538,7 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
                     </Button>
                   )}
                 </div>
-                {!["delegating", "running"].includes(task.status) && (
+                {["ready", "cancelled"].includes(task.status) && (
                   <TaskForm
                     key={`${task.id}:${task.updatedAt}`}
                     state={state}
@@ -452,6 +561,33 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
           )}
         </div>
       )}
+      {tab === "conversations" && (
+        <div className="space-y-3">
+          {state.coordinatorThreadId && (
+            <Button variant="outline" onClick={() => onOpenThread(state.coordinatorThreadId!)}>
+              Coordinator conversation
+            </Button>
+          )}
+          {state.tasks
+            .filter((task) => task.initiativeId === initiative?.id && task.ownerThreadId !== null)
+            .map((task) => (
+              <div key={task.id} className="space-y-2 rounded border p-3">
+                <p className="font-medium">
+                  {state.roles.find((role) => role.id === task.roleId)?.name ?? "Worker"} ·{" "}
+                  {task.title}
+                </p>
+                <CrewWorkerStatus environmentId={environmentId} task={task} />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onOpenThread(task.ownerThreadId!)}
+                >
+                  Open conversation
+                </Button>
+              </div>
+            ))}
+        </div>
+      )}
       {tab === "board" && (
         <Board state={state} initiativeId={initiative?.id ?? null} disabled={disabled} act={act} />
       )}
@@ -460,7 +596,16 @@ function TeamworkPanel({ environmentId, projectId, threadId, onOpenThread }: Pro
         <Roles state={state} disabled={disabled} act={act} environmentId={environmentId} />
       )}
       {tab === "history" && (
-        <History environmentId={environmentId} projectId={projectId} revision={state.revision} />
+        <CrewHistory
+          environmentId={environmentId}
+          projectId={projectId}
+          revision={state.revision}
+          archiveEnabled={query.data?.capabilities?.includes("archive") ?? false}
+          artifactsEnabled={query.data?.capabilities?.includes("artifacts") ?? false}
+          disabled={disabled}
+          act={act}
+          onOpenThread={onOpenThread}
+        />
       )}
       {query.data?.deliveries.some((d) => d.status === "failed") && (
         <div className="space-y-2">
@@ -532,15 +677,18 @@ function ReviewForm({
 }
 function InitiativeEditor({
   initiative,
+  supportsDependencies,
   disabled,
   act,
 }: Pick<EditorProps, "disabled" | "act"> & {
   initiative: TeamworkSnapshot["initiatives"][number];
+  supportsDependencies: boolean;
 }) {
   const [title, setTitle] = useState(initiative.title);
   const [brief, setBrief] = useState(initiative.brief);
   const [milestone, setMilestone] = useState("");
   const [criteria, setCriteria] = useState("");
+  const [dependencies, setDependencies] = useState<readonly string[]>([]);
   return (
     <details>
       <summary className="cursor-pointer text-sm">Edit brief and milestones</summary>
@@ -587,11 +735,18 @@ function InitiativeEditor({
               await act({
                 type: "milestone.save",
                 initiativeId: initiative.id,
-                milestone: { id: randomUUID(), title: milestone, criteria, accepted: false },
+                milestone: {
+                  id: randomUUID(),
+                  title: milestone,
+                  criteria,
+                  accepted: false,
+                  ...(supportsDependencies ? { dependencies } : {}),
+                },
               })
             ) {
               setMilestone("");
               setCriteria("");
+              setDependencies([]);
             }
           }}
         >
@@ -611,6 +766,27 @@ function InitiativeEditor({
             maxLength={12000}
             required
           />
+          {supportsDependencies && initiative.milestones.length > 0 && (
+            <fieldset className="space-y-1">
+              <legend className="text-sm">Wait for verified milestones</legend>
+              {initiative.milestones.map((m) => (
+                <label key={m.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={dependencies.includes(m.id)}
+                    onChange={(e) =>
+                      setDependencies(
+                        e.target.checked
+                          ? [...dependencies, m.id]
+                          : dependencies.filter((id) => id !== m.id),
+                      )
+                    }
+                  />
+                  {m.title}
+                </label>
+              ))}
+            </fieldset>
+          )}
           <Button size="sm" type="submit" disabled={disabled}>
             Add milestone
           </Button>
@@ -774,7 +950,25 @@ function Board({
   act,
 }: EditorProps & { initiativeId: string | null }) {
   const [text, setText] = useState("");
-  const [notify, setNotify] = useState(false);
+  const [recipients, setRecipients] = useState<readonly ThreadId[]>([]);
+  const members = [
+    ...(state.coordinatorThreadId ? [{ id: state.coordinatorThreadId, label: "Coordinator" }] : []),
+    ...state.tasks
+      .filter(
+        (task) =>
+          task.initiativeId === initiativeId &&
+          task.ownerThreadId !== null &&
+          !["done", "cancelled"].includes(task.status),
+      )
+      .map((task) => ({
+        id: task.ownerThreadId!,
+        label: `${state.roles.find((role) => role.id === task.roleId)?.name ?? "Worker"}: ${task.title}`,
+      })),
+  ];
+  const active = state.initiatives.find((i) => i.id === initiativeId)?.status === "active";
+  const activeRecipients = active
+    ? recipients.filter((id) => members.some((member) => member.id === id))
+    : [];
   return (
     <div className="space-y-3">
       {state.board
@@ -802,7 +996,7 @@ function Board({
               type: "board.post",
               initiativeId,
               text,
-              recipients: notify && state.coordinatorThreadId ? [state.coordinatorThreadId] : [],
+              recipients: activeRecipients,
             })
           )
             setText("");
@@ -816,10 +1010,30 @@ function Board({
           maxLength={12000}
           required
         />
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
-          Notify coordinator
-        </label>
+        <fieldset className="space-y-2">
+          <legend className="text-sm">Notify teammates (leave empty for a quiet update)</legend>
+          {members.map((member) => (
+            <label key={member.id} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={activeRecipients.includes(member.id)}
+                disabled={
+                  disabled ||
+                  !active ||
+                  (!activeRecipients.includes(member.id) && activeRecipients.length >= 8)
+                }
+                onChange={(event) =>
+                  setRecipients(
+                    event.target.checked
+                      ? [...activeRecipients, member.id]
+                      : activeRecipients.filter((id) => id !== member.id),
+                  )
+                }
+              />
+              {member.label}
+            </label>
+          ))}
+        </fieldset>
         <Button type="submit" size="sm" disabled={disabled || !text.trim()}>
           Post update
         </Button>
@@ -1022,65 +1236,6 @@ function Roles({
           Save role
         </Button>
       </form>
-    </div>
-  );
-}
-function History({
-  environmentId,
-  projectId,
-  revision,
-}: {
-  environmentId: EnvironmentId;
-  projectId: ProjectId;
-  revision: number;
-}) {
-  const [before, setBefore] = useState<number | undefined>();
-  const query = useEnvironmentQuery(
-    serverEnvironment.teamworkHistory({
-      environmentId,
-      input: { projectId, beforeRevision: before ?? revision + 1 },
-    }),
-  );
-  return (
-    <div className="space-y-2">
-      {query.error && <p role="alert">{query.error}</p>}
-      {query.data?.events.map((event) => (
-        <details key={event.revision} className="rounded border p-3">
-          <summary className="cursor-pointer text-sm">
-            {event.action.type.replaceAll(".", " ")} · {new Date(event.createdAt).toLocaleString()}
-          </summary>
-          <p className="mt-2 whitespace-pre-wrap text-sm">
-            {"text" in event.action
-              ? event.action.text
-              : "brief" in event.action
-                ? event.action.brief
-                : "evidence" in event.action
-                  ? event.action.evidence
-                  : "role" in event.action
-                    ? `${event.action.role.name}\n${event.action.role.instructions}`
-                    : "milestone" in event.action
-                      ? `${event.action.milestone.title}\n${event.action.milestone.criteria}`
-                      : "status" in event.action
-                        ? event.action.status
-                        : "Saved by " +
-                          (event.actorThreadId === null ? "you" : "a team participant")}
-          </p>
-        </details>
-      ))}
-      {query.data?.events.length === 40 && (
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setBefore(query.data!.events.at(-1)!.revision)}
-        >
-          Older history
-        </Button>
-      )}
-      {before !== undefined && (
-        <Button size="sm" variant="ghost" onClick={() => setBefore(undefined)}>
-          Latest history
-        </Button>
-      )}
     </div>
   );
 }

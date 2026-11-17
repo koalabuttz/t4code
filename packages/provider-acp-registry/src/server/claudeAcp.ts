@@ -1,12 +1,7 @@
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type * as AcpSchema from "effect-acp/compat";
 import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
-import {
-  acpUnfinishedStopMessage,
-  type AcpAdapterV2SubagentUpdate,
-  type AcpSubagentSessionEvent,
-} from "@t3tools/provider-acp/server/adapter";
+import type { AcpAdapterV2SubagentUpdate } from "@t3tools/provider-acp/server/adapter";
 
 const decodeAgentInput = Schema.decodeUnknownOption(
   Schema.Struct({
@@ -55,65 +50,4 @@ export function extractClaudeSubagentUpdate(
           : "running",
     result: null,
   };
-}
-
-const decodeChildState = Schema.decodeUnknownOption(
-  Schema.Struct({
-    sessionId: Schema.String,
-    state: Schema.Struct({
-      state: Schema.String,
-      stopReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
-      error: Schema.optionalKey(Schema.NullOr(Schema.Struct({ message: Schema.String }))),
-    }),
-  }),
-);
-const decodeDelegation = Schema.decodeUnknownOption(
-  Schema.Struct({
-    messageId: Schema.String,
-    senderSessionId: Schema.optionalKey(Schema.String),
-    content: Schema.Array(
-      Schema.Struct({ type: Schema.String, text: Schema.optionalKey(Schema.String) }),
-    ),
-  }),
-);
-
-// Claude's session_message id is the Agent/Task or SendMessage tool-use id.
-export function extractClaudeSubagentSessionEvent(
-  notification: AcpSchema.SessionNotification,
-): AcpSubagentSessionEvent | undefined {
-  const update = notification.update;
-  if (update.sessionUpdate !== "_t3_unknown") return;
-  if (update.originalSessionUpdate === "subagent_update") {
-    const child = decodeChildState(update.raw);
-    if (Option.isNone(child)) return;
-    const { sessionId, state } = child.value;
-    const unfinishedMessage = acpUnfinishedStopMessage(state.stopReason);
-    return {
-      type: "state",
-      childSessionId: sessionId,
-      parentSessionId: notification.sessionId,
-      status:
-        state.state === "running" || state.state === "requires_action"
-          ? "running"
-          : state.stopReason === "error" || unfinishedMessage !== undefined
-            ? "failed"
-            : state.stopReason === "cancelled" || state.state === "unknown"
-              ? "cancelled"
-              : "completed",
-      result: state.error?.message ?? unfinishedMessage ?? null,
-    };
-  }
-  if (update.originalSessionUpdate === "session_message") {
-    const delegation = decodeDelegation(update.raw);
-    if (Option.isNone(delegation)) return;
-    return {
-      type: "delegation",
-      childSessionId: notification.sessionId,
-      parentSessionId: delegation.value.senderSessionId ?? null,
-      delegationId: delegation.value.messageId,
-      prompt: delegation.value.content
-        .flatMap((block) => (block.type === "text" && block.text !== undefined ? [block.text] : []))
-        .join("\n"),
-    };
-  }
 }

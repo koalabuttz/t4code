@@ -1608,6 +1608,125 @@ describe("AcpRegistryAdapterV2", () => {
       }).pipe(Effect.provide(layerTest)),
   );
 
+  it.effect.each(["fixture-agent", "claude-acp"])(
+    "projects %s child sessions without provider-specific launch tools",
+    (agentId) =>
+      Effect.gen(function* () {
+        const session = yield* openClaudeReplaySession(
+          [
+            ...claudeFrames.open,
+            ...claudeFrames.prompt(1),
+            claudeFrames.update(CLAUDE_ROOT_SESSION, {
+              sessionUpdate: "subagent_update",
+              sessionId: "native-child",
+              title: "Review changes",
+              state: { state: "running" },
+            }),
+            claudeFrames.update("native-child", {
+              sessionUpdate: "session_message",
+              messageId: "delegation-1",
+              senderSessionId: CLAUDE_ROOT_SESSION,
+              recipientSessionId: "native-child",
+              content: [{ type: "text", text: "Review the changes" }],
+            }),
+            claudeFrames.update("native-child", {
+              sessionUpdate: "agent_message",
+              messageId: "review-1",
+              content: [{ type: "text", text: "The changes look correct." }],
+            }),
+            claudeFrames.update("native-child", {
+              sessionUpdate: "subagent_update",
+              sessionId: "native-grandchild",
+              title: "Check tests",
+              state: { state: "running" },
+            }),
+            claudeFrames.update("native-grandchild", {
+              sessionUpdate: "session_message",
+              messageId: "delegation-2",
+              content: [{ type: "text", text: "Check the tests" }],
+            }),
+            claudeFrames.update("native-grandchild", {
+              sessionUpdate: "agent_message",
+              messageId: "tests-1",
+              content: [{ type: "text", text: "Tests pass." }],
+            }),
+            claudeFrames.update("native-grandchild", {
+              sessionUpdate: "state_update",
+              state: "idle",
+              stopReason: "end_turn",
+            }),
+            claudeFrames.update("native-child", {
+              sessionUpdate: "state_update",
+              state: "idle",
+              stopReason: "end_turn",
+            }),
+            claudeFrames.update(CLAUDE_ROOT_SESSION, {
+              sessionUpdate: "subagent_update",
+              sessionId: "untitled-child",
+              state: { state: "idle", stopReason: "end_turn" },
+            }),
+            claudeFrames.idle("end_turn"),
+            claudeFrames.closeRequest,
+            claudeFrames.closed,
+          ],
+          undefined,
+          true,
+          agentId,
+        );
+        yield* session.runtime.startTurn(session.turnInput(1));
+        const events = yield* session.until((event) => event.type === "turn.terminal");
+        const child = events.find(
+          (event) =>
+            event.type === "app_thread.created" && event.appThread.lineage.parentThreadId !== null,
+        );
+        if (child?.type !== "app_thread.created") throw new Error("Missing native child thread");
+        assert.equal(child.appThread.title, "Review changes");
+        assert.equal(child.appThread.lineage.parentThreadId, session.turnInput(1).threadId);
+        assert.equal(
+          events.some(
+            (event) => event.type === "app_thread.created" && event.appThread.title === "Subagent",
+          ),
+          agentId === "fixture-agent",
+        );
+        const reply = events.find(
+          (event) =>
+            event.type === "message.updated" && event.message.text === "The changes look correct.",
+        );
+        if (reply?.type !== "message.updated") throw new Error("Missing native child reply");
+        assert.equal(reply.message.threadId, child.appThread.id);
+        const grandchild = events.find(
+          (event) => event.type === "app_thread.created" && event.appThread.title === "Check tests",
+        );
+        if (grandchild?.type !== "app_thread.created")
+          throw new Error("Missing nested child thread");
+        assert.equal(grandchild.appThread.lineage.parentThreadId, child.appThread.id);
+        assert.isTrue(
+          events.some(
+            (event) =>
+              event.type === "message.updated" &&
+              event.message.threadId === grandchild.appThread.id &&
+              event.message.text === "Tests pass.",
+          ),
+        );
+        assert.isTrue(
+          events.some(
+            (event) =>
+              event.type === "provider_thread.updated" &&
+              event.providerThread.appThreadId === child.appThread.id &&
+              event.providerThread.nativeThreadRef?.nativeId === "native-child",
+          ),
+        );
+        assert.isTrue(
+          events.some(
+            (event) =>
+              event.type === "subagent.updated" &&
+              event.subagent.childThreadId === child.appThread.id &&
+              event.subagent.status === "completed",
+          ),
+        );
+      }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("settles Claude's accepted foreground reply while retaining child output", () =>
     Effect.gen(function* () {
       const gate = makeProviderReplayGate(["accepted", "child-output", "wake"]);

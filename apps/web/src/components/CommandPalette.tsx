@@ -2,9 +2,9 @@ import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
-import { openTeamworkDialog } from "./teamwork/teamworkDialogState";
 import {
   scopedThreadKey,
+  scopedProjectKey,
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
@@ -1499,7 +1499,12 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThread !== null && activeThreadServerConfig?.environment.capabilities.projectTeamwork) {
+  if (
+    contextualProjectRef !== null &&
+    environments.find(
+      (environment) => environment.environmentId === contextualProjectRef.environmentId,
+    )?.serverConfig?.environment.capabilities.projectTeamwork
+  ) {
     actionItems.push({
       kind: "action",
       value: "action:project-teamwork",
@@ -1507,7 +1512,10 @@ function OpenCommandPaletteDialog(props: {
       title: "Open project crew",
       icon: <UserPlusIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
-        openTeamworkDialog(scopeThreadRef(activeThread.environmentId, activeThread.id));
+        await navigate({
+          to: "/projects/$projectKey/crew",
+          params: { projectKey: scopedProjectKey(contextualProjectRef) },
+        });
       },
     });
   }

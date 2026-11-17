@@ -246,6 +246,11 @@ const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidErro
 import { toastManager } from "../ui/toast";
 import { BuildingIcon, PlayIcon, ReplyIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
+import { scopedProjectKey } from "@t3tools/client-runtime/environment";
+import { crewDraftBrief, readCrewCommand } from "@t3tools/client-runtime/state/crew";
+import { useAtomValue } from "@effect/atom-react";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { serverEnvironment } from "../../state/server";
 import { assistantCitationLabel } from "@t3tools/shared/assistantCitations";
 import { assistantCitationNavigation } from "../../lib/assistantCitationNavigation";
 import { Button } from "../ui/button";
@@ -825,6 +830,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
   const setComposerDraftReplyTo = useComposerDraftStore((store) => store.setReplyTo);
   const navigate = useNavigate();
+  const crewAvailable =
+    useAtomValue(serverEnvironment.configValueAtom(environmentId))?.environment.capabilities
+      .projectTeamwork === true;
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- starts or releases server attachment uploads as upload capability, limits and draft attachments change
   useEffect(() => {
@@ -1961,6 +1969,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return;
     }
     if (item.type === "slash-command") {
+      if ((item.command === "crew" || item.command === "swarm") && activeProjectId) {
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          focusEditorAfterReplace: false,
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          void navigate({
+            to: "/projects/$projectKey/crew",
+            params: { projectKey: scopedProjectKey({ environmentId, projectId: activeProjectId }) },
+          });
+        }
+        return;
+      }
       if (item.command === "model") {
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -2210,6 +2232,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       event?.preventDefault();
       if (isSendBusy || environmentUnavailable !== null) return false;
       onResume();
+      return true;
+    }
+    const crewCommand = readCrewCommand(promptRef.current);
+    if (
+      crewAvailable &&
+      activeProjectId &&
+      crewCommand &&
+      !activePendingProgress &&
+      composerImages.length +
+        composerFiles.length +
+        composerDraft.persistedAttachments.length +
+        composerTerminalContexts.length +
+        composerPreviewAnnotations.length +
+        composerReviewComments.length ===
+        0
+    ) {
+      event?.preventDefault();
+      const projectKey = scopedProjectKey({ environmentId, projectId: activeProjectId });
+      appAtomRegistry.set(crewDraftBrief(projectKey), crewCommand.brief);
+      applyPromptReplacement(0, promptRef.current.length, "", {
+        expectedText: promptRef.current,
+        focusEditorAfterReplace: false,
+      });
+      void navigate({ to: "/projects/$projectKey/crew", params: { projectKey } });
       return true;
     }
     const submission = submitComposerDraft({

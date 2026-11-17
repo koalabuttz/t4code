@@ -21,6 +21,7 @@ import {
   type AuthWebSocketTicketResult,
   type AuthWebSocketTicketUse,
   DpopFailureReason,
+  EnvironmentHttpApi,
   type DpopFailureReason as DpopFailureReasonType,
   mcpClientScopes,
 } from "@t3tools/contracts";
@@ -31,15 +32,19 @@ import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import type * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import type * as HttpClient from "effect/http/HttpClient";
+import * as HttpApiClient from "effect/http-api/HttpApiClient";
 
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as ServerConfig from "../config.ts";
+import { readLiveServerRuntimeState } from "../serverRuntimeState.ts";
 import * as EnvironmentAuthPolicy from "./EnvironmentAuthPolicy.ts";
 import * as PairingGrantStore from "./PairingGrantStore.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
@@ -584,6 +589,13 @@ export class EnvironmentAuth extends Context.Service<
     readonly revokeSession: (
       sessionId: AuthSessionId,
     ) => Effect.Effect<boolean, ServerAuthInternalError>;
+    readonly revokeSessionOnHost: (
+      sessionId: AuthSessionId,
+    ) => Effect.Effect<
+      boolean,
+      ServerAuthInternalError,
+      FileSystem.FileSystem | HttpClient.HttpClient
+    >;
     readonly listClientSessions: (
       currentSessionId: AuthSessionId,
     ) => Effect.Effect<ReadonlyArray<AuthClientSession>, ServerAuthInternalError>;
@@ -1329,6 +1341,36 @@ export const make = Effect.gen(function* () {
       Effect.withSpan("EnvironmentAuth.revokeSession"),
     );
 
+  const revokeSessionOnHost = Effect.fn("EnvironmentAuth.revokeSessionOnHost")(
+    function* (sessionId: AuthSessionId) {
+      const runtime = yield* readLiveServerRuntimeState(config.serverRuntimeStatePath);
+      if (Option.isNone(runtime)) return yield* revokeSession(sessionId);
+      // The server owns socket invalidation; a separate CLI's database write cannot notify it.
+      return yield* Effect.acquireUseRelease(
+        issueSession({
+          scopes: [AuthAccessWriteScope],
+          label: "t3 auth cli",
+          ttl: Duration.minutes(1),
+        }),
+        (issued) =>
+          HttpApiClient.make(EnvironmentHttpApi, { baseUrl: runtime.value.origin }).pipe(
+            Effect.flatMap((client) =>
+              client.auth.revokeClient({
+                headers: { authorization: `Bearer ${issued.token}` },
+                payload: { sessionId },
+              }),
+            ),
+            Effect.map((result) => result.revoked),
+            Effect.timeout(Duration.seconds(10)),
+          ),
+        (issued) => revokeSession(issued.sessionId).pipe(Effect.ignore({ log: true })),
+      );
+    },
+    Effect.mapError((cause) =>
+      isServerAuthInternalError(cause) ? cause : new ServerAuthSessionRevocationError({ cause }),
+    ),
+  );
+
   const revokeOtherSessionsExcept = (sessionId: AuthSessionId) =>
     sessions.revokeAllExcept(sessionId).pipe(
       Effect.mapError((cause) => new ServerAuthOtherSessionsRevocationError({ cause })),
@@ -1625,6 +1667,7 @@ export const make = Effect.gen(function* () {
     issueSession,
     listSessions,
     revokeSession,
+    revokeSessionOnHost,
     listClientSessions,
     revokeClientSession,
     revokeOtherClientSessions,

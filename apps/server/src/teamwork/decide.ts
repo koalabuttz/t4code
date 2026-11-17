@@ -5,6 +5,7 @@ import {
   type TeamworkTask,
   type ThreadId,
   type ProjectId,
+  type TeamworkArchive,
 } from "@t3tools/contracts";
 import * as Result from "effect/Result";
 
@@ -19,12 +20,15 @@ export const emptyTeamwork = (projectId: ProjectId): TeamworkSnapshot => ({
   board: [],
 });
 
+const defaultPolicy = { maxConcurrent: 4, maxAttempts: 3, maxSubmissions: 4 };
+
 export interface TeamworkIntent {
   readonly kind: "message" | "stop";
   readonly threadId: ThreadId;
   readonly initiativeId: string | null;
   readonly text: string;
   readonly planning?: boolean;
+  readonly taskId?: string;
 }
 
 export function decideTeamwork(
@@ -33,6 +37,7 @@ export function decideTeamwork(
   actor: ThreadId | null,
   now: string,
   commandId: string,
+  archive?: TeamworkArchive,
 ): Result.Result<
   { snapshot: TeamworkSnapshot; intents: readonly TeamworkIntent[] },
   TeamworkError
@@ -81,17 +86,83 @@ export function decideTeamwork(
         kind: "stop",
         threadId: task.ownerThreadId,
         initiativeId: task.initiativeId,
+        taskId: task.id,
         text: "Crew paused or cancelled this assignment.",
       });
   };
+  const milestoneHasStartedDependents = (initiativeId: string, milestoneId: string | null) =>
+    milestoneId !== null &&
+    state.initiatives
+      .find((i) => i.id === initiativeId)
+      ?.milestones.some(
+        (m) =>
+          m.dependencies?.includes(milestoneId) &&
+          (m.accepted ||
+            state.tasks.some(
+              (t) =>
+                t.initiativeId === initiativeId &&
+                t.milestoneId === m.id &&
+                !["ready", "cancelled"].includes(t.status),
+            )),
+      );
   switch (action.type) {
+    case "coordinator.pause": {
+      if (actor !== null) return forbidden();
+      if (state.coordinatorThreadId === null) return invalid("Choose a coordinator first.");
+      next = {
+        ...next,
+        initiatives: state.initiatives.map((i) =>
+          i.status === "active" ? { ...i, status: "paused", updatedAt: now } : i,
+        ),
+      };
+      state.tasks.filter((t) => !["done", "cancelled"].includes(t.status)).forEach(stop);
+      intents.push({
+        kind: "stop",
+        threadId: state.coordinatorThreadId,
+        initiativeId: null,
+        text: "Pause the coordinator and its delegated work for a Crew handover.",
+      });
+      break;
+    }
+    case "initiative.archive": {
+      const initiative = state.initiatives.find((i) => i.id === action.id);
+      if (!initiative || !["completed", "cancelled"].includes(initiative.status))
+        return invalid("Complete or cancel the initiative before archiving it.");
+      next = {
+        ...next,
+        initiatives: state.initiatives.filter((i) => i.id !== action.id),
+        tasks: state.tasks.filter((t) => t.initiativeId !== action.id),
+        board: state.board.filter((entry) => entry.initiativeId !== action.id),
+      };
+      break;
+    }
+    case "initiative.restore": {
+      if (!archive || archive.initiative.id !== action.id)
+        return invalid("Archived initiative not found.");
+      if (state.initiatives.some((i) => i.id === action.id))
+        return invalid("This initiative is already active in the workspace.");
+      next = {
+        ...next,
+        initiatives: [
+          ...state.initiatives,
+          { ...archive.initiative, status: "paused", updatedAt: now },
+        ],
+        tasks: [...state.tasks, ...archive.tasks],
+      };
+      break;
+    }
     case "coordinator.set":
       if (actor !== null) return forbidden();
       if (
-        state.tasks.some((t) => ["delegating", "running", "blocked", "review"].includes(t.status))
+        state.tasks.some(
+          (t) =>
+            t.status === "delegating" ||
+            (["running", "blocked", "review"].includes(t.status) &&
+              state.initiatives.find((i) => i.id === t.initiativeId)?.status === "active"),
+        )
       )
         return invalid(
-          "Finish or cancel outstanding assignments before replacing the coordinator.",
+          "Pause active initiatives and finish attaching reserved workers before replacing the coordinator.",
         );
       if (state.tasks.some((t) => t.ownerThreadId === action.threadId))
         return invalid("A worker thread cannot also be the project coordinator.");
@@ -128,6 +199,7 @@ export function decideTeamwork(
             mode: action.mode,
             status,
             approved: action.mode === "swarm",
+            policy: defaultPolicy,
             milestones: [],
             createdAt: now,
             updatedAt: now,
@@ -144,6 +216,7 @@ export function decideTeamwork(
     case "initiative.edit":
     case "initiative.approve":
     case "initiative.status":
+    case "initiative.policy":
     case "milestone.save":
     case "milestone.accept": {
       const id = "initiativeId" in action ? action.initiativeId : action.id;
@@ -151,7 +224,9 @@ export function decideTeamwork(
       if (!initiative) return invalid("Initiative not found.");
       const owned = state.tasks.filter((t) => t.initiativeId === id);
       let updated = initiative;
-      if (action.type === "initiative.edit") {
+      if (action.type === "initiative.policy") {
+        updated = { ...initiative, policy: action.policy };
+      } else if (action.type === "initiative.edit") {
         const changesBrief = action.brief !== initiative.brief || action.mode !== initiative.mode;
         updated = {
           ...initiative,
@@ -197,16 +272,72 @@ export function decideTeamwork(
       } else if (action.type === "milestone.save") {
         if (["completed", "cancelled"].includes(initiative.status))
           return invalid("Reopen the initiative before changing milestones.");
+        const dependencies = action.milestone.dependencies ?? [];
+        const reachesMilestone = (id: string, visited: Set<string>): boolean =>
+          id === action.milestone.id ||
+          (!visited.has(id) &&
+            (visited.add(id),
+            initiative.milestones
+              .find((m) => m.id === id)
+              ?.dependencies?.some((parent) => reachesMilestone(parent, visited)) === true));
+        if (
+          dependencies.some(
+            (id) =>
+              !initiative.milestones.some((m) => m.id === id) || reachesMilestone(id, new Set()),
+          )
+        )
+          return invalid(
+            "Milestone prerequisites must exist in this initiative and cannot form a cycle.",
+          );
+        if (
+          initiative.milestones.some(
+            (m) =>
+              m.dependencies?.includes(action.milestone.id) &&
+              (m.accepted ||
+                owned.some(
+                  (t) => t.milestoneId === m.id && !["ready", "cancelled"].includes(t.status),
+                )),
+          )
+        )
+          return invalid(
+            "Reset dependent milestone work before changing its verification prerequisite.",
+          );
         updated = {
           ...initiative,
           milestones: [
             ...initiative.milestones.filter((m) => m.id !== action.milestone.id),
-            { ...action.milestone, accepted: false },
+            { ...action.milestone, accepted: false, verification: null },
           ],
         };
       } else {
         if (!initiative.milestones.some((m) => m.id === action.id))
           return invalid("Milestone not found.");
+        if (
+          !action.accepted &&
+          initiative.milestones.some(
+            (m) =>
+              m.dependencies?.includes(action.id) &&
+              (m.accepted ||
+                owned.some(
+                  (t) => t.milestoneId === m.id && !["ready", "cancelled"].includes(t.status),
+                )),
+          )
+        )
+          return invalid("Reset dependent milestone work before reopening its prerequisite.");
+        if (
+          action.accepted &&
+          initiative.milestones
+            .find((m) => m.id === action.id)
+            ?.dependencies?.some((id) => !initiative.milestones.find((m) => m.id === id)?.accepted)
+        )
+          return invalid("Verify and accept the prerequisite milestones first.");
+        if (
+          action.accepted &&
+          (initiative.status !== "active" || !action.artifact || !action.evidence)
+        )
+          return invalid(
+            "Verify the integrated result in an active initiative and provide its immutable artifact and verification evidence.",
+          );
         if (
           action.accepted &&
           owned.some(
@@ -220,7 +351,24 @@ export function decideTeamwork(
             ? { status: "paused" as const }
             : {}),
           milestones: initiative.milestones.map((m) =>
-            m.id === action.id ? { ...m, accepted: action.accepted } : m,
+            m.id === action.id
+              ? {
+                  ...m,
+                  accepted: action.accepted,
+                  verification:
+                    action.accepted && action.artifact && action.evidence
+                      ? {
+                          artifact: action.artifact,
+                          evidence: action.evidence,
+                          submissions: owned
+                            .filter((t) => t.milestoneId === m.id && t.status === "done")
+                            .map((t) => ({ taskId: t.id, revision: t.submission?.revision ?? 0 })),
+                          threadId: actor,
+                          createdAt: now,
+                        }
+                      : null,
+                }
+              : m,
           ),
         };
       }
@@ -242,8 +390,17 @@ export function decideTeamwork(
       const initiative = state.initiatives.find((i) => i.id === initiativeId);
       if (!initiative || ["completed", "cancelled"].includes(initiative.status))
         return invalid("Reopen the initiative before changing tasks.");
-      if (existing && ["delegating", "running"].includes(existing.status))
-        return invalid("Stop and reset the assignment before editing it.");
+      if (existing && !["ready", "cancelled"].includes(existing.status))
+        return invalid(
+          "Use task.review to request changes without losing the worker or submission. Editing an assigned task requires an explicit task.reset first.",
+        );
+      if (
+        milestoneHasStartedDependents(initiativeId, action.milestoneId) ||
+        (existing && milestoneHasStartedDependents(initiativeId, existing.milestoneId))
+      )
+        return invalid(
+          "Reset dependent milestone work before changing its verification prerequisite.",
+        );
       if (
         existing &&
         state.tasks.some(
@@ -290,6 +447,9 @@ export function decideTeamwork(
         ownerThreadId: null,
         delegatedTaskId: null,
         delegationId: null,
+        attemptCount: existing?.attemptCount ?? (existing?.delegationId ? 1 : 0),
+        submissionCount: existing?.submissionCount ?? 0,
+        submission: null,
         evidence: "",
         review: null,
         createdAt: existing?.createdAt ?? now,
@@ -304,7 +464,7 @@ export function decideTeamwork(
                 ...i,
                 milestones: i.milestones.map((m) =>
                   m.id === action.milestoneId || m.id === existing?.milestoneId
-                    ? { ...m, accepted: false }
+                    ? { ...m, accepted: false, verification: null }
                     : m,
                 ),
               }
@@ -329,12 +489,49 @@ export function decideTeamwork(
       )
         return invalid("Reset dependent assignments before changing their prerequisite.");
       const initiative = state.initiatives.find((i) => i.id === task.initiativeId)!;
+      if (
+        action.type === "task.reset" &&
+        milestoneHasStartedDependents(initiative.id, task.milestoneId)
+      )
+        return invalid(
+          "Reset dependent milestone work before changing its verification prerequisite.",
+        );
+      const policy = initiative.policy ?? defaultPolicy;
       if (action.type === "task.reserve") {
         if (initiative.status !== "active" || !initiative.approved || task.status !== "ready")
           return invalid("Only a ready task in an active, approved initiative can be delegated.");
+        if (
+          initiative.milestones
+            .find((m) => m.id === task.milestoneId)
+            ?.dependencies?.some((id) => !initiative.milestones.find((m) => m.id === id)?.accepted)
+        )
+          return invalid(
+            "Verify and accept this task's prerequisite milestones before starting it.",
+          );
         if (task.dependencies.some((id) => state.tasks.find((t) => t.id === id)?.status !== "done"))
           return invalid("Complete the task's dependencies first.");
-        tasks({ ...task, status: "delegating", delegationId: action.delegationId });
+        if (
+          state.tasks.filter(
+            (t) =>
+              t.initiativeId === initiative.id &&
+              ["delegating", "running", "blocked", "review"].includes(t.status),
+          ).length >= policy.maxConcurrent
+        )
+          return invalid(
+            "This initiative has reached its concurrent assignment limit. Finish or reset an assignment first.",
+          );
+        const attemptCount = task.attemptCount ?? (task.delegationId ? 1 : 0);
+        if (attemptCount >= policy.maxAttempts)
+          return invalid(
+            "This task has reached its attempt limit. Review the failure and explicitly raise the initiative limit to retry.",
+          );
+        tasks({
+          ...task,
+          status: "delegating",
+          delegationId: action.delegationId,
+          attemptCount: attemptCount + 1,
+          submission: null,
+        });
       } else if (action.type === "task.assign") {
         if (task.delegationId !== action.delegationId || task.status !== "delegating")
           return invalid("This delegation reservation is no longer current.");
@@ -357,21 +554,66 @@ export function decideTeamwork(
         tasks(assigned);
         if (initiative.status !== "active") stop(assigned);
       } else if (action.type === "task.report") {
+        if (initiative.status !== "active")
+          return invalid("Resume the initiative before reporting further work.");
         if (actor !== null && actor !== task.ownerThreadId)
           return invalid("Only the assigned worker or user can report this task's result.");
         if (!["running", "blocked", "review"].includes(task.status))
           return invalid("This task has no current assignment to report.");
-        tasks({ ...task, status: action.status, evidence: action.evidence, review: null });
+        if (
+          task.delegationId === null ||
+          (actor !== null && action.attemptId !== task.delegationId) ||
+          (action.attemptId !== undefined && action.attemptId !== task.delegationId)
+        )
+          return invalid(
+            "Report the current assignment's attemptId. This update belongs to a missing or replaced assignment.",
+          );
+        if (action.status === "review" && !action.artifact)
+          return invalid(
+            "Submit an immutable commit SHA or content digest with the evidence for review.",
+          );
+        if (action.status === "review" && (task.submissionCount ?? 0) >= policy.maxSubmissions)
+          return invalid(
+            "This task has reached its submission limit. Review the remaining problems before raising the initiative limit.",
+          );
+        tasks({
+          ...task,
+          status: action.status,
+          evidence: action.evidence,
+          review: null,
+          submissionCount: (task.submissionCount ?? 0) + (action.status === "review" ? 1 : 0),
+          submission:
+            action.status === "review" && action.artifact
+              ? {
+                  revision: state.revision + 1,
+                  attemptId: task.delegationId,
+                  artifact: action.artifact,
+                  evidence: action.evidence,
+                  threadId: actor,
+                  createdAt: now,
+                }
+              : null,
+        });
         if (initiative.status === "active" && action.status !== "running")
           wake(
             `Task ${task.id} is ${action.status}. Evidence: ${action.evidence}\nRead t3_team_read. A result needs an independent review before approval.`,
             task.initiativeId,
           );
       } else if (action.type === "task.review") {
+        if (initiative.status !== "active")
+          return invalid("Resume the initiative before reviewing work.");
         if (task.status !== "review" || !task.evidence.trim())
           return invalid("The task needs submitted evidence before review.");
         if (actor !== null && actor === task.ownerThreadId)
           return invalid("A worker cannot approve or review its own task.");
+        if (
+          !task.submission ||
+          action.submissionRevision !== task.submission.revision ||
+          task.submission.attemptId !== task.delegationId
+        )
+          return invalid(
+            "Review the exact current submissionRevision. An older approval cannot accept newer work.",
+          );
         if (
           actor !== null &&
           !operator &&
@@ -383,8 +625,25 @@ export function decideTeamwork(
         tasks({
           ...task,
           status: action.decision === "approve" ? "done" : "blocked",
-          review: { threadId: actor, decision: action.decision, evidence: action.evidence },
+          review: {
+            threadId: actor,
+            decision: action.decision,
+            evidence: action.evidence,
+            submissionRevision: task.submission.revision,
+          },
         });
+        if (
+          action.decision === "changes" &&
+          task.ownerThreadId !== null &&
+          (task.submissionCount ?? 0) < policy.maxSubmissions
+        )
+          intents.push({
+            kind: "message",
+            threadId: task.ownerThreadId,
+            initiativeId: task.initiativeId,
+            taskId: task.id,
+            text: `Changes requested for task ${task.id}, submission ${task.submission.revision}:\n${action.evidence}\nRead the current assignment before revising. Report a new immutable artifact for independent review using attemptId ${task.delegationId}.`,
+          });
         if (initiative.status === "active")
           wake(`Task ${task.id} review: ${action.decision}. ${action.evidence}`, task.initiativeId);
       } else {
@@ -396,6 +655,7 @@ export function decideTeamwork(
           delegatedTaskId: null,
           delegationId: null,
           review: null,
+          submission: null,
         });
         next = {
           ...next,
@@ -405,7 +665,7 @@ export function decideTeamwork(
                   ...i,
                   status: i.status === "completed" ? "paused" : i.status,
                   milestones: i.milestones.map((m) =>
-                    m.id === task.milestoneId ? { ...m, accepted: false } : m,
+                    m.id === task.milestoneId ? { ...m, accepted: false, verification: null } : m,
                   ),
                 }
               : i,
@@ -449,6 +709,7 @@ export function decideTeamwork(
             text: action.text,
             recipients,
             createdAt: now,
+            revision: state.revision + 1,
           },
         ].slice(-60),
       };
@@ -461,7 +722,12 @@ export function decideTeamwork(
         });
       break;
     }
-    case "knowledge.save":
+    case "knowledge.save": {
+      const existing = state.knowledge.find((k) => k.id === action.id);
+      const initiativeId =
+        action.initiativeId === undefined ? (existing?.initiativeId ?? null) : action.initiativeId;
+      if (initiativeId !== null && !state.initiatives.some((i) => i.id === initiativeId))
+        return invalid("Knowledge scope must name an active workspace initiative.");
       if (
         !operator &&
         state.knowledge.some((k) => k.id === action.id && k.sourceThreadId !== actor)
@@ -484,13 +750,25 @@ export function decideTeamwork(
             text: action.text,
             sourceThreadId: actor,
             sourceTaskId: action.sourceTaskId,
+            sourceRevision: state.revision + 1,
+            initiativeId,
+            pinned: action.pinned ?? existing?.pinned ?? false,
+            excluded: action.excluded ?? existing?.excluded ?? false,
             updatedAt: now,
           },
         ],
       };
       break;
+    }
     case "knowledge.forget":
-      next = { ...next, knowledge: next.knowledge.filter((k) => k.id !== action.id) };
+      next = {
+        ...next,
+        knowledge: next.knowledge.filter((k) => k.id !== action.id),
+        tasks: next.tasks.map((t) => ({
+          ...t,
+          knowledgeIds: t.knowledgeIds.filter((id) => id !== action.id),
+        })),
+      };
       break;
     case "delivery.retry":
       break;

@@ -7,6 +7,10 @@
       "types": "./src/pullRequestDiffFold.ts",
       "default": "./src/pullRequestDiffFold.ts"
     },
+    "./state/crew": {
+      "types": "./src/state/crew.ts",
+      "default": "./src/state/crew.ts"
+    },
     "./assembly-highlighting": {
       "types": "./src/assemblyHighlighting.ts",
       "default": "./src/assemblyHighlighting.ts"
@@ -250,6 +254,14 @@
     "./state/deviceHubAccess": {
       "types": "./src/state/deviceHubAccess.ts",
       "default": "./src/state/deviceHubAccess.ts"
+    },
+    "./state/polytoken": {
+      "types": "./src/state/polytoken.ts",
+      "default": "./src/state/polytoken.ts"
+    },
+    "./state/polytoken-surfaces": {
+      "types": "./src/state/polytokenSurfaces.ts",
+      "default": "./src/state/polytokenSurfaces.ts"
     },
     "./state/peerLinks": {
       "types": "./src/state/peerLinks.ts",
@@ -518,6 +530,10 @@
     "./mcp-apps": {
       "types": "./src/mcpApps/host.ts",
       "default": "./src/mcpApps/host.ts"
+    },
+    "./polytoken/surface-host": {
+      "types": "./src/polytoken/surfaceHost.ts",
+      "default": "./src/polytoken/surfaceHost.ts"
     },
     "./state/mcp-apps": {
       "types": "./src/state/mcpApps.ts",

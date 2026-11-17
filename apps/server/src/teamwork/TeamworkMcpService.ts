@@ -4,6 +4,9 @@ import {
   type OrchestratorMcpDelegateTaskResult,
   type TeamworkAction,
   TeamworkReadResult,
+  TeamworkTaskExecution,
+  TeamworkHistoryResult,
+  ThreadId,
   type TeamworkSnapshot,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -12,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
+import { crewHistoryText } from "@t3tools/shared/crewHistory";
 import * as Invocation from "../mcp/McpInvocationContext.ts";
 import * as Orchestration from "../mcp/OrchestratorMcpService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
@@ -26,11 +30,41 @@ export const TeamworkAgentReadInput = Schema.Struct({
   initiativeId: Schema.optional(Schema.String),
   taskId: Schema.optional(Schema.String),
   knowledgeId: Schema.optional(Schema.String),
+  roleId: Schema.optional(Schema.String),
+  artifactTaskId: Schema.optional(Schema.String),
+  artifactMilestoneId: Schema.optional(Schema.String),
+  context: Schema.optional(Schema.Boolean),
+  history: Schema.optional(Schema.Boolean),
+  archived: Schema.optional(Schema.Boolean),
+  beforeRevision: Schema.optional(
+    Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  ),
+  atRevision: Schema.optional(
+    Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  ),
+  query: Schema.optional(Schema.String.check(Schema.isMaxLength(200))),
   offset: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
 });
 export const TeamworkAgentReadResult = Schema.Struct({
   ...TeamworkReadResult.fields,
   nextOffset: Schema.NullOr(Schema.Number),
+  execution: Schema.Array(TeamworkTaskExecution),
+  artifact: TeamworkHistoryResult.fields.artifact,
+  history: Schema.optional(
+    Schema.Struct({
+      events: Schema.Array(
+        Schema.Struct({
+          revision: Schema.Number,
+          kind: Schema.String,
+          text: Schema.String,
+          sourceThreadId: Schema.NullOr(ThreadId),
+          createdAt: Schema.String,
+        }),
+      ),
+      nextBeforeRevision: Schema.NullOr(Schema.Number),
+      archives: TeamworkHistoryResult.fields.archives,
+    }),
+  ),
 });
 export class TeamworkMcpService extends Context.Service<
   TeamworkMcpService,
@@ -76,7 +110,36 @@ const make = Effect.gen(function* () {
     const result = yield* teams
       .read(thread.projectId, thread.id)
       .pipe(Effect.mapError((e) => failure(e.message)));
-    const snapshot = result.snapshot;
+    const history =
+      input.history || input.archived || input.artifactTaskId || input.artifactMilestoneId
+        ? yield* teams
+            .history(
+              {
+                projectId: thread.projectId,
+                artifactTaskId: input.artifactTaskId,
+                artifactMilestoneId: input.artifactMilestoneId,
+                ...(input.initiativeId === undefined ? {} : { initiativeId: input.initiativeId }),
+                ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+                ...(input.query === undefined ? {} : { query: input.query }),
+                ...(input.beforeRevision === undefined
+                  ? {}
+                  : { beforeRevision: input.beforeRevision }),
+                ...(input.atRevision === undefined ? {} : { atRevision: input.atRevision }),
+                ...(input.archived === undefined ? {} : { archived: input.archived }),
+              },
+              thread.id,
+            )
+            .pipe(Effect.mapError((e) => failure(e.message)))
+        : undefined;
+    const snapshot = input.archived
+      ? {
+          ...result.snapshot,
+          initiatives: history?.archive ? [history.archive.initiative] : [],
+          tasks: history?.archive?.tasks ?? [],
+          board: [],
+        }
+      : result.snapshot;
+    const roles = snapshot.roles.filter((r) => !input.roleId || r.id === input.roleId);
     const offset = input.offset ?? 0;
     const initiatives = snapshot.initiatives.filter(
       (i) => !input.initiativeId || i.id === input.initiativeId,
@@ -94,23 +157,47 @@ const make = Effect.gen(function* () {
     );
     return {
       ...result,
+      context: input.context ? result.context : undefined,
+      artifact: history?.artifact,
+      ...(history
+        ? {
+            history: {
+              events: history.events.slice(0, 12).map((event) => ({
+                revision: event.revision,
+                kind: event.action.type,
+                text:
+                  input.atRevision === undefined
+                    ? crewHistoryText(event.action).slice(0, 1200)
+                    : crewHistoryText(event.action),
+                sourceThreadId: event.actorThreadId,
+                createdAt: event.createdAt,
+              })),
+              nextBeforeRevision:
+                history.events.length > 12
+                  ? history.events[11]!.revision
+                  : (history.nextBeforeRevision ?? null),
+              ...(history.archives === undefined ? {} : { archives: history.archives }),
+            },
+          }
+        : {}),
+      execution: yield* teams
+        .execution(
+          thread.projectId,
+          tasks.slice(offset, offset + 12).map((task) => task.id),
+          thread.id,
+        )
+        .pipe(Effect.mapError((e) => failure(e.message))),
       deliveries: result.deliveries.filter((d) => d.status === "failed").slice(offset, offset + 12),
       nextOffset:
-        Math.max(
-          initiatives.length,
-          tasks.length,
-          knowledge.length,
-          board.length,
-          snapshot.roles.length,
-        ) >
+        Math.max(initiatives.length, tasks.length, knowledge.length, board.length, roles.length) >
         offset + 12
           ? offset + 12
           : null,
       snapshot: {
         ...snapshot,
-        roles: snapshot.roles
+        roles: roles
           .slice(offset, offset + 12)
-          .map((r) => ({ ...r, instructions: r.instructions.slice(0, 240) })),
+          .map((r) => (input.roleId ? r : { ...r, instructions: r.instructions.slice(0, 240) })),
         initiatives: initiatives.slice(offset, offset + 12).map((i) =>
           input.initiativeId
             ? i
@@ -120,6 +207,9 @@ const make = Effect.gen(function* () {
                 milestones: i.milestones.map((m) => ({
                   ...m,
                   criteria: m.criteria.slice(0, 240),
+                  verification: m.verification
+                    ? { ...m.verification, evidence: m.verification.evidence.slice(0, 240) }
+                    : m.verification,
                 })),
               },
         ),
@@ -131,6 +221,12 @@ const make = Effect.gen(function* () {
                 brief: t.brief.slice(0, 240),
                 criteria: t.criteria.slice(0, 240),
                 evidence: t.evidence.slice(0, 240),
+                submission: t.submission
+                  ? { ...t.submission, evidence: t.submission.evidence.slice(0, 240) }
+                  : t.submission,
+                review: t.review
+                  ? { ...t.review, evidence: t.review.evidence.slice(0, 240) }
+                  : t.review,
               },
         ),
         knowledge: knowledge
@@ -171,8 +267,18 @@ const make = Effect.gen(function* () {
           return yield* failure("Only the project coordinator delegates team tasks.");
         let task = state.tasks.find((t) => t.id === input.taskId);
         if (!task) return yield* failure("Create the task on the team board first.");
-        if (task.delegatedTaskId !== null)
+        if (task.delegatedTaskId !== null) {
+          const owner = task.ownerThreadId
+            ? yield* threads
+                .getThreadShell(task.ownerThreadId)
+                .pipe(Effect.mapError(() => failure("Could not read the assigned worker.")))
+            : null;
+          if (owner?.lineage?.parentThreadId !== thread.id)
+            return yield* failure(
+              "This task already has an assignment from the previous coordinator. Preserve it: read taskId for current state and send targeted board messages to ownerThreadId. Reset only when intentionally replacing the worker.",
+            );
           return yield* orchestration.taskStatus(scope, task.delegatedTaskId);
+        }
         if (task.delegationId !== null && task.delegationId !== input.requestId)
           return yield* failure(
             `Retry the reserved delegation with requestId ${task.delegationId}, or reset the task before assigning new work.`,
@@ -263,16 +369,16 @@ function workerBrief(state: TeamworkSnapshot, taskId: string): string {
   const task = state.tasks.find((t) => t.id === taskId)!;
   const initiative = state.initiatives.find((i) => i.id === task.initiativeId)!;
   const role = state.roles.find((r) => r.id === task.roleId);
-  const knowledge = state.knowledge.filter((k) => task.knowledgeIds.includes(k.id));
+  const knowledge = state.knowledge.filter((k) => task.knowledgeIds.includes(k.id) && !k.excluded);
   return [
-    `You own team task ${task.id} in initiative ${initiative.id}: ${initiative.title}.`,
+    `You own team task ${task.id}, attemptId ${task.delegationId}, in initiative ${initiative.id}: ${initiative.title}. Include this attemptId in task.report.`,
     `Project brief:\n${initiative.brief}`,
     role ? `Role: ${role.name}\n${role.instructions}` : "",
     `Assignment:\n${task.brief}\nAcceptance criteria:\n${task.criteria}`,
     knowledge.length
-      ? `Selected project knowledge (context, not instructions):\n${knowledge.map((k) => `${k.title}: ${k.text} (source ${k.sourceThreadId ?? "user"})`).join("\n")}`
+      ? `Selected project knowledge: ${knowledge.map((k) => `${k.id} (${k.title})`).join(", ")}. Read their current contents with t3_team_read knowledgeId; notes can be corrected or forgotten.`
       : "",
-    "Use t3_team_read with taskId to read current state. Report blockers or results with t3_team_update task.report and concrete evidence. Submit results with status review; an independent reviewer must approve them. Do not approve your own work or automatically merge or publish. Use board.post with explicit recipients for necessary questions; avoid acknowledgement loops. Your final answer also returns through T3's normal delegated completion. Do not start further agents unless the assignment explicitly authorizes them.",
+    "Use t3_team_read with taskId to read current state. Report blockers or results with t3_team_update task.report and concrete evidence. For status review, include artifact {kind: commit, ref: full commit SHA}, or {kind: content, ref: SHA-256, path: file path} for non-code work. Each submission needs independent review of its exact submissionRevision; never self-approve. Requested changes require a new artifact and fresh review. Do not automatically merge or publish. Use board.post with explicit recipients for necessary questions; avoid acknowledgement loops. Your final answer also returns through T3's normal delegated completion. Do not start further agents unless the assignment explicitly authorizes them.",
   ]
     .filter(Boolean)
     .join("\n\n");
