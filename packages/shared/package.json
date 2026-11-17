@@ -7,6 +7,10 @@
       "types": "./src/crewArtifacts.ts",
       "import": "./src/crewArtifacts.ts"
     },
+    "./crewSupervision": {
+      "types": "./src/crewSupervision.ts",
+      "import": "./src/crewSupervision.ts"
+    },
     "./crewHistory": {
       "types": "./src/crewHistory.ts",
       "import": "./src/crewHistory.ts"
