@@ -67,7 +67,10 @@ export const CrewWorkstreamTaskLink = Schema.Struct({
 });
 export type CrewWorkstreamTaskLink = typeof CrewWorkstreamTaskLink.Type;
 
-export const CrewConsultationReply = Schema.Struct({ consultationId: Id, responseId: Id });
+export const CrewConsultationReply = Schema.Struct({
+  consultationId: Id,
+  responseId: MessageId,
+});
 export const CrewConsultationRequest = Schema.Struct({
   id: Id,
   origin: CrewMessageRef,
@@ -80,7 +83,7 @@ export type CrewConsultationRequest = typeof CrewConsultationRequest.Type;
 export const CrewConsultationExchange = Schema.Struct({
   request: CrewMessageRef,
   response: CrewMessageRef,
-  responseId: Id,
+  responseId: MessageId,
 });
 export type CrewConsultationExchange = typeof CrewConsultationExchange.Type;
 export const CrewConsultationProgress = Schema.Union([

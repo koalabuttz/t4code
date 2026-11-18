@@ -57,6 +57,7 @@ const message = (
 const question = message(origin, "question", "user", null);
 const request = message(destination, "forwarded", "system", "run");
 const response = message(destination, "answer", "agent", "run");
+const responseId = MessageId.make("response");
 const workstream: CrewWorkstream = {
   conversation: destination,
   title: "Android",
@@ -85,7 +86,7 @@ const observation = () =>
     scope,
     consultationId: "consult",
     deliveryId: "delivery",
-    outcome: { type: "answered", exchange: { request, response, responseId: "response" } },
+    outcome: { type: "answered", exchange: { request, response, responseId } },
   });
 const answered = () => {
   const result = observeCrewConsultation(consultation(), observation(), later);
@@ -216,7 +217,7 @@ describe("Crew conversation state", () => {
             ...observation(),
             outcome: {
               type: "answered",
-              exchange: { request, response: invalidResponse, responseId: "response" },
+              exchange: { request, response: invalidResponse, responseId },
             },
           },
           later,
@@ -228,7 +229,10 @@ describe("Crew conversation state", () => {
         current,
         {
           ...observation(),
-          outcome: { type: "answered", exchange: { request, response, responseId: "different" } },
+          outcome: {
+            type: "answered",
+            exchange: { request, response, responseId: MessageId.make("different") },
+          },
         },
         later,
       ).accepted,
@@ -250,7 +254,7 @@ describe("Crew conversation state", () => {
             exchange: {
               request: { ...request, runId: RunId.make("wrong-run") },
               response: { ...response, runId: RunId.make("wrong-run") },
-              responseId: "response",
+              responseId,
             },
           },
         },
@@ -274,7 +278,7 @@ describe("Crew conversation state", () => {
             exchange: {
               request: { ...request, messageId: MessageId.make("different") },
               response,
-              responseId: "response",
+              responseId,
             },
           },
         },
@@ -319,7 +323,7 @@ describe("Crew conversation state", () => {
     const followup = {
       ...current,
       id: "followup",
-      replyTo: { consultationId: current.id, responseId: "response" },
+      replyTo: { consultationId: current.id, responseId },
     };
     expect(crewConsultationRequestProblem(scope, followup, workstream, answered())).toBeNull();
     expect(crewConsultationRequestProblem(scope, followup, workstream, current)).toBe("reply");

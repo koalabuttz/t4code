@@ -138,7 +138,9 @@ it.effect(
       const sourceRequest = messages.get(MessageId.make(consultation.deliveryId))!;
       const answer = {
         ...sourceRequest,
-        id: MessageId.make("canonical-answer"),
+        id: MessageId.make(
+          "message:provider:acpRegistry:native-item:provider-instance%3AdevReplay%3A00000000-0000-4000-8000-000000000000%3Aturn%3A1%3Aassistant%3A0",
+        ),
         role: "assistant" as const,
         creationSource: "provider" as const,
         text: "Use the safe-area inset.",

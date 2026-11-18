@@ -61,7 +61,7 @@ it("attributes only the correlated server return at its origin across follow-ups
       exchange: {
         request: { ...source, messageId: MessageId.make("request") },
         response: source,
-        responseId: "response-1",
+        responseId: source.messageId,
       },
     },
     createdAt: "2026-11-17T00:00:00Z",
@@ -72,7 +72,7 @@ it("attributes only the correlated server return at its origin across follow-ups
     id: "follow-up",
     deliveryId: CommandId.make("delivery-2"),
     origin: { ...originMessage, messageId: MessageId.make("next-question") },
-    replyTo: { consultationId: consultation.id, responseId: "response-1" },
+    replyTo: { consultationId: consultation.id, responseId: source.messageId },
     progress: { state: "queued" },
   };
   const exchanges = crewChatExchanges(scope, coordinatorId, [consultation, followUp], []);
