@@ -623,11 +623,25 @@ const make = Effect.gen(function* () {
             return;
           }
           const state = yield* load(input.projectId);
-          if (state.revision !== input.expectedRevision)
-            return yield* new TeamworkError({
-              reason: "conflict",
-              message: "The team changed. Refresh its state and retry your action.",
-            });
+          if (state.revision !== input.expectedRevision) {
+            // A worker's supervised report can add attention events while awaiting approval.
+            const onlyOwnApprovalObservations =
+              actor !== null &&
+              input.action.type === "task.report" &&
+              input.action.attemptId !== undefined &&
+              input.expectedRevision < state.revision &&
+              (yield* sql`SELECT 1 FROM project_teamwork_events
+                WHERE project_id = ${input.projectId} AND revision > ${input.expectedRevision}
+                AND (json_extract(action_json, '$.runtimeRequestThreadId') IS NOT ${actor}
+                  OR json_extract(action_json, '$.runtimeRequestKind') IS NOT 'mcp-elicitation'
+                  OR json_extract(action_json, '$.type') IS NOT 'crew.conversation')
+                LIMIT 1`).length === 0;
+            if (!onlyOwnApprovalObservations)
+              return yield* new TeamworkError({
+                reason: "conflict",
+                message: "The team changed. Refresh its state and retry your action.",
+              });
+          }
           if (input.action.type === "task.reserve") {
             const taskId = input.action.id;
             const task = state.tasks.find((t) => t.id === taskId);

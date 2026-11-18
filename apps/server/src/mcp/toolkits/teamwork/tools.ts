@@ -5,12 +5,7 @@ import {
 } from "@t3tools/contracts";
 import { McpSchema, Tool, Toolkit } from "effect/ai";
 import * as Schema from "effect/Schema";
-import {
-  CrewConversationCommand,
-  CrewConversationQuery,
-  CrewConversationReceipt,
-  CrewConversationPage,
-} from "@t3tools/contracts/crewConversation";
+import { CrewConversationReceipt, CrewConversationPage } from "@t3tools/contracts/crewConversation";
 import * as Invocation from "../../McpInvocationContext.ts";
 import * as Threads from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as Teamwork from "../../../teamwork/TeamworkMcpService.ts";
@@ -59,8 +54,8 @@ const delegate = Tool.make("t3_team_delegate", {
 const conversationRead = Tool.make("t3_crew_conversations", {
   ...shared,
   description:
-    "Read this project's linked persistent workstreams, consultations, handoffs or coordinator attention. Use scope with the caller's environment/project and collection; follow nextCursor. Canonical source references preserve attribution; read their source conversation with its access checks. Queued delivery is not proof the provider considered it. Ordinary independent threads do not participate until explicitly linked.",
-  parameters: CrewConversationQuery,
+    "Read this project's linked persistent workstreams, consultations, handoffs or coordinator attention. Choose a collection and follow nextCursor. Scope defaults to the calling conversation. Canonical source references preserve attribution; read their source conversation with its access checks. Queued delivery is not proof the provider considered it. Ordinary independent threads do not participate until explicitly linked.",
+  parameters: Teamwork.TeamworkConversationQueryInput,
   success: CrewConversationPage,
 })
   .annotate(Tool.Readonly, true)
@@ -68,8 +63,8 @@ const conversationRead = Tool.make("t3_crew_conversations", {
 const conversationCommand = Tool.make("t3_crew_conversation_command", {
   ...shared,
   description:
-    "Coordinator: manage persistent workstreams, correlated specialist consultations and visible handoffs. Use current Crew revision and a unique commandId; reuse only an identical retry. Consult the existing linked thread with consultation.request using exact canonical origin/context references; its actual final answer returns to that origin. Follow-ups use replyTo consultationId/responseId. Do not use board.post for consultations or create a replacement specialist for a question. A handoff requires a visible explanation at the origin and reconciled implementation ownership; forwarding never authorizes a second owner. Link/status changes start no work and never resume paused implementation. Human-only questions, secrets and approvals remain human-only. Coordination is a behavioral role: delegate implementation and preserve the selected provider and user permissions. Missing a complete implementation-tool allowlist does not block otherwise supported coordination. Report hard-enforcement limits honestly; never claim instructions enforce tools, silently switch providers or implement yourself.",
-  parameters: CrewConversationCommand,
+    "Coordinator: manage persistent workstreams, correlated specialist consultations and visible handoffs. Use current Crew revision and a unique commandId; reuse only an identical retry. Consult the existing linked thread with consultation.request using exact canonical origin/context references; its actual final answer returns to that origin. Follow-ups use replyTo consultationId/responseId. Do not use board.post for consultations or create a replacement specialist for a question. For a direct-message handoff, send the visible coordinator explanation in the origin thread, then use handoff.propose-from-attention with the attention record id, destination thread id, explanation message id and task id for implementation. Crew resolves canonical references and current assignment. Scope defaults to the calling conversation. Confirm Stop and complete the handoff before reassigning implementation. Link/status changes start no work and never resume paused implementation. Human-only questions, secrets and approvals remain human-only. Coordination is a behavioral role: delegate implementation and preserve the selected provider and user permissions. Missing a complete implementation-tool allowlist does not block otherwise supported coordination. Report hard-enforcement limits honestly; never claim instructions enforce tools, silently switch providers or implement yourself.",
+  parameters: Teamwork.TeamworkConversationCommandInput,
   success: CrewConversationReceipt,
 })
   .annotate(Tool.Destructive, true)

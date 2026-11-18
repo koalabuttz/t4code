@@ -1,5 +1,6 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { deriveThreadQueueWorkflowState } from "@t3tools/client-runtime/state/thread-workflows";
+import { CrewQueuedHandoffs } from "../teamwork/CrewTimeline";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
 import {
   isAttachmentOnlyBootstrapPrompt,
@@ -239,6 +240,7 @@ export function QueuedRunsControl({
       <span className="sr-only" aria-live="polite">
         {items.length} queued
       </span>
+      <CrewQueuedHandoffs />
       <ol className="flex flex-col items-end gap-3" id={queueListId}>
         {visibleItems.map((item, position) => {
           const previewText = isAttachmentOnlyBootstrapPrompt(item.text)

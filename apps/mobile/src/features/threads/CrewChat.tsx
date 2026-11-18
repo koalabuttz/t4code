@@ -1,4 +1,6 @@
 import { useNavigation } from "@react-navigation/native";
+import { useAtomValue } from "@effect/atom-react";
+import { Atom } from "effect/reactivity";
 import { scopedProjectKey } from "@t3tools/client-runtime/environment";
 import {
   crewDraftBrief,
@@ -22,7 +24,11 @@ import { AppText } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { threadEnvironment, useEnvironmentThread } from "../../state/threads";
+import {
+  environmentThreadDetails,
+  threadEnvironment,
+  useEnvironmentThread,
+} from "../../state/threads";
 import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { appendComposerDraftText, getComposerDraftSnapshot } from "../../state/use-composer-drafts";
@@ -50,6 +56,7 @@ export type CrewChatRoute = {
 };
 
 const CrewChatContext = createContext<ReturnType<typeof useCrewChatModel> | null>(null);
+const emptyCrewQueue = Atom.make(null);
 export const useCrewChat = () => use(CrewChatContext);
 
 export function CrewChatFrame({
@@ -100,7 +107,21 @@ function useCrewChatModel(
   );
   const navigation = useNavigation();
   const controls = useCrewControls(scope, snapshot?.revision, freshness === "current");
-  const metadata = useCrewTimelineMetadata(active ? scope : null, thread.id, snapshot?.revision);
+  const queue = useAtomValue(
+    active
+      ? environmentThreadDetails.queueWorkflowAtom({
+          environmentId: thread.environmentId,
+          threadId: thread.id,
+        })
+      : emptyCrewQueue,
+  );
+  const queuedMessageIds = queue?.queuedRuns.map((entry) => entry.messageId) ?? [];
+  const metadata = useCrewTimelineMetadata(
+    active ? scope : null,
+    thread.id,
+    snapshot?.revision,
+    queuedMessageIds,
+  );
   const attention = useCrewCollection(active && !route.coordinator ? scope : null, {
     collection: "attention",
     ...(route.coordinator ? {} : { threadId: thread.id }),
@@ -189,6 +210,8 @@ function useCrewChatModel(
     ]);
   };
   return {
+    canRead,
+    queuedMessageIds: new Set(queuedMessageIds),
     route,
     conversation,
     workstream,
@@ -237,6 +260,28 @@ export function moveCrewEntryDraft(conversation: {
   const draft = getComposerDraftSnapshot(draftKey);
   appendComposerDraftText(draftKey, draft.text ? `\n\n${brief}` : brief);
   appAtomRegistry.set(crewDraftBrief(key), "");
+}
+
+export function CrewQueuedHandoffs() {
+  const chat = useCrewChat();
+  if (!chat) return null;
+  const handoffs = [...chat.exchange.routes].flatMap(([messageId, records]) =>
+    chat.queuedMessageIds.has(messageId) ? records : [],
+  );
+  if (handoffs.length === 0) return null;
+  return (
+    <View className="mx-4 mb-2 gap-2">
+      {handoffs.map((handoff) => (
+        <Button
+          key={handoff.id}
+          label={`Handoff · ${chat.threadName(handoff.destination.threadId)}`}
+          accessibilityLabel="View handoff details"
+          size="compact"
+          onPress={() => chat.openExchange("handoffs", handoff.id)}
+        />
+      ))}
+    </View>
+  );
 }
 
 export function CrewChatStatus() {
@@ -321,7 +366,9 @@ export function CrewChatMessage({
     }
   }
   const consultations = chat.exchange.byOrigin.get(message.id);
-  const handoffs = chat.exchange.routes.get(message.id);
+  const handoffs = chat.queuedMessageIds.has(message.id)
+    ? undefined
+    : chat.exchange.routes.get(message.id);
   const attention = chat.inbox.get(message.id);
   if (!consultations && !handoffs && !attention) return children;
   return (
@@ -644,7 +691,7 @@ function HandoffCard({ handoff }: { handoff: CrewHandoff }) {
       <Button
         label={`Open ${destination}`}
         size="compact"
-        disabled={!chat.available(handoff.destination.threadId)}
+        disabled={!chat.canRead}
         onPress={() => chat.openSource(handoff.destination)}
       />
     </View>

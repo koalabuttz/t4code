@@ -1,5 +1,5 @@
 import { useNavigation } from "@react-navigation/native";
-import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
 import {
   isCrewCoordinatorCandidate,
   crewSelectedInitiative,
@@ -184,6 +184,7 @@ export function CrewExchangeDetails({
 }) {
   const navigation = useNavigation();
   const { threads } = useCrewProject(scope);
+  const canRead = useEnvironmentScope(scope.environmentId, AuthOrchestrationReadScope);
   const query = useCrewCollection(kind && id ? scope : null, {
     collection: kind ?? "consultations",
     ...(id ? { id } : {}),
@@ -213,15 +214,16 @@ export function CrewExchangeDetails({
   }
   function lens(sources: ReturnType<typeof exchangedSources>) {
     return sources.map(({ label, message }) => {
+      const inScope = sameCrewProject(scope, message.conversation);
       const source =
-        sameCrewProject(scope, message.conversation) &&
+        inScope &&
         threads.find(
           (thread) => thread.id === message.conversation.threadId && thread.deletedAt === null,
         );
       return (
         <View key={label} className="gap-2 rounded-xl border border-border p-3">
           <AppText className="font-t3-semibold">{label}</AppText>
-          <AppText>{source ? source.title : "Source unavailable"}</AppText>
+          <AppText>{source ? source.title : "Source conversation"}</AppText>
           <AppText selectable className="text-foreground-muted">
             {message.messageId}
           </AppText>
@@ -229,7 +231,7 @@ export function CrewExchangeDetails({
             label="Open message"
             accessibilityLabel={`Open ${label.toLowerCase()}`}
             size="compact"
-            disabled={!source}
+            disabled={!canRead || !inScope}
             onPress={() => openCrewSource(navigation, scope, message.conversation, message)}
           />
         </View>
@@ -254,13 +256,21 @@ export function CrewExchangeDetails({
           <AppText accessibilityRole="header" className="text-lg font-t3-semibold">
             {handoff ? "Handoff" : "Consultation"}
           </AppText>
-          <AppText>{destination?.title ?? "Destination unavailable"}</AppText>
+          <AppText>{destination?.title ?? "Destination work thread"}</AppText>
           <AppText>
             {handoff
               ? `State · ${handoff.state}`
               : `Response · ${consultation?.progress.state === "answered" ? "Received" : "Not received"}`}
           </AppText>
           {consultation?.replyTo && <AppText>Follow-up consultation</AppText>}
+          {handoff && sameCrewProject(scope, handoff.destination) && (
+            <Button
+              label="Open destination"
+              size="compact"
+              disabled={!canRead}
+              onPress={() => openCrewSource(navigation, scope, handoff.destination)}
+            />
+          )}
           {opened}
         </>
       )}
@@ -347,6 +357,7 @@ function ProjectDetails({
 function WorkstreamList({ scope }: { scope: CrewProjectScope }) {
   const navigation = useNavigation();
   const { threads, snapshot, freshness, supervision } = useCrewProject(scope);
+  const canRead = useEnvironmentScope(scope.environmentId, AuthOrchestrationReadScope);
   const [search, setSearch] = useState("");
   const [linking, setLinking] = useState(false);
   const [cursor, setCursor] = useState<string>();
@@ -452,7 +463,7 @@ function WorkstreamList({ scope }: { scope: CrewProjectScope }) {
               <AppText accessibilityRole="header" className="font-t3-semibold">
                 {title}
               </AppText>
-              {rows.map(({ workstream, shell, detail, unread }) => (
+              {rows.map(({ workstream, detail, unread }) => (
                 <View
                   key={workstream.conversation.threadId}
                   className="gap-2 rounded-xl border border-border p-3"
@@ -467,7 +478,7 @@ function WorkstreamList({ scope }: { scope: CrewProjectScope }) {
                       label="Open thread"
                       accessibilityLabel={`Open ${workstream.title}`}
                       size="compact"
-                      disabled={!shell}
+                      disabled={!canRead}
                       onPress={() => openCrewSource(navigation, scope, workstream.conversation)}
                     />
                     <Button

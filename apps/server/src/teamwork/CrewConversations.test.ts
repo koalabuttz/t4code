@@ -49,6 +49,7 @@ it.effect(
     let queued = false;
     let busy = false;
     let failed = false;
+    let queueHeldAfterStop: boolean | undefined;
     let questionStatus: "pending" | "resolved" = "pending";
     let coordinatorMode: "approval-required" | "full-access" = "approval-required";
     const returnModes: Array<string | undefined> = [];
@@ -475,6 +476,45 @@ it.effect(
         threadId: worker,
         delegatedTaskId: NodeId.make("delegated"),
       });
+      const reportRevision = (yield* teams.read(projectId)).snapshot.revision;
+      const report = (expectedRevision: number, commandId: string) =>
+        teams.mutate(
+          {
+            projectId,
+            expectedRevision,
+            commandId: CommandId.make(commandId),
+            action: {
+              type: "task.report",
+              id: "owned",
+              attemptId: "attempt",
+              status: "running",
+              evidence: "Checked the inset.",
+            },
+          },
+          worker,
+        );
+      questionStatus = "pending";
+      const approval = {
+        ...pendingEvent,
+        event: {
+          ...pendingEvent.event,
+          payload: { ...pendingEvent.event.payload, kind: "mcp-elicitation" as const },
+        },
+      };
+      yield* teams.observeConversationEvent({ ...approval, sequence: 35 });
+      questionStatus = "resolved";
+      yield* teams.observeConversationEvent({
+        ...approval,
+        sequence: 36,
+        event: { ...approval.event, payload: { ...approval.event.payload, status: "resolved" } },
+      });
+      assert.isAbove((yield* teams.read(projectId)).snapshot.revision, reportRevision);
+      yield* report(reportRevision, "approved-report");
+      assert.equal(
+        (yield* teams.read(projectId)).snapshot.tasks[0]?.evidence,
+        "Checked the inset.",
+      );
+      assert.isTrue(Result.isFailure(yield* Effect.result(report(reportRevision, "old-report"))));
       const ownedHandoff = {
         type: "handoff.propose",
         id: "owned-route",
@@ -491,15 +531,32 @@ it.effect(
         assignment: null,
       } as const;
       assert.isTrue(Result.isFailure(yield* Effect.result(change("hide-owner", ownedHandoff))));
-      yield* change("owned-proposal", {
-        ...ownedHandoff,
-        assignment: {
-          initiativeId: "implementation",
-          taskId: "owned",
-          attemptId: "attempt",
-          owner: { ...scope, threadId: worker },
-        },
-      });
+      const proposal = {
+        type: "handoff.propose-from-attention",
+        id: ownedHandoff.id,
+        attentionId: directAttention.id,
+        destinationThreadId: api,
+        explanationMessageId: explanation.id,
+        taskId: "owned",
+      } as const;
+      assert.isTrue(
+        Result.isFailure(
+          yield* Effect.result(
+            change("bad-explanation", { ...proposal, explanationMessageId: direct.id }),
+          ),
+        ),
+      );
+      yield* change("owned-proposal", proposal);
+      const proposed = (yield* teams.conversationQuery({
+        scope,
+        collection: "handoffs",
+        id: proposal.id,
+      })).handoffs[0];
+      assert.deepEqual(proposed?.origin, directAttention.source);
+      assert.equal(proposed?.ownership.state, "required");
+      if (proposed?.ownership.state === "required") {
+        assert.equal(proposed.ownership.assignment.attemptId, "attempt");
+      }
       assert.isTrue(
         Result.isFailure(
           yield* Effect.result(
@@ -511,6 +568,15 @@ it.effect(
       yield* teams.drain;
       yield* mutate("release", { type: "task.reset", id: "owned", status: "ready" });
       yield* teams.drain;
+      queueHeldAfterStop = false;
+      assert.isTrue(
+        Result.isFailure(
+          yield* Effect.result(
+            change("unheld-queue-transfer", { type: "handoff.complete", id: "owned-route" }),
+          ),
+        ),
+      );
+      queueHeldAfterStop = true;
       yield* change("reconciled-transfer", { type: "handoff.complete", id: "owned-route" });
       assert.equal(
         (yield* teams.conversationQuery({ scope, collection: "handoffs", id: "owned-route" }))
@@ -806,6 +872,15 @@ it.effect(
                         userMessageId: MessageId.make("direct"),
                         status: "interrupted",
                       },
+                      ...(threadId === worker && queueHeldAfterStop !== undefined
+                        ? [
+                            {
+                              id: RunId.make("held-message"),
+                              status: "queued",
+                              queueHeld: queueHeldAfterStop,
+                            },
+                          ]
+                        : []),
                     ],
                     messages: [...messages.values()].filter(
                       (m) =>

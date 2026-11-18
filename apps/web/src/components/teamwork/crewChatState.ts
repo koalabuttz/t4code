@@ -38,10 +38,11 @@ export function useCrewTimelineMetadata(
   scope: ScopedProjectRef | null,
   threadId: ThreadId | null,
   revision: number | undefined,
+  queuedMessageIds: readonly MessageId[],
 ) {
   const environmentId = scope?.environmentId;
   const projectId = scope?.projectId;
-  const [selection, setSelection] = useState<string | null>(null);
+  const [visibleSelection, setSelection] = useState<string | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const onVisibleMessages = (messageIds: readonly MessageId[]) => {
     if (!environmentId || !projectId || !threadId) return;
@@ -53,21 +54,27 @@ export function useCrewTimelineMetadata(
       }),
     );
   };
-  const selected = selection
-    ? (JSON.parse(selection) as {
+  const selected = visibleSelection
+    ? (JSON.parse(visibleSelection) as {
         scope: ScopedProjectRef;
         threadId: ThreadId;
         messageIds: MessageId[];
       })
     : null;
+  const visibleIds =
+    selected?.scope.environmentId === environmentId &&
+    selected?.scope.projectId === projectId &&
+    selected?.threadId === threadId
+      ? (selected?.messageIds ?? [])
+      : [];
+  const messageIds = [...new Set([...visibleIds, ...queuedMessageIds])].sort();
+  const selection =
+    scope && threadId && messageIds.length > 0
+      ? JSON.stringify({ scope, threadId, messageIds })
+      : null;
   const key =
-    selected &&
-    selected.scope.environmentId === environmentId &&
-    selected.scope.projectId === projectId &&
-    selected.threadId === threadId &&
-    selected.messageIds.length > 0 &&
-    revision !== undefined
-      ? JSON.stringify({ ...selected, revision, refreshVersion })
+    selection && revision !== undefined
+      ? JSON.stringify({ scope, threadId, messageIds, revision, refreshVersion })
       : null;
   const [result, setResult] = useState<{
     selection: string;

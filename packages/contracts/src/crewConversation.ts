@@ -245,6 +245,14 @@ export const CrewConversationAction = Schema.Union([
     consultationId: Schema.NullOr(Id),
     assignment: Schema.NullOr(CrewTaskAssignmentRef),
   }),
+  Schema.Struct({
+    type: Schema.Literal("handoff.propose-from-attention"),
+    id: Id,
+    attentionId: Id,
+    destinationThreadId: ThreadId,
+    explanationMessageId: MessageId,
+    taskId: Schema.optional(Id),
+  }),
   Schema.Struct({ type: Schema.Literal("handoff.complete"), id: Id }),
   Schema.Struct({ type: Schema.Literal("handoff.cancel"), id: Id }),
 ]);

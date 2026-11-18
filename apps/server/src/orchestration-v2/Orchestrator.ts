@@ -12381,6 +12381,41 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     return turnItems.find(isRequest)?.message;
   });
 
+  const cancelInterruptedRunRequests = Effect.fn("Orchestrator.cancelInterruptedRunRequests")(
+    function* (input: {
+      readonly command: Extract<
+        OrchestrationV2ServerCommand,
+        { readonly type: "run.interrupt" | "thread.background-work.settle" }
+      >;
+      readonly projection: Pick<OrchestrationV2ThreadProjection, "nodes" | "runtimeRequests">;
+      readonly run: OrchestrationV2Run;
+      readonly events: Ref.Ref<Array<OrchestrationV2DomainEvent>>;
+      readonly now: DateTime.Utc;
+    }) {
+      const emitEvent = emit(input.events, input.command);
+      const nodes = new Set(
+        input.projection.nodes.filter((node) => node.runId === input.run.id).map((node) => node.id),
+      );
+      for (const request of input.projection.runtimeRequests) {
+        if (request.status !== "pending" || !nodes.has(request.nodeId)) continue;
+        yield* emitEvent({
+          threadId: input.command.threadId,
+          runId: input.run.id,
+          nodeId: request.nodeId,
+          providerInstanceId: input.run.providerInstanceId,
+          occurredAt: input.now,
+          type: "runtime-request.updated",
+          payload: {
+            ...request,
+            status: "cancelled",
+            resolvedAt: input.now,
+            responseCapability: { type: "not_resumable", reason: "The run was interrupted." },
+          },
+        });
+      }
+    },
+  );
+
   // A successful Stop may have no terminal event to ingest: the session or
   // native turn already died, or its final write failed when storage filled.
   const settleInterruptedRun = Effect.fn("Orchestrator.settleInterruptedRun")(function* (input: {
@@ -12521,24 +12556,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       },
     }).pipe(mapDispatchError(input.command));
     yield* Ref.update(input.events, (events) => [...events, ...cascaded]);
-    for (const request of input.projection.runtimeRequests) {
-      if (
-        request.status !== "pending" ||
-        !input.projection.nodes.some((node) => node.id === request.nodeId && node.runId === run.id)
-      )
-        continue;
-      yield* emitEvent({
-        ...base,
-        nodeId: request.nodeId,
-        type: "runtime-request.updated",
-        payload: {
-          ...request,
-          status: "cancelled",
-          resolvedAt: input.now,
-          responseCapability: { type: "not_resumable", reason: "The run was interrupted." },
-        },
-      });
-    }
+    yield* cancelInterruptedRunRequests({ ...input, run });
     if (providerThread !== undefined) {
       yield* emitEvent({
         ...base,
@@ -13004,6 +13022,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           effects,
           now,
         });
+      } else if (
+        stoppedRun.status === "interrupted" &&
+        stoppedRun.activeAttemptId ===
+          (command.externalRuntime?.attemptId ?? stopped.providerTurn?.runAttemptId)
+      ) {
+        yield* cancelInterruptedRunRequests({ command, projection, run: stoppedRun, events, now });
       }
       // A new turn may have started since Stop; its work is not this Stop's.
       if (

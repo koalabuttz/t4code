@@ -28,7 +28,9 @@ it.effect(
   () => {
     const projectId = ProjectId.make("project");
     const coordinator = ThreadId.make("coordinator");
-    const worker = ThreadId.make("worker");
+    const worker = ThreadId.make(
+      "thread:delegated-task:command%3Amcp%3Ateamwork%253A00000000-0000-4000-8000-000000000000%253Aandroid-doc%253Aandroid-doc-assign%3Adelegate-task%3Aandroid-doc-assign",
+    );
     const taskId = NodeId.make("native-task");
     const calls: string[] = [];
     const reused: string[] = [];

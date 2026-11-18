@@ -327,7 +327,7 @@ export function mobileCrewWorkstreamGroups(input: {
       input.freshness !== "current"
         ? "Execution is unconfirmed"
         : !shell
-          ? "Conversation unavailable"
+          ? "Open the thread to check its current status"
           : (needsYou?.label ??
             active?.label ??
             waiting?.label ??

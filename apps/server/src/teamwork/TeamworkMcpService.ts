@@ -23,12 +23,22 @@ import * as Orchestration from "../mcp/OrchestratorMcpService.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import * as Teamwork from "./TeamworkService.ts";
 import { DispatchModeLimit } from "../orchestration-v2/DispatchModeLimit.ts";
-import type {
+import {
   CrewConversationCommand,
   CrewConversationQuery,
-  CrewConversationReceipt,
-  CrewConversationPage,
+  CrewProjectScope,
+  type CrewConversationReceipt,
+  type CrewConversationPage,
 } from "@t3tools/contracts/crewConversation";
+
+export const TeamworkConversationCommandInput = Schema.Struct({
+  ...CrewConversationCommand.fields,
+  scope: Schema.optional(CrewProjectScope),
+});
+export const TeamworkConversationQueryInput = Schema.Struct({
+  ...CrewConversationQuery.fields,
+  scope: Schema.optional(CrewProjectScope),
+});
 
 export const TeamworkDelegateInput = Schema.Struct({
   taskId: Schema.String,
@@ -93,11 +103,11 @@ export class TeamworkMcpService extends Context.Service<
     ) => Effect.Effect<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure>;
     readonly conversationCommand: (
       scope: Invocation.McpInvocationScope,
-      input: CrewConversationCommand,
+      input: typeof TeamworkConversationCommandInput.Type,
     ) => Effect.Effect<CrewConversationReceipt, OrchestratorMcpFailure>;
     readonly conversationQuery: (
       scope: Invocation.McpInvocationScope,
-      input: CrewConversationQuery,
+      input: typeof TeamworkConversationQueryInput.Type,
     ) => Effect.Effect<CrewConversationPage, OrchestratorMcpFailure>;
   }
 >()("t3/teamwork/TeamworkMcpService") {}
@@ -369,7 +379,8 @@ const make = Effect.gen(function* () {
                     {
                       scope: { environmentId: scope.environmentId, projectId: thread.projectId },
                       collection: "workstreams",
-                      id: threadId,
+                      threadId,
+                      limit: 1,
                     },
                     thread.id,
                   )
@@ -544,24 +555,35 @@ const make = Effect.gen(function* () {
       function* (scope, input) {
         const { thread } = yield* caller(scope);
         if (
-          input.scope.projectId !== thread.projectId ||
-          input.scope.environmentId !== scope.environmentId
+          input.scope &&
+          (input.scope.projectId !== thread.projectId ||
+            input.scope.environmentId !== scope.environmentId)
         )
           return yield* failure("Use the calling conversation's environment and project.");
         return yield* teams
-          .conversationCommand(input, thread.id)
+          .conversationCommand(
+            {
+              ...input,
+              scope: { projectId: thread.projectId, environmentId: scope.environmentId },
+            },
+            thread.id,
+          )
           .pipe(Effect.mapError((e) => failure(e.message)));
       },
     ),
     conversationQuery: Effect.fn("TeamworkMcpService.conversationQuery")(function* (scope, input) {
       const { thread } = yield* caller(scope);
       if (
-        input.scope.projectId !== thread.projectId ||
-        input.scope.environmentId !== scope.environmentId
+        input.scope &&
+        (input.scope.projectId !== thread.projectId ||
+          input.scope.environmentId !== scope.environmentId)
       )
         return yield* failure("Use the calling conversation's environment and project.");
       return yield* teams
-        .conversationQuery(input, thread.id)
+        .conversationQuery(
+          { ...input, scope: { projectId: thread.projectId, environmentId: scope.environmentId } },
+          thread.id,
+        )
         .pipe(Effect.mapError((e) => failure(e.message)));
     }),
   });

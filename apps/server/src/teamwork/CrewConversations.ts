@@ -34,6 +34,7 @@ import {
   sameCrewConversation,
 } from "@t3tools/shared/crewConversation";
 import type { KeyedLock } from "@t3tools/shared/KeyedLock";
+import { latestExecutedRun } from "@t3tools/shared/orchestrationV2ThreadError";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -268,7 +269,68 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
               "forbidden",
             );
           const now = DateTime.formatIso(yield* DateTime.now);
-          const action = input.action;
+          let action: Exclude<
+            CrewConversationCommand["action"],
+            { type: "handoff.propose-from-attention" }
+          >;
+          if (input.action.type === "handoff.propose-from-attention") {
+            const proposal = input.action;
+            const attention = yield* get(
+              projectId,
+              "attention",
+              proposal.attentionId,
+              CrewAttention,
+            );
+            if (
+              !attention ||
+              attention.reason !== "user-message" ||
+              !sameCrewConversation(
+                attention.coordinator,
+                ref(projectId, state.coordinatorThreadId),
+              )
+            )
+              return yield* fail("Choose a direct message recorded for the current coordinator.");
+            const origin = attention.source;
+            yield* canonical(projectId, origin);
+            const sourceThreadId = origin.conversation.threadId;
+            const explanation = (yield* deps.threads.getMessagesById(sourceThreadId, [
+              proposal.explanationMessageId,
+            ])).get(proposal.explanationMessageId);
+            if (!explanation || explanation.senderThreadId !== state.coordinatorThreadId)
+              return yield* fail("Send a visible explanation to the source thread first.");
+            const task =
+              proposal.taskId === undefined
+                ? null
+                : state.tasks.find((candidate) => candidate.id === proposal.taskId);
+            if (
+              proposal.taskId !== undefined &&
+              (!task ||
+                task.ownerThreadId !== sourceThreadId ||
+                task.delegationId === null ||
+                ["done", "cancelled"].includes(task.status))
+            )
+              return yield* fail("Choose the current assignment in the source work thread.");
+            action = {
+              type: "handoff.propose",
+              id: proposal.id,
+              origin,
+              destination: ref(projectId, proposal.destinationThreadId),
+              explanation: messageRef(projectId, explanation),
+              context: { replyTo: null, sources: [], attachments: [] },
+              consultationId: null,
+              assignment:
+                task?.delegationId != null
+                  ? {
+                      initiativeId: task.initiativeId,
+                      taskId: task.id,
+                      attemptId: task.delegationId,
+                      owner: origin.conversation,
+                    }
+                  : null,
+            };
+          } else {
+            action = input.action;
+          }
           const deliveryId = CommandId.make(`crew:${projectId}:${input.commandId}`);
           switch (action.type) {
             case "workstream.link": {
@@ -500,7 +562,7 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                     revision: number;
                   }>`SELECT revision FROM project_teamwork_events WHERE project_id = ${projectId}
                     AND json_extract(action_json, '$.type') = 'crew.conversation'
-                    AND json_extract(json_extract(action_json, '$.command'), '$.action.type') = 'handoff.propose'
+                    AND json_extract(json_extract(action_json, '$.command'), '$.action.type') IN ('handoff.propose', 'handoff.propose-from-attention')
                     AND json_extract(json_extract(action_json, '$.command'), '$.action.id') = ${current.id} ORDER BY revision DESC LIMIT 1`;
                   const stop = yield* sql<{
                     id: string;
@@ -509,10 +571,13 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                   const records = yield* deps.threads.getThreadRecords(assignment.owner.threadId, [
                     "runs",
                   ]);
-                  const run = records.runs.at(-1);
+                  const run = latestExecutedRun(records.runs);
                   if (
                     !stop[0] ||
                     !run ||
+                    records.runs.some(
+                      (queued) => queued.status === "queued" && !queued.queueHeld,
+                    ) ||
                     !["completed", "cancelled", "interrupted", "failed", "rolled_back"].includes(
                       run.status,
                     )
@@ -943,6 +1008,12 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
           const now = DateTime.formatIso(yield* DateTime.now);
           if (event.type === "runtime-request.updated") {
             if (event.runId == null) return;
+            const observation = yield* encodeState({
+              type: "crew.conversation",
+              eventSequence: stored.sequence,
+              runtimeRequestKind: event.payload.kind,
+              runtimeRequestThreadId: event.threadId,
+            });
             const existing = yield* sql<{ id: string }>`SELECT id FROM project_crew_conversations
               WHERE project_id = ${projectId} AND collection = 'attention' AND thread_id = ${event.threadId}
               AND json_extract(payload_json, '$.pendingRequest.requestId') = ${event.payload.id}
@@ -962,7 +1033,7 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                 state,
                 CommandId.make(`crew:event:${stored.sequence}`),
                 null,
-                yield* encodeState({ type: "crew.conversation", eventSequence: stored.sequence }),
+                observation,
                 now,
               );
               return;
@@ -1008,7 +1079,7 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
               state,
               CommandId.make(`crew:event:${stored.sequence}`),
               null,
-              yield* encodeState({ type: "crew.conversation", eventSequence: stored.sequence }),
+              observation,
               now,
             );
             return;

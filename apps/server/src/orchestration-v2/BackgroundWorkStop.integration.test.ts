@@ -56,7 +56,11 @@ const stopEarlierBackgroundWork = ({
   readonly olderStart?: boolean;
   readonly workflowMember?: boolean;
   readonly external?: "connected" | "disconnected" | "runless";
-  readonly stalledRun?: "missing-session-terminal" | "returned-interrupt" | "superseded-attempt";
+  readonly stalledRun?:
+    | "missing-session-terminal"
+    | "returned-interrupt"
+    | "superseded-attempt"
+    | "terminal-before-cleanup";
 }) =>
   Effect.gen(function* () {
     const cwd = yield* checkpointWorkspace("background-work-stop");
@@ -416,7 +420,7 @@ const stopEarlierBackgroundWork = ({
         const approvalRequestId = RuntimeRequestId.make("request:stalled-approval");
         const approvalNodeId = NodeId.make("node:stalled-approval");
         const approvalItemId = TurnItemId.make("turn-item:stalled-approval");
-        if (stalledRun === "returned-interrupt") {
+        if (stalledRun === "returned-interrupt" || stalledRun === "terminal-before-cleanup") {
           yield* sink.write({
             events: [
               {
@@ -484,6 +488,33 @@ const stopEarlierBackgroundWork = ({
               },
             ],
           });
+        }
+        if (stalledRun === "terminal-before-cleanup") {
+          yield* sink.write({
+            events: [
+              {
+                id: EventId.make("terminal-before-stop-cleanup"),
+                type: "run.updated",
+                threadId,
+                runId: run.id,
+                occurredAt: now,
+                payload: { ...run, status: "interrupted", completedAt: now },
+              },
+            ],
+          });
+          yield* orchestrator.dispatch({
+            type: "thread.background-work.settle",
+            commandId: CommandId.make("settle-after-terminal"),
+            threadId,
+            providerThreadId: codexTurn.providerThreadId,
+            providerTurnId: codexTurn.id,
+          });
+          const after = yield* orchestrator.getThreadProjection(threadId);
+          assert.equal(
+            after.runtimeRequests.find((request) => request.id === approvalRequestId)?.status,
+            "cancelled",
+          );
+          return;
         }
         if (stalledRun === "superseded-attempt") {
           yield* sink.write({
@@ -1279,9 +1310,13 @@ it.effect.each(["thread.stop", "run.interrupt"] as const)(
   (stopType) => stopEarlierBackgroundWork({ stopWithQueue: stopType, olderStart: true }),
 );
 
-it.effect.each(["missing-session-terminal", "returned-interrupt", "superseded-attempt"] as const)(
-  "Stop recovers a stalled run after %s without changing a newer attempt",
-  (stalledRun) => stopEarlierBackgroundWork({ stalledRun }),
+it.effect.each([
+  "missing-session-terminal",
+  "returned-interrupt",
+  "superseded-attempt",
+  "terminal-before-cleanup",
+] as const)("Stop recovers a stalled run after %s without changing a newer attempt", (stalledRun) =>
+  stopEarlierBackgroundWork({ stalledRun }),
 );
 
 it.effect("Stop holds a provider wake that queues before the stopped turn ends", () =>

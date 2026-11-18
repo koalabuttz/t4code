@@ -14,7 +14,7 @@ import type {
   CrewHandoff,
   CrewMessageRef,
 } from "@t3tools/contracts/crewConversation";
-import { scopedProjectKey } from "@t3tools/client-runtime/environment";
+import { scopedProjectKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { assistantCitationRoute } from "../../lib/assistantCitationNavigation";
 import {
   useQuietThreadProjection,
@@ -47,6 +47,7 @@ const CrewTimelineContext = createContext<{
   exchanges: ReturnType<typeof crewChatExchanges>;
   deliveries: ReadonlyMap<string, DeliveryStatus>;
   returnedMessages: ReadonlySet<string>;
+  queuedMessageIds: ReadonlySet<MessageId>;
   onVisibleMessages: (ids: readonly MessageId[]) => void;
 } | null>(null);
 const expandedCrewAnswers = Atom.family((_threadKey: string) =>
@@ -69,7 +70,12 @@ export function CrewTimeline({
   children: ReactNode;
 }) {
   const { query, snapshot } = useCrewProject(scope);
-  const metadata = useCrewTimelineMetadata(scope, threadId, snapshot?.revision);
+  const projection = useQuietThreadProjection(
+    scope && threadId ? scopeThreadRef(scope.environmentId, threadId) : null,
+  )?.projection;
+  const queuedMessageIds =
+    projection?.runs.filter((run) => run.status === "queued").map((run) => run.userMessageId) ?? [];
+  const metadata = useCrewTimelineMetadata(scope, threadId, snapshot?.revision, queuedMessageIds);
   const deliveries = new Map(
     query.data?.deliveries
       .filter((delivery) => delivery.threadId === threadId && delivery.kind === "message")
@@ -97,6 +103,7 @@ export function CrewTimeline({
           threadId,
           exchanges,
           deliveries,
+          queuedMessageIds: new Set(queuedMessageIds),
           onVisibleMessages: metadata.onVisibleMessages,
           returnedMessages: new Set(
             returnsToCheck.size === 0
@@ -124,6 +131,16 @@ export function CrewTimeline({
       ) : null}
       {children}
     </CrewTimelineContext>
+  );
+}
+
+export function CrewQueuedHandoffs() {
+  const context = use(CrewTimelineContext);
+  if (!context) return null;
+  return [...context.exchanges.byHandoffMessage].map(([messageId, handoff]) =>
+    context.queuedMessageIds.has(messageId) ? (
+      <CrewHandoffEntry key={handoff.id} scope={context.scope} handoff={handoff} />
+    ) : null,
   );
 }
 
@@ -161,7 +178,9 @@ export function CrewTimelineMessage({
   return (
     <>
       {children}
-      {handoff ? <CrewHandoffEntry scope={scope} handoff={handoff} /> : null}
+      {handoff && !context.queuedMessageIds.has(message.id) ? (
+        <CrewHandoffEntry scope={scope} handoff={handoff} />
+      ) : null}
       {origins?.map((record) => (
         <CrewConsultationStatus
           key={record.id}

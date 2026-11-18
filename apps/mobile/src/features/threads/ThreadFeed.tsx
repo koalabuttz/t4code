@@ -1,7 +1,7 @@
 import { toServerClock } from "@t3tools/client-runtime/clock";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { crewScrollOffset } from "@t3tools/client-runtime/state/crew";
-import { CrewChatMessage, useCrewChat } from "./CrewChat";
+import { CrewChatMessage, CrewQueuedHandoffs, useCrewChat } from "./CrewChat";
 import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { useOpenPullRequest } from "../../native/useOpenPullRequest";
@@ -4280,22 +4280,21 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
               </>
             }
             ListFooterComponent={
-              props.pendingHandoff || props.statusLines?.length ? (
-                <>
-                  {props.pendingHandoff ? (
-                    <ThreadHandoffDivider
-                      environmentId={props.environmentId}
-                      endpoints={props.pendingHandoff}
-                      iconColor={iconSubtleColor}
-                      surfaceColor={screenColor}
-                      label="Context handoff pending"
-                    />
-                  ) : null}
-                  {props.statusLines?.map((line) => (
-                    <ThreadStatusLine key={line.key} line={line} iconColor={iconSubtleColor} />
-                  ))}
-                </>
-              ) : null
+              <>
+                <CrewQueuedHandoffs />
+                {props.pendingHandoff ? (
+                  <ThreadHandoffDivider
+                    environmentId={props.environmentId}
+                    endpoints={props.pendingHandoff}
+                    iconColor={iconSubtleColor}
+                    surfaceColor={screenColor}
+                    label="Context handoff pending"
+                  />
+                ) : null}
+                {props.statusLines?.map((line) => (
+                  <ThreadStatusLine key={line.key} line={line} iconColor={iconSubtleColor} />
+                ))}
+              </>
             }
             contentContainerStyle={{
               ...(props.fitShortFeedToViewport ? { minHeight: "100%" } : {}),
