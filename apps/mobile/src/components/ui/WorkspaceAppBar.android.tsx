@@ -16,6 +16,7 @@ import { AndroidHeaderIconButton } from "./AndroidScreenHeader.android";
 import { AppText } from "./AppText";
 import { NativeAppBar } from "./NativeAppBar.android";
 import { useControlTheme } from "./useControlTheme";
+import { useAndroidControlSizing } from "./useAndroidControlSizing";
 import { useToolbarLayout } from "./useToolbarLayout";
 
 const SEARCH_ICON = require("../../../assets/icons/search.xml");
@@ -28,6 +29,7 @@ const ACTION_END_INSET = 4;
 export interface WorkspaceAppBarProps {
   readonly title: string;
   readonly titleContent?: ReactNode;
+  readonly leading?: ReactNode;
   readonly search?: {
     readonly accessibilityLabel: string;
     readonly active: boolean;
@@ -132,6 +134,7 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
   const { colors } = useControlTheme();
   const tint = colors["--color-header-foreground"];
   const { height, paddingTop, paddingBottom } = useToolbarLayout();
+  const { buttonSize } = useAndroidControlSizing();
   const filterMenu = filter ? (
     <AndroidAnchoredMenu
       actions={filter.actions}
@@ -172,7 +175,14 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
         <NativeAppBar
           title={
             <RNHostView matchContents={{ vertical: true }}>
-              <View collapsable={false} className="justify-center" style={{ height: ACTION_SIZE }}>
+              <View
+                collapsable={false}
+                className="justify-center"
+                style={{
+                  height: ACTION_SIZE,
+                  paddingStart: props.leading ? buttonSize : 0,
+                }}
+              >
                 {props.titleContent ?? (
                   <AppText textRole="title" numberOfLines={1} className="text-header-foreground">
                     {props.title}
@@ -203,6 +213,14 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
             </>
           }
         />
+        {props.leading && (
+          <View
+            className="absolute"
+            style={{ start: ACTION_END_INSET, top: (height - buttonSize) / 2 }}
+          >
+            {props.leading}
+          </View>
+        )}
         {filter && !searching ? (
           <View
             className="absolute"
