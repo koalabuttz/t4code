@@ -1198,14 +1198,24 @@ const stopEarlierBackgroundWork = ({
       }
       yield* worker.drain();
       if (stopWithQueue !== undefined) {
-        const targetedRuns = yield* orchestrator.getStopRequestedRunIds({
+        const stopCommand = {
           threadId,
           commandId: CommandId.make("stop-background-work"),
-        });
+        };
+        const evidence = yield* orchestrator.getStopRunEvidence(stopCommand);
         if (stopWithQueue === "thread.stop") {
-          assert.include(targetedRuns, olderStart ? watcherRun.runId : latestRun.runId);
+          const committed = yield* sink.readByCommandId(stopCommand).pipe(Stream.runCollect);
+          const firstMarker = committed.find(
+            ({ event }) =>
+              event.type === "turn-item.updated" &&
+              event.payload.type === "run_interrupt_request" &&
+              event.runId !== undefined,
+          );
+          assert.isDefined(firstMarker);
+          assert.equal(evidence?.firstSequence, firstMarker!.sequence);
+          assert.include(evidence?.runIds ?? [], olderStart ? watcherRun.runId : latestRun.runId);
         } else {
-          assert.isEmpty(targetedRuns);
+          assert.isNull(evidence);
         }
       }
 

@@ -6,6 +6,7 @@ import {
   type EnvironmentId,
   type IsoDateTime,
   type ProjectId,
+  type RunId,
   type ThreadId,
   type TeamworkSnapshot,
   type OrchestrationV2ThreadShell,
@@ -234,6 +235,10 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
       const { runs } = yield* deps.threads.getThreadRecords(assignment.owner.threadId, ["runs"]);
       if (runs.some((run) => run.status === "queued" && !run.queueHeld)) return;
 
+      // An older delivery can be retried after a newer Stop has already reached the worker.
+      let firstStop:
+        | { stopDeliveryId: CommandId; firstSequence: number; runIds: ReadonlyArray<RunId> }
+        | undefined;
       for (const stop of stops) {
         // A retry may confirm that a run stopped after an earlier dispatch's confirmation failed.
         const retries =
@@ -248,21 +253,22 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
               AND json_extract(action_json, '$.id') = ${stop.id}
               ORDER BY revision`;
         for (const retryId of [null, ...retries.map((retry) => retry.command_id)]) {
-          const targets = yield* deps.threads.getStopRequestedRunIds({
+          const evidence = yield* deps.threads.getStopRunEvidence({
             threadId: assignment.owner.threadId,
             commandId: teamworkDeliveryCommandId(stop.id, retryId),
           });
-          if (targets.length === 0) continue;
-          // A later idle Stop can mark a completed discussion defensively.
-          const run = latestExecutedRun(runs.filter((candidate) => targets.includes(candidate.id)));
-          if (
-            run &&
-            ["completed", "cancelled", "interrupted", "failed", "rolled_back"].includes(run.status)
-          )
-            return { stopDeliveryId: CommandId.make(stop.id), stoppedRunId: run.id };
-          return;
+          if (evidence && (!firstStop || evidence.firstSequence < firstStop.firstSequence))
+            firstStop = { ...evidence, stopDeliveryId: CommandId.make(stop.id) };
         }
       }
+      if (!firstStop) return;
+      const { runIds, stopDeliveryId } = firstStop;
+      const run = latestExecutedRun(runs.filter((candidate) => runIds.includes(candidate.id)));
+      if (
+        run &&
+        ["completed", "cancelled", "interrupted", "failed", "rolled_back"].includes(run.status)
+      )
+        return { stopDeliveryId, stoppedRunId: run.id };
     },
   );
   const outbox = Effect.fn("CrewConversations.outbox")(function* (

@@ -415,10 +415,13 @@ export interface OrchestratorV2Shape {
     readonly threadId: ThreadId;
     readonly commandId: CommandId;
   }) => Effect.Effect<void, StopConfirmation.StopConfirmationError>;
-  readonly getStopRequestedRunIds: (input: {
+  readonly getStopRunEvidence: (input: {
     readonly threadId: ThreadId;
     readonly commandId: CommandId;
-  }) => Effect.Effect<ReadonlyArray<RunId>, OrchestratorProjectionError>;
+  }) => Effect.Effect<
+    { readonly firstSequence: number; readonly runIds: ReadonlyArray<RunId> } | null,
+    OrchestratorProjectionError
+  >;
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<OrchestratorV2DispatchResult, OrchestratorV2Error>;
@@ -1571,7 +1574,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const projectionStore = yield* ProjectionStoreV2;
   const effectOutbox = yield* EffectOutbox.EffectOutboxV2;
   const confirmStop = yield* StopConfirmation.make;
-  const getStopRequestedRunIds = Effect.fn("Orchestrator.getStopRequestedRunIds")(
+  const getStopRunEvidence = Effect.fn("Orchestrator.getStopRunEvidence")(
     function* (input: { readonly threadId: ThreadId; readonly commandId: CommandId }) {
       const receipt = yield* commandReceipts.getByCommandId(input.commandId);
       if (
@@ -1580,20 +1583,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         receipt.value.commandType !== "thread.stop" ||
         receipt.value.status !== "accepted"
       )
-        return [];
+        return null;
       const events = yield* eventSink.readByCommandId(input).pipe(Stream.runCollect);
-      return Array.from(
-        new Set(
-          events.flatMap(({ event }) =>
-            event.type === "turn-item.updated" &&
-            event.threadId === input.threadId &&
-            event.payload.type === "run_interrupt_request" &&
-            event.runId !== undefined
-              ? [event.runId]
-              : [],
-          ),
-        ),
+      const markers = events.flatMap(({ event, sequence }) =>
+        event.type === "turn-item.updated" &&
+        event.threadId === input.threadId &&
+        event.payload.type === "run_interrupt_request" &&
+        event.runId !== undefined
+          ? [{ sequence, runId: event.runId }]
+          : [],
       );
+      const first = markers[0];
+      return first
+        ? {
+            firstSequence: first.sequence,
+            runIds: [...new Set(markers.map((marker) => marker.runId))],
+          }
+        : null;
     },
     (effect, input) =>
       effect.pipe(
@@ -16442,7 +16448,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       return effectOutbox.awaitSettled(`effect:restart-continuation:${run.id}`).pipe(Effect.ignore);
     }),
     confirmStop,
-    getStopRequestedRunIds,
+    getStopRunEvidence,
     dispatch: dispatchWithReceipt,
     autoArmLimitRecovery: Effect.fn("OrchestratorV2.autoArmLimitRecovery")(function (input) {
       return threadDispatch.withLock(

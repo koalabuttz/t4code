@@ -54,7 +54,12 @@ it.effect(
     let queueHeldAfterStop: boolean | undefined;
     const discussionAfterStop = RunId.make("discussion-after-stop");
     const discussionBeforeRelease = RunId.make("discussion-before-release");
-    const dispatchedStops = new Map<CommandId, RunId>();
+    const cleanupAttemptRun = RunId.make("cleanup-attempt-run");
+    const discussionAfterCleanup = RunId.make("discussion-after-cleanup");
+    const dispatchedStops = new Map<
+      CommandId,
+      { readonly firstSequence: number; readonly runIds: ReadonlyArray<RunId> }
+    >();
     let stopTarget = source.runId;
     let confirmationFails = false;
     let questionStatus: "pending" | "resolved" = "pending";
@@ -686,6 +691,65 @@ it.effect(
           delegatedTaskId: NodeId.make(attemptId),
         });
       });
+      yield* mutate("allow-four-fixture-attempts", {
+        type: "initiative.policy",
+        id: "implementation",
+        policy: { maxConcurrent: 4, maxAttempts: 4, maxSubmissions: 4 },
+      });
+      yield* reuseWorker("cleanup-attempt");
+      const cleanupProposal = { ...proposal, id: "cleanup-owned-route" };
+      yield* change("cleanup-proposal", cleanupProposal);
+      confirmationFails = true;
+      yield* mutate("pause-before-cleanup", {
+        type: "initiative.status",
+        id: "implementation",
+        status: "paused",
+      });
+      yield* teams.drain;
+      const emptyPause = (yield* teams.read(projectId)).deliveries.find(
+        (delivery) => delivery.kind === "stop" && delivery.taskId === "owned",
+      )!;
+      assert.equal(emptyPause.status, "failed");
+      stopTarget = cleanupAttemptRun;
+      confirmationFails = false;
+      yield* mutate("release-after-failed-pause", {
+        type: "task.reset",
+        id: "owned",
+        status: "ready",
+      });
+      yield* teams.drain;
+      const cleanup = (yield* teams.read(projectId)).deliveries.find(
+        (delivery) => delivery.kind === "stop" && delivery.taskId === "owned",
+      )!;
+      assert.notEqual(cleanup.id, emptyPause.id);
+      assert.equal(cleanup.status, "delivered");
+      stopTarget = discussionAfterCleanup;
+      yield* mutate("retry-pause-after-cleanup", { type: "delivery.retry", id: emptyPause.id });
+      yield* teams.drain;
+      assert.equal(
+        (yield* teams.read(projectId)).deliveries.find((delivery) => delivery.id === emptyPause.id)
+          ?.status,
+        "delivered",
+      );
+      yield* change("complete-after-cleanup", { type: "handoff.complete", id: cleanupProposal.id });
+      const cleanupHandoff = (yield* teams.conversationQuery({
+        scope,
+        collection: "handoffs",
+        id: cleanupProposal.id,
+      })).handoffs[0];
+      assert.equal(cleanupHandoff?.ownership.state, "reconciled");
+      if (cleanupHandoff?.ownership.state === "reconciled") {
+        assert.deepEqual(
+          [cleanupHandoff.ownership.stopDeliveryId, cleanupHandoff.ownership.stoppedRunId],
+          [cleanup.id, cleanupAttemptRun],
+        );
+      }
+      stopTarget = null;
+      yield* mutate("resume-after-cleanup", {
+        type: "initiative.status",
+        id: "implementation",
+        status: "active",
+      });
       yield* reuseWorker("idle-attempt");
       yield* change("stale-proposal", { ...proposal, id: "stale-owned-route" });
       yield* mutate("release-idle", { type: "task.reset", id: "owned", status: "ready" });
@@ -1012,6 +1076,8 @@ it.effect(
                             },
                             { id: discussionAfterStop, ordinal: 2, status: "completed" },
                             { id: discussionBeforeRelease, ordinal: 3, status: "completed" },
+                            { id: cleanupAttemptRun, ordinal: 4, status: "interrupted" },
+                            { id: discussionAfterCleanup, ordinal: 5, status: "completed" },
                           ]
                         : []),
                     ],
@@ -1062,17 +1128,20 @@ it.effect(
                 dispatch: (command) =>
                   Effect.sync(() => {
                     if (command.type === "thread.stop" && command.threadId === worker && stopTarget)
-                      dispatchedStops.set(command.commandId, stopTarget);
+                      dispatchedStops.set(command.commandId, {
+                        firstSequence: dispatchedStops.size + 1,
+                        runIds: [stopTarget],
+                      });
                     return {} as never;
                   }),
                 confirmStop: ({ threadId }) =>
                   confirmationFails
                     ? Effect.fail(new StopConfirmationError({ threadId, reason: "Timed out" }))
                     : Effect.void,
-                getStopRequestedRunIds: ({ threadId, commandId }) => {
-                  const run = dispatchedStops.get(commandId);
-                  return Effect.succeed(threadId === worker && run ? [run] : []);
-                },
+                getStopRunEvidence: ({ threadId, commandId }) =>
+                  Effect.succeed(
+                    threadId === worker ? (dispatchedStops.get(commandId) ?? null) : null,
+                  ),
               }),
             ),
           ),
