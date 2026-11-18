@@ -96,17 +96,23 @@ function CrewProjectPageScreen({ route }: CrewRouteProps) {
   const goBack = useAndroidWorkspaceBack(true);
   const page = route.params.page;
   const title = page ? pageTitles[page] : undefined;
+  const settingsPage = page === "project-settings" || page === "advanced";
   const originThreadId = route.params.originThreadId
     ? ThreadId.make(route.params.originThreadId)
     : null;
   return (
-    <View className="flex-1 bg-screen android:bg-header">
+    <View
+      className={
+        settingsPage ? "flex-1 bg-sheet android:bg-header" : "flex-1 bg-screen android:bg-header"
+      }
+    >
       <AppBar
         title={title ?? project?.title ?? "Project chat"}
         subtitle={title ? project?.title : "Project chat"}
         onBack={goBack}
+        hideBottomBorder={settingsPage}
       />
-      <ScreenContent surface="canvas">
+      <ScreenContent surface={settingsPage ? "sheet" : "canvas"}>
         {!project || !supported ? (
           <AppText className="p-5">
             {!project

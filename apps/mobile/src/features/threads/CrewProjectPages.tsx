@@ -21,6 +21,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
+import { ListActionRow } from "../../components/ui/ListActionRow";
+import { ListRow } from "../../components/ui/ListRow";
+import { ListRowLayout } from "../../components/ui/ListRowLayout";
+import { ListSection } from "../../components/ui/ListSection";
+import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { useBarOverlap } from "../../components/ui/useBarInset";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
@@ -88,12 +93,17 @@ function CrewPageScroll({
   const [initial] = useState(() => appAtomRegistry.get(atom));
   const scroll = useRef<React.ElementRef<typeof ScrollView>>(null);
   const restored = useRef(initial === 0);
+  const settingsPage = page === "project-settings" || page === "advanced";
+  const PageScrollView = settingsPage ? ScreenScrollView : ScrollView;
   return (
-    <ScrollView
+    <PageScrollView
       ref={scroll}
-      className="flex-1"
+      className={settingsPage ? "flex-1 ios:bg-sheet" : "flex-1"}
       contentContainerClassName="gap-4 px-5 pt-4"
-      contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{
+        paddingBottom: settingsPage ? Math.max(insets.bottom, 18) + 18 : insets.bottom + 24,
+      }}
+      showsVerticalScrollIndicator={!settingsPage}
       keyboardShouldPersistTaps="handled"
       scrollEventThrottle={100}
       onScroll={(event) => {
@@ -108,7 +118,7 @@ function CrewPageScroll({
       }}
     >
       {children}
-    </ScrollView>
+    </PageScrollView>
   );
 }
 
@@ -130,43 +140,63 @@ export function CrewProjectPages({
         <ProjectResults scope={scope} />
       ) : page === "project-settings" ? (
         <>
-          <AppText className="text-lg font-t3-semibold" accessibilityRole="header">
-            Project
-          </AppText>
           <ProjectDetails scope={scope} project={project} />
-          <Button
-            label="Crew and permissions"
-            onPress={() => openCrewPage(navigation, scope, "settings")}
-          />
-          <Button
-            label="Memory and context"
-            onPress={() => openCrewPage(navigation, scope, "knowledge")}
-          />
-          <Button label="Advanced" onPress={() => openCrewPage(navigation, scope, "advanced")} />
+          <ListSection title="Crew">
+            <ListRow
+              icon="person.2"
+              label="Crew and permissions"
+              onPress={() => openCrewPage(navigation, scope, "settings")}
+            />
+            <ListRow
+              icon="doc.text"
+              label="Memory and context"
+              onPress={() => openCrewPage(navigation, scope, "knowledge")}
+            />
+            <ListRow
+              icon="gearshape"
+              label="Advanced"
+              onPress={() => openCrewPage(navigation, scope, "advanced")}
+            />
+          </ListSection>
         </>
       ) : (
         <>
-          <Button
-            label="Inter-thread board"
-            onPress={() => openCrewPage(navigation, scope, "board")}
-          />
-          <Button
-            label="Received context"
-            onPress={() => openCrewPage(navigation, scope, "context")}
-          />
-          <Button
-            label="Execution history"
-            onPress={() => openCrewPage(navigation, scope, "history")}
-          />
-          <Button
-            label="Recovery and handover"
-            onPress={() => openCrewPage(navigation, scope, "recovery")}
-          />
-          <Button label="Roles" onPress={() => openCrewPage(navigation, scope, "roles")} />
-          <Button
-            label="Initiatives and approval"
-            onPress={() => openCrewPage(navigation, scope, "settings")}
-          />
+          <ListSection title="Conversations">
+            <ListRow
+              icon="text.bubble"
+              label="Inter-thread board"
+              onPress={() => openCrewPage(navigation, scope, "board")}
+            />
+            <ListRow
+              icon="doc.text"
+              label="Received context"
+              onPress={() => openCrewPage(navigation, scope, "context")}
+            />
+          </ListSection>
+          <ListSection title="Activity">
+            <ListRow
+              icon="clock"
+              label="Execution history"
+              onPress={() => openCrewPage(navigation, scope, "history")}
+            />
+            <ListRow
+              icon="arrow.clockwise"
+              label="Recovery and handover"
+              onPress={() => openCrewPage(navigation, scope, "recovery")}
+            />
+          </ListSection>
+          <ListSection title="Management">
+            <ListRow
+              icon="person.2"
+              label="Roles"
+              onPress={() => openCrewPage(navigation, scope, "roles")}
+            />
+            <ListRow
+              icon="checkmark.circle"
+              label="Initiatives and approval"
+              onPress={() => openCrewPage(navigation, scope, "settings")}
+            />
+          </ListSection>
         </>
       )}
     </CrewPageScroll>
@@ -291,66 +321,86 @@ function ProjectDetails({
   const [title, setTitle] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const nextTitle = title?.trim() ?? "";
+  const canRename = canEdit && freshness === "current";
+  const canSave = canRename && !busy && nextTitle.length > 0 && nextTitle !== project.title;
   const initiative = snapshot?.initiatives.findLast(
     (item) => item.status === "active" || item.status === "paused" || item.status === "draft",
   );
+  const saveName = () => {
+    if (!canSave) return;
+    setBusy(true);
+    setError(null);
+    void update({
+      environmentId: scope.environmentId,
+      input: { projectId: scope.projectId, title: nextTitle },
+    })
+      .then((result) => {
+        if (result._tag === "Success") setTitle(null);
+        else if (!isAtomCommandInterrupted(result)) {
+          const failure = squashAtomCommandFailure(result);
+          setError(failure instanceof Error ? failure.message : "Could not rename the project.");
+        }
+      })
+      .finally(() => setBusy(false));
+  };
   return (
-    <View className="gap-3">
-      <AppText>{project.title}</AppText>
-      <AppText selectable>{project.workspaceRoot}</AppText>
-      {initiative && <AppText numberOfLines={4}>{initiative.brief}</AppText>}
-      {error && <AppText accessibilityRole="alert">{error}</AppText>}
+    <ListSection title="Project details">
       {title === null ? (
-        <Button
+        <ListActionRow
+          icon="pencil"
           label="Rename project"
-          disabled={!canEdit || freshness !== "current"}
+          description={project.title}
+          disabled={!canRename}
           onPress={() => setTitle(project.title)}
         />
       ) : (
-        <>
+        <View className="gap-3 p-4">
+          <AppText className="text-sm font-t3-medium text-foreground-muted">Name</AppText>
           <AppTextInput
+            accessibilityLabel="Project name"
+            className="min-h-11 min-w-0 rounded-xl border-continuous bg-card px-3 text-base text-foreground"
             value={title}
             onChangeText={setTitle}
+            returnKeyType="done"
             editable={!busy}
-            accessibilityLabel="Project name"
-            className="rounded-xl border border-border p-3"
           />
           <View className="flex-row flex-wrap gap-2">
-            <Button
-              label="Save name"
-              disabled={
-                !canEdit ||
-                freshness !== "current" ||
-                !title.trim() ||
-                title.trim() === project.title
-              }
-              loading={busy}
-              onPress={() => {
-                setBusy(true);
-                setError(null);
-                void update({
-                  environmentId: scope.environmentId,
-                  input: { projectId: scope.projectId, title: title.trim() },
-                })
-                  .then((result) => {
-                    if (result._tag === "Success") setTitle(null);
-                    else if (!isAtomCommandInterrupted(result)) {
-                      const failure = squashAtomCommandFailure(result);
-                      setError(
-                        failure instanceof Error
-                          ? failure.message
-                          : "Could not rename the project.",
-                      );
-                    }
-                  })
-                  .finally(() => setBusy(false));
-              }}
-            />
+            <Button label="Save name" disabled={!canSave} loading={busy} onPress={saveName} />
             <Button label="Cancel" disabled={busy} onPress={() => setTitle(null)} />
           </View>
-        </>
+        </View>
       )}
-    </View>
+      {error && (
+        <AppText accessibilityRole="alert" className="px-4 pb-3 text-sm text-danger-foreground">
+          {error}
+        </AppText>
+      )}
+      <View className="border-t border-border-subtle">
+        <ListRowLayout
+          icon="folder"
+          label="Workspace"
+          meta={
+            <AppText textRole="footnote" className="text-foreground-muted" selectable>
+              {project.workspaceRoot}
+            </AppText>
+          }
+        />
+      </View>
+      {initiative && (
+        <View className="border-t border-border-subtle">
+          <ListRowLayout
+            icon="doc.text"
+            label="Project brief"
+            meta={
+              <AppText textRole="footnote" className="text-foreground-muted" numberOfLines={4}>
+                {initiative.brief}
+              </AppText>
+            }
+          />
+        </View>
+      )}
+    </ListSection>
   );
 }
 
