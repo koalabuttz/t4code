@@ -382,10 +382,9 @@ function CoordinatorSetup({ scope }: { scope: ScopedProjectRef }) {
       setError(
         failure instanceof Error ? failure.message : "Could not establish this coordinator.",
       );
-    } finally {
-      query.refresh();
-      setBusy(false);
     }
+    query.refresh();
+    setBusy(false);
   };
   return (
     <section className="space-y-3 rounded-lg border p-4 text-sm">
