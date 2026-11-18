@@ -32,21 +32,26 @@ import { sameCrewConversation, sameCrewProject } from "@t3tools/shared/crewConve
 
 type MessageDraft = Atom.Type<ReturnType<typeof crewMessageDraft>>;
 type TimelineMetadata = Awaited<ReturnType<typeof readCrewTimelineMetadata>>;
+const INACTIVE_CREW_TIMELINE_LIMIT = 200;
 
 export function retainMobileCrewTimelineMetadata(
   previous: TimelineMetadata | null,
-  received: TimelineMetadata,
-  selectedMessageIds: readonly MessageId[] = received.messageIds,
+  received: TimelineMetadata | null,
+  selectedMessageIds: readonly MessageId[] = received?.messageIds ?? [],
 ): TimelineMetadata {
-  const receivedIds = new Set(received.messageIds);
+  if (!received && previous && previous.messageIds.length <= INACTIVE_CREW_TIMELINE_LIMIT)
+    return previous;
+  const receivedIds = new Set(received?.messageIds);
   const selected = new Set(selectedMessageIds);
   const previousIds = (previous?.messageIds ?? []).filter((id) => !receivedIds.has(id));
-  const recentOffscreen = new Set(previousIds.filter((id) => !selected.has(id)).slice(-200));
+  const offscreenIds = previousIds.filter((id) => !selected.has(id));
+  if (!received && previous && offscreenIds.length <= INACTIVE_CREW_TIMELINE_LIMIT) return previous;
+  const recentOffscreen = new Set(offscreenIds.slice(-INACTIVE_CREW_TIMELINE_LIMIT));
   const retainedIds = previousIds.filter((id) => selected.has(id) || recentOffscreen.has(id));
-  const messageIds = [...retainedIds, ...received.messageIds];
+  const messageIds = [...retainedIds, ...(received?.messageIds ?? [])];
   const retained = new Set(messageIds);
-  const consultations = new Map(received.consultations.map((record) => [record.id, record]));
-  const handoffs = new Map(received.handoffs.map((record) => [record.id, record]));
+  const consultations = new Map(received?.consultations.map((record) => [record.id, record]));
+  const handoffs = new Map(received?.handoffs.map((record) => [record.id, record]));
   for (const record of previous?.consultations ?? []) {
     const id = record.origin.messageId;
     if (retained.has(id) && !receivedIds.has(id) && !consultations.has(record.id))

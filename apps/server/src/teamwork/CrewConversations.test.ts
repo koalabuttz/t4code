@@ -53,6 +53,7 @@ it.effect(
     let failed = false;
     let queueHeldAfterStop: boolean | undefined;
     const discussionAfterStop = RunId.make("discussion-after-stop");
+    const discussionBeforeRelease = RunId.make("discussion-before-release");
     const dispatchedStops = new Map<CommandId, RunId>();
     let stopTarget = source.runId;
     let confirmationFails = false;
@@ -629,6 +630,14 @@ it.effect(
       );
       assert.equal(timedOut?.status, "failed");
       stopTarget = null;
+      yield* mutate("retry-without-marker", { type: "delivery.retry", id: timedOut!.id });
+      yield* teams.drain;
+      assert.equal(
+        (yield* teams.read(projectId)).deliveries.find((delivery) => delivery.id === timedOut!.id)
+          ?.status,
+        "failed",
+      );
+      stopTarget = discussionAfterStop;
       confirmationFails = false;
       yield* mutate("retry-idle-stop", { type: "delivery.retry", id: timedOut!.id });
       yield* teams.drain;
@@ -637,8 +646,10 @@ it.effect(
           ?.status,
         "delivered",
       );
+      stopTarget = discussionBeforeRelease;
       yield* mutate("release", { type: "task.reset", id: "owned", status: "ready" });
       yield* teams.drain;
+      stopTarget = null;
       queueHeldAfterStop = false;
       assert.isTrue(
         Result.isFailure(
@@ -1000,6 +1011,7 @@ it.effect(
                               queueHeld: queueHeldAfterStop,
                             },
                             { id: discussionAfterStop, ordinal: 2, status: "completed" },
+                            { id: discussionBeforeRelease, ordinal: 3, status: "completed" },
                           ]
                         : []),
                     ],

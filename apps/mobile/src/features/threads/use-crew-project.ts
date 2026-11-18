@@ -84,7 +84,16 @@ export function useCrewTimelineMetadata(
     error: string | null;
   } | null>(null);
   const current = identity && result?.identity === identity ? result : null;
-  const loaded = new Set(current?.data?.messageIds);
+  const cached = current?.data ?? null;
+  const data = useMemo(
+    () => cached && retainMobileCrewTimelineMetadata(cached, null, messageIds),
+    [cached, messageIds],
+  );
+  // A drained selection can be fully cached, so it may never trigger another fetch.
+  if (result !== null && (current === null || data !== cached)) {
+    setResult(current && { ...current, data });
+  }
+  const loaded = new Set(data?.messageIds);
   const missing = messageIds.filter((id) => !loaded.has(id));
   const key =
     identity && missing.length > 0
@@ -147,7 +156,7 @@ export function useCrewTimelineMetadata(
     return () => controller.abort();
   }, [identity, key]);
   return {
-    data: current?.data ?? null,
+    data,
     visibleMessageIds: messageIds,
     error: key && current?.failedKey === key ? current.error : null,
     onVisibleMessages,

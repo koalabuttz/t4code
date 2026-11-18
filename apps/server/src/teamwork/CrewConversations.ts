@@ -6,7 +6,6 @@ import {
   type EnvironmentId,
   type IsoDateTime,
   type ProjectId,
-  type RunId,
   type ThreadId,
   type TeamworkSnapshot,
   type OrchestrationV2ThreadShell,
@@ -230,7 +229,7 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
         AND json_extract(payload_json, '$.initiativeId') = ${assignment.initiativeId}
         AND json_extract(payload_json, '$.taskId') = ${assignment.taskId}
         AND revision >= ${proposalRevision} AND revision < ${attemptEnd}
-        ORDER BY revision DESC, id DESC`;
+        ORDER BY revision, id`;
       if (stops.length === 0) return;
       const { runs } = yield* deps.threads.getThreadRecords(assignment.owner.threadId, ["runs"]);
       if (runs.some((run) => run.status === "queued" && !run.queueHeld)) return;
@@ -246,21 +245,23 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
               AND revision <= (SELECT revision FROM project_teamwork_events
                 WHERE project_id = ${projectId} AND command_id = ${stop.retry_id})
               AND json_extract(action_json, '$.type') = 'delivery.retry'
-              AND json_extract(action_json, '$.id') = ${stop.id}`;
-        const stopped = new Set<RunId>();
+              AND json_extract(action_json, '$.id') = ${stop.id}
+              ORDER BY revision`;
         for (const retryId of [null, ...retries.map((retry) => retry.command_id)]) {
           const targets = yield* deps.threads.getStopRequestedRunIds({
             threadId: assignment.owner.threadId,
             commandId: teamworkDeliveryCommandId(stop.id, retryId),
           });
-          for (const target of targets) stopped.add(target);
+          if (targets.length === 0) continue;
+          // A later idle Stop can mark a completed discussion defensively.
+          const run = latestExecutedRun(runs.filter((candidate) => targets.includes(candidate.id)));
+          if (
+            run &&
+            ["completed", "cancelled", "interrupted", "failed", "rolled_back"].includes(run.status)
+          )
+            return { stopDeliveryId: CommandId.make(stop.id), stoppedRunId: run.id };
+          return;
         }
-        const run = latestExecutedRun(runs.filter((run) => stopped.has(run.id)));
-        if (
-          run &&
-          ["completed", "cancelled", "interrupted", "failed", "rolled_back"].includes(run.status)
-        )
-          return { stopDeliveryId: CommandId.make(stop.id), stoppedRunId: run.id };
       }
     },
   );
