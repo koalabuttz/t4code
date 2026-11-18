@@ -5,6 +5,7 @@ import type {
   TeamworkTaskExecution,
   ThreadId,
 } from "@t3tools/contracts";
+import type { CrewWorkstream } from "@t3tools/contracts/crewConversation";
 
 import { crewTaskExecution } from "./crewExecution.ts";
 
@@ -91,6 +92,27 @@ export interface CrewSupervisionItem {
   readonly dependencyIds?: ReadonlyArray<string>;
   readonly deliveryId?: string;
   readonly requestId?: string;
+}
+
+// The live shell omits idle subagents. Its missing row can produce an unknown-execution item.
+export function isResolvedCrewWorkstreamWithoutShell(input: {
+  threadId: ThreadId;
+  status: CrewWorkstream["status"];
+  freshness: Freshness;
+  items: readonly CrewSupervisionItem[];
+}): boolean {
+  return (
+    input.status === "resolved" &&
+    input.freshness === "current" &&
+    input.items.every(
+      (item) =>
+        !item.underway &&
+        (!item.attention ||
+          (item.kind === "execution-unknown" &&
+            item.threadId === input.threadId &&
+            item.lastKnownState === "unknown")),
+    )
+  );
 }
 
 export type CrewPrerequisite =

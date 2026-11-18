@@ -27,7 +27,10 @@ import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { crewTaskExecution } from "@t3tools/shared/crewExecution";
-import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
+import {
+  classifyCrewSupervision,
+  isResolvedCrewWorkstreamWithoutShell,
+} from "@t3tools/shared/crewSupervision";
 import { sameCrewConversation, sameCrewProject } from "@t3tools/shared/crewConversation";
 
 type MessageDraft = Atom.Type<ReturnType<typeof crewMessageDraft>>;
@@ -338,6 +341,14 @@ export function mobileCrewWorkstreamGroups(input: {
       input.supervision?.items.filter(
         (item) => (item.taskId !== null && linked?.has(item.taskId)) || item.threadId === threadId,
       ) ?? [];
+    const resolvedWithoutShell =
+      !shell &&
+      isResolvedCrewWorkstreamWithoutShell({
+        threadId,
+        status: workstream.status,
+        freshness: input.freshness,
+        items: facts,
+      });
     const needsYou = facts.find(
       (item) =>
         item.attention &&
@@ -357,21 +368,23 @@ export function mobileCrewWorkstreamGroups(input: {
     );
     const active = facts.find((item) => item.underway && item.kind !== "review");
     const waiting = facts.find((item) => item.kind === "review" || item.kind === "dependencies");
-    const group: WorkstreamGroup =
-      input.freshness !== "current" ||
-      !shell ||
-      needsYou ||
-      ["approval", "input", "failed", "unknown", "unavailable", "disconnected"].includes(
-        threadExecution.state,
-      )
+    const group: WorkstreamGroup = resolvedWithoutShell
+      ? "Resolved"
+      : input.freshness !== "current" ||
+          !shell ||
+          needsYou ||
+          ["approval", "input", "failed", "unknown", "unavailable", "disconnected"].includes(
+            threadExecution.state,
+          )
         ? "Needs you"
         : active || ["working", "starting"].includes(threadExecution.state)
           ? "Working"
           : workstream.status === "resolved" && !waiting
             ? "Resolved"
             : "Waiting";
-    const detail =
-      input.freshness !== "current"
+    const detail = resolvedWithoutShell
+      ? "Resolved"
+      : input.freshness !== "current"
         ? "Execution is unconfirmed"
         : !shell
           ? "Open the thread to check its current status"

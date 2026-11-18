@@ -12,7 +12,10 @@ import { type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
 import { crewExecutionLabels } from "@t3tools/shared/crewExecution";
 import { hasUnseenCompletion, resolveThreadLastVisitedAt } from "../Sidebar.logic";
 import { useUiStateStore } from "../../uiStateStore";
-import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
+import {
+  classifyCrewSupervision,
+  isResolvedCrewWorkstreamWithoutShell,
+} from "@t3tools/shared/crewSupervision";
 import { useQuietThreadShells } from "../../state/entities";
 import { useEnvironmentShellStatus } from "../../state/shell";
 import { Button } from "../ui/button";
@@ -109,6 +112,15 @@ export function CrewThreads({ scope }: { scope: ScopedProjectRef }) {
     const relevant = supervision.items.filter(
       (item) => item.threadId === row.id || tasks.some((task) => task.id === item.taskId),
     );
+    const resolvedWithoutShell =
+      !shell &&
+      !execution &&
+      isResolvedCrewWorkstreamWithoutShell({
+        threadId: row.id,
+        status: row.membership,
+        freshness,
+        items: relevant,
+      });
     const attention = relevant.find((item) => item.attention && item.responsibility !== "crew");
     const working = relevant.find((item) => item.underway);
     const stopped = relevant.every((item) => !item.underway && item.responsibility !== "unknown");
@@ -116,38 +128,40 @@ export function CrewThreads({ scope }: { scope: ScopedProjectRef }) {
       row.membership === "resolved" ||
       (tasks.length > 0 &&
         tasks.every((task) => task.status === "done" || task.status === "cancelled"));
-    const group =
-      attention ||
-      freshness !== "current" ||
-      !shell ||
-      shell.deletedAt !== null ||
-      execution?.needsAttention
+    const group = resolvedWithoutShell
+      ? "Resolved"
+      : attention ||
+          freshness !== "current" ||
+          !shell ||
+          shell.deletedAt !== null ||
+          execution?.needsAttention
         ? "Needs you"
         : working || execution?.state === "working" || execution?.state === "starting"
           ? "Working"
           : resolved && stopped
             ? "Resolved"
             : "Waiting";
-    const update =
-      attention?.label ??
-      working?.label ??
-      (freshness !== "current"
-        ? "Execution unconfirmed"
-        : !shell || shell.deletedAt !== null
-          ? "Conversation unavailable"
-          : (relevant[0]?.label ??
-            (resolved
-              ? "Resolved workstream"
-              : execution
-                ? crewExecutionLabels[execution.state]
-                : "Execution unconfirmed")));
+    const update = resolvedWithoutShell
+      ? "Resolved workstream"
+      : (attention?.label ??
+        working?.label ??
+        (freshness !== "current"
+          ? "Execution unconfirmed"
+          : !shell || shell.deletedAt !== null
+            ? "Conversation unavailable"
+            : (relevant[0]?.label ??
+              (resolved
+                ? "Resolved workstream"
+                : execution
+                  ? crewExecutionLabels[execution.state]
+                  : "Execution unconfirmed"))));
     if (!`${row.title} ${update}`.toLowerCase().includes(filter.trim().toLowerCase())) continue;
     const workstream = members.find((entry) => entry.conversation.threadId === row.id);
     groups[group]!.push(
       <li key={row.id} className="space-y-2 rounded-lg border px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            {shell?.deletedAt === null ? (
+            {resolvedWithoutShell || shell?.deletedAt === null ? (
               <Link
                 {...crewThreadRoute(scope, row.id)}
                 state={{ crewSource: { projectKey, originHref } }}
