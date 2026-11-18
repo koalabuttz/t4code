@@ -37,7 +37,7 @@ import { RuntimeMode, ProviderInteractionMode } from "@t3tools/contracts";
 import { decideTeamwork, emptyTeamwork } from "./decide.ts";
 import { crewContext } from "./context.ts";
 import { CrewArtifacts } from "./CrewArtifacts.ts";
-import { makeCrewConversations } from "./CrewConversations.ts";
+import { makeCrewConversations, teamworkDeliveryCommandId } from "./CrewConversations.ts";
 import { reconcileLegacyCrewWorkstreams } from "./CrewWorkstreamUpgrade.ts";
 import {
   CrewWorkstream,
@@ -452,9 +452,7 @@ const make = Effect.gen(function* () {
         continue;
       }
       const payload = yield* decodeDelivery(row.payload_json);
-      const commandId = CommandId.make(
-        `teamwork:${row.id}${payload.stopCommandId === undefined ? "" : `:retry:${payload.stopCommandId}`}`,
-      );
+      const commandId = teamworkDeliveryCommandId(row.id, payload.stopCommandId);
       const acceptedStop = yield* locks.withLock(
         projectId,
         Effect.gen(function* () {

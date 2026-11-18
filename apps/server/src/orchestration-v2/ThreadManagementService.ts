@@ -521,6 +521,7 @@ export interface ThreadManagementServiceShape {
     Orchestrator.OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError
   >;
   readonly confirmStop: Orchestrator.OrchestratorV2["Service"]["confirmStop"];
+  readonly getStopRequestedRunIds: Orchestrator.OrchestratorV2["Service"]["getStopRequestedRunIds"];
   readonly getThreadEventSequence: Orchestrator.OrchestratorV2["Service"]["getThreadEventSequence"];
   readonly recoverDelegatedTask: Orchestrator.OrchestratorV2["Service"]["recoverDelegatedTask"];
   readonly cancelDelegatedTask: Orchestrator.OrchestratorV2["Service"]["cancelDelegatedTask"];
@@ -1793,6 +1794,7 @@ const make = Effect.gen(function* () {
     interruptThread,
     stopDelegatedTasks,
     confirmStop: orchestrator.confirmStop,
+    getStopRequestedRunIds: orchestrator.getStopRequestedRunIds,
     stopWorkflow,
     forceStopThread,
     awaitBackgroundTasks,

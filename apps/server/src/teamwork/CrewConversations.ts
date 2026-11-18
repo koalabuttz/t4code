@@ -6,6 +6,7 @@ import {
   type EnvironmentId,
   type IsoDateTime,
   type ProjectId,
+  type RunId,
   type ThreadId,
   type TeamworkSnapshot,
   type OrchestrationV2ThreadShell,
@@ -45,6 +46,8 @@ import * as Result from "effect/Result";
 
 const fail = (message: string, reason: TeamworkError["reason"] = "invalid-state") =>
   new TeamworkError({ reason, message });
+export const teamworkDeliveryCommandId = (deliveryId: string, retryId?: string | null) =>
+  CommandId.make(`teamwork:${deliveryId}${retryId == null ? "" : `:retry:${retryId}`}`);
 const isTeamworkError = Schema.is(TeamworkError);
 const storageError = (cause: unknown) =>
   isTeamworkError(cause) ? cause : fail("Could not access Crew conversations.", "storage");
@@ -375,7 +378,7 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
               destination: ref(projectId, proposal.destinationThreadId),
               explanation: messageRef(projectId, explanation),
               context: { replyTo: null, sources: [], attachments: [] },
-              consultationId: null,
+              consultationId: proposal.consultationId ?? null,
               assignment:
                 task?.delegationId != null
                   ? {
@@ -622,24 +625,48 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                     AND json_extract(action_json, '$.type') = 'crew.conversation'
                     AND json_extract(json_extract(action_json, '$.command'), '$.action.type') IN ('handoff.propose', 'handoff.propose-from-attention')
                     AND json_extract(json_extract(action_json, '$.command'), '$.action.id') = ${current.id} ORDER BY revision DESC LIMIT 1`;
-                  const stop = yield* sql<{
+                  const stops = yield* sql<{
                     id: string;
-                  }>`SELECT id FROM project_teamwork_outbox WHERE project_id = ${projectId} AND thread_id = ${assignment.owner.threadId} AND kind = 'stop' AND status = 'delivered'
-                AND json_extract(payload_json, '$.taskId') = ${assignment.taskId} AND revision >= ${proposals[0]?.revision ?? Number.MAX_SAFE_INTEGER} ORDER BY revision DESC LIMIT 1`;
+                    retry_id: string | null;
+                  }>`SELECT id, json_extract(payload_json, '$.stopCommandId') AS retry_id
+                    FROM project_teamwork_outbox WHERE project_id = ${projectId} AND thread_id = ${assignment.owner.threadId}
+                    AND kind = 'stop' AND status = 'delivered'
+                    AND json_extract(payload_json, '$.taskId') = ${assignment.taskId}
+                    AND revision >= ${proposals[0]?.revision ?? Number.MAX_SAFE_INTEGER}
+                    ORDER BY revision DESC, id DESC`;
                   const records = yield* deps.threads.getThreadRecords(assignment.owner.threadId, [
                     "runs",
                   ]);
-                  const run = latestExecutedRun(records.runs);
-                  if (
-                    !stop[0] ||
-                    !run ||
-                    records.runs.some(
-                      (queued) => queued.status === "queued" && !queued.queueHeld,
-                    ) ||
-                    !["completed", "cancelled", "interrupted", "failed", "rolled_back"].includes(
-                      run.status,
-                    )
-                  )
+                  const unheldQueue = records.runs.some(
+                    (run) => run.status === "queued" && !run.queueHeld,
+                  );
+                  let confirmation: { stopDeliveryId: CommandId; stoppedRunId: RunId } | undefined;
+                  if (!unheldQueue) {
+                    for (const stop of stops) {
+                      const stopped = new Set(
+                        yield* deps.threads.getStopRequestedRunIds({
+                          threadId: assignment.owner.threadId,
+                          commandId: teamworkDeliveryCommandId(stop.id, stop.retry_id),
+                        }),
+                      );
+                      const run = latestExecutedRun(
+                        records.runs.filter((run) => stopped.has(run.id)),
+                      );
+                      if (
+                        run &&
+                        ["completed", "cancelled", "interrupted", "failed", "rolled_back"].includes(
+                          run.status,
+                        )
+                      ) {
+                        confirmation = {
+                          stopDeliveryId: CommandId.make(stop.id),
+                          stoppedRunId: run.id,
+                        };
+                        break;
+                      }
+                    }
+                  }
+                  if (!confirmation)
                     return yield* fail(
                       "The exact assignment needs confirmed stop evidence before the handoff can complete.",
                     );
@@ -653,8 +680,7 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                       ownership: {
                         state: "reconciled",
                         assignment,
-                        stopDeliveryId: CommandId.make(stop[0].id),
-                        stoppedRunId: run.id,
+                        ...confirmation,
                         reconciledRevision: state.revision,
                       },
                       state: "completed",

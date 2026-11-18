@@ -415,6 +415,10 @@ export interface OrchestratorV2Shape {
     readonly threadId: ThreadId;
     readonly commandId: CommandId;
   }) => Effect.Effect<void, StopConfirmation.StopConfirmationError>;
+  readonly getStopRequestedRunIds: (input: {
+    readonly threadId: ThreadId;
+    readonly commandId: CommandId;
+  }) => Effect.Effect<ReadonlyArray<RunId>, OrchestratorProjectionError>;
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<OrchestratorV2DispatchResult, OrchestratorV2Error>;
@@ -1567,6 +1571,37 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const projectionStore = yield* ProjectionStoreV2;
   const effectOutbox = yield* EffectOutbox.EffectOutboxV2;
   const confirmStop = yield* StopConfirmation.make;
+  const getStopRequestedRunIds = Effect.fn("Orchestrator.getStopRequestedRunIds")(
+    function* (input: { readonly threadId: ThreadId; readonly commandId: CommandId }) {
+      const receipt = yield* commandReceipts.getByCommandId(input.commandId);
+      if (
+        Option.isNone(receipt) ||
+        receipt.value.threadId !== input.threadId ||
+        receipt.value.commandType !== "thread.stop" ||
+        receipt.value.status !== "accepted"
+      )
+        return [];
+      const events = yield* eventSink.readByCommandId(input).pipe(Stream.runCollect);
+      return Array.from(
+        new Set(
+          events.flatMap(({ event }) =>
+            event.type === "turn-item.updated" &&
+            event.threadId === input.threadId &&
+            event.payload.type === "run_interrupt_request" &&
+            event.runId !== undefined
+              ? [event.runId]
+              : [],
+          ),
+        ),
+      );
+    },
+    (effect, input) =>
+      effect.pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: input.threadId, cause }),
+        ),
+      ),
+  );
   const nextTurnItemOrdinal = (
     projection: Pick<OrchestrationV2ThreadProjection, "thread"> &
       Partial<Pick<OrchestrationV2ThreadProjection, "turnItems">>,
@@ -16407,6 +16442,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       return effectOutbox.awaitSettled(`effect:restart-continuation:${run.id}`).pipe(Effect.ignore);
     }),
     confirmStop,
+    getStopRequestedRunIds,
     dispatch: dispatchWithReceipt,
     autoArmLimitRecovery: Effect.fn("OrchestratorV2.autoArmLimitRecovery")(function (input) {
       return threadDispatch.withLock(

@@ -260,6 +260,7 @@ export const CrewConversationAction = Schema.Union([
     destinationThreadId: ThreadId,
     explanationMessageId: MessageId,
     taskId: Schema.optional(Id),
+    consultationId: Schema.optional(Id),
   }),
   Schema.Struct({ type: Schema.Literal("handoff.complete"), id: Id }),
   Schema.Struct({ type: Schema.Literal("handoff.cancel"), id: Id }),

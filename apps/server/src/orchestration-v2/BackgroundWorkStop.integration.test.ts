@@ -1197,6 +1197,17 @@ const stopEarlierBackgroundWork = ({
         assert.equal((yield* outbox.reconcileAfterProcessLoss).requeued, 1);
       }
       yield* worker.drain();
+      if (stopWithQueue !== undefined) {
+        const targetedRuns = yield* orchestrator.getStopRequestedRunIds({
+          threadId,
+          commandId: CommandId.make("stop-background-work"),
+        });
+        if (stopWithQueue === "thread.stop") {
+          assert.include(targetedRuns, olderStart ? watcherRun.runId : latestRun.runId);
+        } else {
+          assert.isEmpty(targetedRuns);
+        }
+      }
 
       if (external !== undefined) {
         assert.sameMembers(

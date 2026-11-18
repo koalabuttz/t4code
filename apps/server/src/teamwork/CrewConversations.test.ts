@@ -51,6 +51,8 @@ it.effect(
     let busy = false;
     let failed = false;
     let queueHeldAfterStop: boolean | undefined;
+    const discussionAfterStop = RunId.make("discussion-after-stop");
+    const dispatchedStops = new Set<CommandId>();
     let questionStatus: "pending" | "resolved" = "pending";
     let coordinatorMode: "approval-required" | "full-access" = "approval-required";
     let coordinatorActiveRunId = source.runId;
@@ -385,6 +387,10 @@ it.effect(
       yield* teams.drain;
       assert.deepEqual(returnModes, ["approval-required", "approval-required"]);
       assert.equal(sent.at(-1)?.threadId, worker);
+      const returned = messages.get(MessageId.make(`${retried.deliveryId}:return`));
+      assert.equal(returned?.threadId, origin.conversation.threadId);
+      assert.equal(returned?.senderThreadId, api);
+      assert.include(returned?.text ?? "", retryAnswer.id);
       const pendingEvent = {
         sequence: 23,
         commandId: null,
@@ -575,11 +581,22 @@ it.effect(
         destinationThreadId: api,
         explanationMessageId: explanation.id,
         taskId: "owned",
+        consultationId: retried.id,
       } as const;
       assert.isTrue(
         Result.isFailure(
           yield* Effect.result(
             change("bad-explanation", { ...proposal, explanationMessageId: direct.id }),
+          ),
+        ),
+      );
+      assert.isTrue(
+        Result.isFailure(
+          yield* Effect.result(
+            change("unrelated-proposal", {
+              ...proposal,
+              consultationId: "other-consultation",
+            }),
           ),
         ),
       );
@@ -615,11 +632,16 @@ it.effect(
       );
       queueHeldAfterStop = true;
       yield* change("reconciled-transfer", { type: "handoff.complete", id: "owned-route" });
-      assert.equal(
-        (yield* teams.conversationQuery({ scope, collection: "handoffs", id: "owned-route" }))
-          .handoffs[0]?.ownership.state,
-        "reconciled",
-      );
+      const reconciled = (yield* teams.conversationQuery({
+        scope,
+        collection: "handoffs",
+        id: "owned-route",
+      })).handoffs[0];
+      assert.equal(reconciled?.ownership.state, "reconciled");
+      if (reconciled?.ownership.state === "reconciled") {
+        assert.equal(reconciled.ownership.stoppedRunId, source.runId);
+      }
+      assert.equal(reconciled?.consultationId, retried.id);
       yield* change("paused-question", {
         type: "consultation.request",
         request: { ...request, id: "paused" },
@@ -907,6 +929,7 @@ it.effect(
                     runs: [
                       {
                         id: source.runId,
+                        ordinal: 1,
                         userMessageId: MessageId.make("direct"),
                         status: "interrupted",
                       },
@@ -917,6 +940,7 @@ it.effect(
                               status: "queued",
                               queueHeld: queueHeldAfterStop,
                             },
+                            { id: discussionAfterStop, ordinal: 2, status: "completed" },
                           ]
                         : []),
                     ],
@@ -964,8 +988,19 @@ it.effect(
                       delivery: queued ? "queued" : "started",
                     } as never;
                   }),
-                dispatch: () => Effect.succeed({} as never),
+                dispatch: (command) =>
+                  Effect.sync(() => {
+                    if (command.type === "thread.stop" && command.threadId === worker)
+                      dispatchedStops.add(command.commandId);
+                    return {} as never;
+                  }),
                 confirmStop: () => Effect.void,
+                getStopRequestedRunIds: ({ threadId, commandId }) =>
+                  Effect.succeed(
+                    threadId === worker && dispatchedStops.has(commandId) && source.runId
+                      ? [source.runId]
+                      : [],
+                  ),
               }),
             ),
           ),
