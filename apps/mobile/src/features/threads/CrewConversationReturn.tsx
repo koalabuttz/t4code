@@ -7,8 +7,7 @@ import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppText } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
-import type { CrewPage } from "./TeamworkSheet";
-import { openCrewPage } from "./crewProjectNavigation";
+import { openCrewPage, type CrewPage } from "./crewProjectNavigation";
 
 export function CrewConversationReturn({
   environmentId,

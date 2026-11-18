@@ -1,5 +1,6 @@
 import { StackActions, type NavigationProp } from "@react-navigation/native";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import type { CrewView } from "@t3tools/client-runtime/state/crew";
 import type {
   CrewConversationRef,
   CrewMessageRef,
@@ -9,8 +10,15 @@ import { sameCrewProject } from "@t3tools/shared/crewConversation";
 
 import { requestThreadMessageJump } from "./threadMessageJump";
 import type { CrewRequestTarget } from "./crewMobile.logic";
-import type { CrewPage } from "./TeamworkSheet";
 
+export type CrewPage =
+  | CrewView
+  | "setup"
+  | "settings"
+  | "recovery"
+  | "task"
+  | "task-edit"
+  | "milestones";
 export type CrewProjectPage =
   | CrewPage
   | "threads"

@@ -52,7 +52,7 @@ import { CrewLimits, CrewMilestone, CrewTaskArtifact } from "./CrewVerification"
 import { environmentThreadShells, threadFamilies } from "../../state/threads";
 import { useRetryEnvironment } from "../connection/useRetryEnvironment";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { openCrewPage } from "./crewProjectNavigation";
+import { openCrewPage, type CrewPage } from "./crewProjectNavigation";
 import {
   mobileCrewArtifactWorkspace,
   mobileCrewDraftAfterSave,
@@ -61,14 +61,6 @@ import {
   mobileCrewSupervision,
 } from "./crewMobile.logic";
 
-export type CrewPage =
-  | CrewView
-  | "setup"
-  | "settings"
-  | "recovery"
-  | "task"
-  | "task-edit"
-  | "milestones";
 export interface TeamworkTarget {
   environmentId: EnvironmentId;
   projectId: ProjectId;
