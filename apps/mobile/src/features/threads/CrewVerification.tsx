@@ -21,6 +21,7 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { AppText, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
+import { FormField, FormSection } from "../../components/ui/FormSection";
 
 type Props = {
   initiative: TeamworkInitiative;
@@ -167,8 +168,7 @@ export function CrewLimits({ initiative, disabled, act }: Props) {
     initiative.policy ?? { maxConcurrent: 4, maxAttempts: 3, maxSubmissions: 4 },
   );
   return (
-    <View className="gap-2">
-      <AppText className="font-t3-semibold">Execution limits</AppText>
+    <FormSection title="Execution limits">
       {(
         [
           ["maxConcurrent", "Concurrent assignments"],
@@ -176,10 +176,11 @@ export function CrewLimits({ initiative, disabled, act }: Props) {
           ["maxSubmissions", "Submissions per task"],
         ] as const
       ).map(([field, label]) => (
-        <View key={field}>
-          <AppText>{label}</AppText>
-          <AppTextInput
+        <View key={field} className="gap-1">
+          <FormField
+            label={label}
             accessibilityLabel={label}
+            placeholder={label}
             keyboardType="number-pad"
             value={String(policy[field])}
             onChangeText={(value) => setPolicy({ ...policy, [field]: Number(value) })}
@@ -195,7 +196,7 @@ export function CrewLimits({ initiative, disabled, act }: Props) {
         }
         onPress={() => void act({ type: "initiative.policy", id: initiative.id, policy })}
       />
-    </View>
+    </FormSection>
   );
 }
 

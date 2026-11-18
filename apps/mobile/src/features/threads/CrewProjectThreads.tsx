@@ -38,6 +38,7 @@ import { useSearchScrollRestoration } from "../layout/workspace/useSearchScrollR
 import { mobileCrewWorkstreamGroups } from "./crewMobile.logic";
 import { openCrewSource } from "./crewProjectNavigation";
 import {
+  ThreadListV2CollapsibleSection,
   ThreadListV2FallbackRow,
   ThreadListV2Row,
   ThreadListV2SectionDivider,
@@ -63,6 +64,7 @@ export interface CrewProjectThreadsFilters {
   search: string;
   cursor: string | undefined;
   requestCursor: string | undefined;
+  collapsedGroups: ReadonlySet<CrewSection["title"]>;
 }
 
 export interface CrewProjectThreadsScroll {
@@ -71,7 +73,7 @@ export interface CrewProjectThreadsScroll {
 }
 
 type CrewThreadItem =
-  | { type: "section"; key: string; title: CrewSection["title"] }
+  | { type: "section"; key: string; title: CrewSection["title"]; count: number; expanded: boolean }
   | {
       type: "thread";
       key: string;
@@ -111,7 +113,7 @@ export function CrewProjectThreads({
   const contentBottomInset = useContentBottomInset();
   const { threads, snapshot, freshness, supervision } = useCrewProject(scope);
   const canRead = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
-  const { search, cursor, requestCursor } = filters;
+  const { search, cursor, requestCursor, collapsedGroups } = filters;
   const [linking, setLinking] = useState(false);
   const [linkIssue, setLinkIssue] = useState<string | null>(null);
   const [checkingLink, setCheckingLink] = useState(false);
@@ -165,6 +167,14 @@ export function CrewProjectThreads({
   const searching = search.trim().length > 0;
   const items: CrewThreadItem[] = groups.flatMap(({ title, rows }) => {
     if (rows.length === 0) return [];
+    const section: CrewThreadItem = {
+      type: "section",
+      key: title,
+      title,
+      count: rows.length,
+      expanded: searching || !collapsedGroups.has(title),
+    };
+    if (!section.expanded) return [section];
     const metadata = buildThreadListV2ListItems({
       items: rows.flatMap(({ shell: thread }) => {
         if (!thread) return [];
@@ -211,7 +221,7 @@ export function CrewProjectThreads({
               (pinRank.get(b.workstream.conversation.threadId) ?? pinned.length),
           );
     return [
-      { type: "section", key: title, title },
+      section,
       ...ordered.map((row, index): CrewThreadItem => {
         const key = row.workstream.conversation.threadId;
         const item = byThread.get(key);
@@ -522,7 +532,22 @@ export function CrewProjectThreads({
               }
               renderItem={({ item: entry }) => {
                 if (entry.type === "section")
-                  return <ThreadListV2SectionDivider label={entry.title} />;
+                  return (
+                    <ThreadListV2CollapsibleSection
+                      label={entry.title}
+                      count={entry.count}
+                      expanded={entry.expanded}
+                      searching={searching}
+                      onToggle={() => {
+                        setFilters((current) => {
+                          const collapsedGroups = new Set(current.collapsedGroups);
+                          if (collapsedGroups.has(entry.title)) collapsedGroups.delete(entry.title);
+                          else collapsedGroups.add(entry.title);
+                          return { ...current, collapsedGroups };
+                        });
+                      }}
+                    />
+                  );
                 const { workstream, detail } = entry.row;
                 const { conversation } = workstream;
                 const open = () => {

@@ -261,6 +261,37 @@ export const ThreadListV2SectionDivider = memo(function ThreadListV2SectionDivid
   return <ThreadListV2Section {...props} />;
 });
 
+export function ThreadListV2CollapsibleSection({
+  label,
+  count,
+  expanded,
+  searching,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  expanded: boolean;
+  searching: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <ThreadListV2Section
+      label={expanded ? label : `${label} (${count})`}
+      disclosure={{
+        expanded,
+        disabled: searching,
+        onToggle,
+        accessibilityLabel: `${label}, ${count} ${count === 1 ? "thread" : "threads"}`,
+        accessibilityHint: searching
+          ? "Shows matching threads while searching."
+          : expanded
+            ? "Collapses this group."
+            : "Expands this group.",
+      }}
+    />
+  );
+}
+
 interface ThreadListV2AdditionalAction {
   readonly item: MenuAction;
   readonly onPress: () => void;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, View, type ScrollViewInstance } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAtom, useAtomValue } from "@effect/atom-react";
 import {
   crewCandidateThread,
@@ -36,7 +37,14 @@ import { crewDeliveryNotice } from "@t3tools/shared/crewArtifacts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { AppText, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
+import { FormField, FormSection } from "../../components/ui/FormSection";
+import { ListActionRow } from "../../components/ui/ListActionRow";
+import { ListRow } from "../../components/ui/ListRow";
+import { ListRowLayout } from "../../components/ui/ListRowLayout";
+import { ListSection } from "../../components/ui/ListSection";
 import { Menu } from "../../components/ui/Menu";
+import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { Sheet } from "../../components/ui/Sheet";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentShellReadiness } from "../../state/shell";
@@ -67,6 +75,18 @@ export interface TeamworkTarget {
   threadId: ThreadId | null;
 }
 
+export function isCrewSettingsPage(page: string | undefined): boolean {
+  return (
+    page === "settings" ||
+    page === "knowledge" ||
+    page === "board" ||
+    page === "context" ||
+    page === "history" ||
+    page === "recovery" ||
+    page === "roles"
+  );
+}
+
 export function TeamworkSheet({
   target,
   onClose,
@@ -79,6 +99,8 @@ export function TeamworkSheet({
   page?: CrewPage | undefined;
 }) {
   const { environmentId, projectId, threadId } = target;
+  const insets = useSafeAreaInsets();
+  const settingsPage = isCrewSettingsPage(page);
   const projectKey = scopedProjectKey(target);
   const query = useEnvironmentQuery(
     serverEnvironment.teamworkLive({ environmentId, input: { projectId } }),
@@ -279,13 +301,15 @@ export function TeamworkSheet({
   };
   const resumeBlockers =
     summary?.resume.prerequisites.filter((item) => item.kind !== "approve-plan") ?? [];
+  const RecoveryLink = page === "recovery" ? ListRow : Button;
+  const RecoveryAction = page === "recovery" ? ListActionRow : Button;
   const actionFor = (item: CrewSupervisionItem) => {
     const action = item.action;
     if (!action) return null;
     switch (action.kind) {
       case "open-thread":
         return (
-          <Button
+          <RecoveryLink
             label={
               action.focus === "approval"
                 ? "Open approval conversation"
@@ -299,7 +323,7 @@ export function TeamworkSheet({
         );
       case "open-task":
         return (
-          <Button
+          <RecoveryLink
             label={item.kind === "review" ? "Inspect submitted result" : "Inspect work"}
             onPress={() => {
               setSelectedTask(action.taskId);
@@ -310,19 +334,21 @@ export function TeamworkSheet({
         );
       case "retry-delivery":
         return (
-          <Button
+          <RecoveryAction
             label="Retry delivery"
             disabled={disabled}
             onPress={() => void act({ type: "delivery.retry", id: action.deliveryId })}
           />
         );
       case "refresh-connection":
-        return <Button label="Refresh facts" disabled={!connected} onPress={query.refresh} />;
+        return (
+          <RecoveryAction label="Refresh facts" disabled={!connected} onPress={query.refresh} />
+        );
       case "select-coordinator":
-        return <Button label="Choose coordinator" onPress={() => go("recovery")} />;
+        return <RecoveryLink label="Choose coordinator" onPress={() => go("recovery")} />;
       case "resume":
         return (
-          <Button
+          <RecoveryLink
             label="Review resume prerequisites"
             onPress={() => {
               setSelected(action.initiativeId);
@@ -332,7 +358,7 @@ export function TeamworkSheet({
         );
       case "approve-plan":
         return (
-          <Button
+          <RecoveryLink
             label="Review plan"
             onPress={() => {
               setSelected(action.initiativeId);
@@ -342,56 +368,87 @@ export function TeamworkSheet({
         );
     }
   };
-  const renderItem = (item: CrewSupervisionItem) => (
-    <View key={item.id} className="gap-2 rounded-2xl bg-secondary p-4">
-      <AppText className="font-t3-semibold">{item.label}</AppText>
-      <AppText>
-        {item.initiativeTitle ?? "Project crew"}
-        {item.taskId
-          ? ` · ${state?.tasks.find((task) => task.id === item.taskId)?.title ?? item.taskId}`
-          : ""}
-      </AppText>
-      <AppText>
-        {item.responsibility === "human"
-          ? "Needs you"
-          : item.responsibility === "crew"
-            ? item.underway
-              ? "Crew is handling it"
-              : "Crew owns the next step; execution is not confirmed"
-            : item.responsibility === "waiting"
-              ? "Waiting"
-              : "Responsibility unknown"}
-        {item.actor.kind === "agent" ? ` · ${threadName(item.actor.threadId)}` : ""}
-      </AppText>
-      {item.freshness !== "current" && (
-        <AppText>
-          Execution {item.freshness === "last-known" ? "last known" : "unavailable"}
-          {item.lastKnownState ? ` · ${item.lastKnownState}` : ""}
-        </AppText>
-      )}
-      {item.detail && <AppText>{item.detail}</AppText>}
-      {item.requestId && (
-        <AppText selectable>
-          Request: {item.requestId}. Open the conversation to respond to this request.
-        </AppText>
-      )}
-      {item.dependencyIds?.map((id) => (
-        <Button
-          key={id}
-          label={`Dependency: ${state?.tasks.find((task) => task.id === id)?.title ?? id}`}
-          onPress={() => {
-            setSelectedTask(id);
-            const dependency = state?.tasks.find((task) => task.id === id);
-            if (dependency) setSelected(dependency.initiativeId);
-            go("task");
-          }}
+  const renderItem = (item: CrewSupervisionItem) => {
+    const subject =
+      (item.initiativeTitle ?? "Project crew") +
+      (item.taskId
+        ? ` · ${state?.tasks.find((task) => task.id === item.taskId)?.title ?? item.taskId}`
+        : "");
+    const responsibility =
+      (item.responsibility === "human"
+        ? "Needs you"
+        : item.responsibility === "crew"
+          ? item.underway
+            ? "Crew is handling it"
+            : "Crew owns the next step; execution is not confirmed"
+          : item.responsibility === "waiting"
+            ? "Waiting"
+            : "Responsibility unknown") +
+      (item.actor.kind === "agent" ? ` · ${threadName(item.actor.threadId)}` : "");
+    const details = (
+      <>
+        {item.freshness !== "current" && (
+          <AppText>
+            Execution {item.freshness === "last-known" ? "last known" : "unavailable"}
+            {item.lastKnownState ? ` · ${item.lastKnownState}` : ""}
+          </AppText>
+        )}
+        {item.detail && <AppText>{item.detail}</AppText>}
+        {item.requestId && (
+          <AppText selectable>
+            Request: {item.requestId}. Open the conversation to respond to this request.
+          </AppText>
+        )}
+      </>
+    );
+    const actions = (
+      <>
+        {item.dependencyIds?.map((id) => (
+          <RecoveryLink
+            key={id}
+            label={`Dependency: ${state?.tasks.find((task) => task.id === id)?.title ?? id}`}
+            onPress={() => {
+              setSelectedTask(id);
+              const dependency = state?.tasks.find((task) => task.id === id);
+              if (dependency) setSelected(dependency.initiativeId);
+              go("task");
+            }}
+          />
+        ))}
+        {actionFor(item)}
+      </>
+    );
+    return page === "recovery" ? (
+      <ListSection key={item.id}>
+        <ListRowLayout
+          label={item.label}
+          description={subject}
+          meta={
+            <View className="gap-1">
+              <AppText textRole="footnote" className="text-foreground-muted">
+                {responsibility}
+              </AppText>
+              {details}
+            </View>
+          }
         />
-      ))}
-      {actionFor(item)}
-    </View>
-  );
+        {actions}
+      </ListSection>
+    ) : (
+      <View key={item.id} className="gap-2 rounded-2xl bg-secondary p-4">
+        <AppText className="font-t3-semibold">{item.label}</AppText>
+        <AppText>{subject}</AppText>
+        <AppText>{responsibility}</AppText>
+        {details}
+        {actions}
+      </View>
+    );
+  };
   const recipients = initiative && state ? mobileCrewRecipients(state, initiative.id, threads) : [];
   const validRecipients = draft.recipients.filter((id) => recipients.includes(id));
+  const boardPage = page === "board";
+  const BoardLink = boardPage ? ListRow : Button;
+  const BoardAction = boardPage ? ListActionRow : Button;
   const renderBoardMessage = (message: TeamworkSnapshot["board"][number]) => {
     const messageInitiative = state?.initiatives.find((item) => item.id === message.initiativeId);
     const deliveries = mobileCrewMessageDeliveries(
@@ -399,93 +456,116 @@ export function TeamworkSheet({
       message,
       query.data?.deliveries ?? [],
     );
-    return (
+    const title =
+      message.initiativeId === null
+        ? "Project crew"
+        : (messageInitiative?.title ?? "Initiative unavailable");
+    const intent = message.recipients.length ? "Asked crew" : "Quiet note";
+    const author = `${message.authorThreadId ? threadName(message.authorThreadId) : "You"} · ${message.createdAt}`;
+    const deliveryNotice = message.recipients.length
+      ? "Recorded delivery for this message. Delivery does not confirm an answer."
+      : "No agent notification requested.";
+    const records = deliveries.map(({ threadId: recipient, delivery }) => {
+      const status =
+        delivery === null
+          ? "Delivery details are unavailable in the current history window."
+          : delivery.status === "pending"
+            ? "Delivery pending"
+            : delivery.status === "delivered"
+              ? "Delivered; answer not confirmed"
+              : delivery.status === "failed"
+                ? "Delivery failed"
+                : "Delivery cancelled";
+      return (
+        <View key={recipient} className={boardPage ? "border-t border-border-subtle" : "gap-2"}>
+          {boardPage ? (
+            <ListRowLayout label={threadName(recipient)} description={status} />
+          ) : (
+            <AppText>
+              {threadName(recipient)}: {status}
+            </AppText>
+          )}
+          {delivery?.status === "failed" && (
+            <>
+              <BoardAction
+                label="Retry this message delivery"
+                disabled={disabled || messageInitiative?.status !== "active"}
+                onPress={() => void act({ type: "delivery.retry", id: delivery.id })}
+              />
+              {messageInitiative?.status !== "active" && (
+                <AppText className={boardPage ? "px-4 py-2 text-foreground-muted" : undefined}>
+                  Delivery retry requires an active initiative. Resume explicitly before notifying
+                  its crew.
+                </AppText>
+              )}
+              {messageInitiative && messageInitiative.status !== "active" && (
+                <BoardLink
+                  label="Review this initiative's resume prerequisites"
+                  onPress={() => {
+                    setSelected(messageInitiative.id);
+                    go("recovery");
+                  }}
+                />
+              )}
+            </>
+          )}
+        </View>
+      );
+    });
+    return boardPage ? (
+      <ListSection key={message.id} title={title} footer={deliveryNotice}>
+        <ListRowLayout
+          label={intent}
+          description={author}
+          meta={<AppText selectable>{message.text}</AppText>}
+        />
+        {records}
+      </ListSection>
+    ) : (
       <View key={message.id} className="gap-2 rounded-2xl bg-secondary p-4">
-        <AppText className="font-t3-semibold">
-          {message.initiativeId === null
-            ? "Project crew"
-            : (messageInitiative?.title ?? "Initiative unavailable")}
-        </AppText>
+        <AppText className="font-t3-semibold">{title}</AppText>
         <AppText>
-          {message.recipients.length ? "Asked crew" : "Quiet note"} ·{" "}
-          {message.authorThreadId ? threadName(message.authorThreadId) : "You"} ·{" "}
-          {message.createdAt}
+          {intent} · {author}
         </AppText>
         <AppText selectable>{message.text}</AppText>
-        {message.recipients.length === 0 ? (
-          <AppText>No agent notification requested.</AppText>
-        ) : (
-          <>
-            <AppText>
-              Recorded delivery for this message. Delivery does not confirm an answer.
-            </AppText>
-            {deliveries.map(({ threadId: recipient, delivery }) => (
-              <View key={recipient} className="gap-2">
-                <AppText>
-                  {threadName(recipient)}:{" "}
-                  {delivery === null
-                    ? "Delivery details are unavailable in the current history window."
-                    : delivery.status === "pending"
-                      ? "Delivery pending"
-                      : delivery.status === "delivered"
-                        ? "Delivered; answer not confirmed"
-                        : delivery.status === "failed"
-                          ? "Delivery failed"
-                          : "Delivery cancelled"}
-                </AppText>
-                {delivery?.status === "failed" && (
-                  <>
-                    <Button
-                      label="Retry this message delivery"
-                      disabled={disabled || messageInitiative?.status !== "active"}
-                      onPress={() => void act({ type: "delivery.retry", id: delivery.id })}
-                    />
-                    {messageInitiative?.status !== "active" && (
-                      <AppText>
-                        Delivery retry requires an active initiative. Resume explicitly before
-                        notifying its crew.
-                      </AppText>
-                    )}
-                    {messageInitiative && messageInitiative.status !== "active" && (
-                      <Button
-                        label="Review this initiative's resume prerequisites"
-                        onPress={() => {
-                          setSelected(messageInitiative.id);
-                          go("recovery");
-                        }}
-                      />
-                    )}
-                  </>
-                )}
-              </View>
-            ))}
-          </>
-        )}
+        <AppText>{deliveryNotice}</AppText>
+        {records}
       </View>
     );
   };
   const lastMessage = state?.board.find((message) => message.id === lastMessageId);
-  const composer = initiative && (
-    <View className="gap-3">
-      <AppText className="text-lg font-t3-semibold">Quick response</AppText>
-      <View className="flex-row flex-wrap gap-2">
-        <Button
-          label="Ask crew"
-          tone={draft.intent === "ask" ? "primary" : "secondary"}
-          onPress={() => setDraft({ ...draft, intent: "ask" })}
+  const MessageField = boardPage ? FormField : AppTextInput;
+  const composerFields = initiative && (
+    <>
+      {boardPage ? (
+        <SegmentedControl
+          options={[
+            { value: "ask", label: "Ask crew" },
+            { value: "note", label: "Save a note" },
+          ]}
+          selected={draft.intent}
+          onSelect={(intent) => setDraft({ ...draft, intent })}
         />
-        <Button
-          label="Save a note"
-          tone={draft.intent === "note" ? "primary" : "secondary"}
-          onPress={() => setDraft({ ...draft, intent: "note" })}
-        />
-      </View>
-      <AppText>
+      ) : (
+        <View className="flex-row flex-wrap gap-2">
+          <Button
+            label="Ask crew"
+            tone={draft.intent === "ask" ? "primary" : "secondary"}
+            onPress={() => setDraft({ ...draft, intent: "ask" })}
+          />
+          <Button
+            label="Save a note"
+            tone={draft.intent === "note" ? "primary" : "secondary"}
+            onPress={() => setDraft({ ...draft, intent: "note" })}
+          />
+        </View>
+      )}
+      <AppText className={boardPage ? "text-foreground-muted" : undefined}>
         {draft.intent === "ask"
           ? "Choose a recipient to request an agent response. Delivery confirms receipt, not an answer."
           : "A quiet project update. Saving a note does not start an agent turn."}
       </AppText>
-      <AppTextInput
+      <MessageField
         accessibilityLabel="Crew message"
         placeholder={
           draft.intent === "ask"
@@ -604,11 +684,28 @@ export function TeamworkSheet({
           <Button label="View messages and their delivery" onPress={() => go("board")} />
         </>
       )}
-    </View>
+    </>
   );
+  const composer =
+    composerFields &&
+    (boardPage ? (
+      <FormSection title="Quick response">{composerFields}</FormSection>
+    ) : (
+      <View className="gap-3">
+        <AppText className="text-lg font-t3-semibold">Quick response</AppText>
+        {composerFields}
+      </View>
+    ));
+  const boardMessages = boardPage
+    ? (state?.board ?? [])
+        .filter(
+          (message) => message.initiativeId === initiative?.id || message.initiativeId === null,
+        )
+        .reverse()
+    : [];
   const coordinatorPicker = (
     <>
-      <AppText>
+      <AppText className={page === "recovery" ? "px-4 py-2 text-foreground-muted" : undefined}>
         {state?.coordinatorThreadId
           ? "Choose a replacement for explicit handover. Selecting a conversation changes no assignments and starts no work."
           : "Choose a project conversation to coordinate this initiative. Selecting it starts no work."}
@@ -630,25 +727,46 @@ export function TeamworkSheet({
           accessible
           accessibilityRole="button"
           accessibilityLabel="Choose coordinator conversation"
-          className="rounded-2xl bg-secondary p-4"
+          className={page === "recovery" ? undefined : "rounded-2xl bg-secondary p-4"}
         >
-          <AppText>
-            {handoverCandidate?.title ?? coordinator?.title ?? "Choose coordinator conversation"}
-          </AppText>
+          {page === "recovery" ? (
+            <ListRowLayout
+              icon="person.2"
+              label="Coordinator conversation"
+              description={handoverCandidate?.title ?? coordinator?.title ?? "Choose a coordinator"}
+            />
+          ) : (
+            <AppText>
+              {handoverCandidate?.title ?? coordinator?.title ?? "Choose coordinator conversation"}
+            </AppText>
+          )}
         </View>
       </Menu>
-      {selection.reason && <AppText>{selection.reason}</AppText>}
-      {!eligibleThreads.length && (
-        <AppText>Start a project conversation before choosing a coordinator.</AppText>
-      )}
+      {selection.reason &&
+        (page === "recovery" ? (
+          <ListRowLayout label={selection.reason} />
+        ) : (
+          <AppText>{selection.reason}</AppText>
+        ))}
+      {!eligibleThreads.length &&
+        (page === "recovery" ? (
+          <ListRowLayout label="Start a project conversation before choosing a coordinator." />
+        ) : (
+          <AppText>Start a project conversation before choosing a coordinator.</AppText>
+        ))}
     </>
   );
+  const PageScrollView = settingsPage ? ScreenScrollView : ScrollView;
   const content = (
-    <ScrollView
+    <PageScrollView
       ref={scroll}
       key={page}
       contentInsetAdjustmentBehavior={embedded ? "never" : "automatic"}
-      contentContainerClassName="gap-5 px-5 pb-10 pt-4"
+      className={settingsPage ? "flex-1 ios:bg-sheet" : undefined}
+      contentContainerClassName={settingsPage ? "gap-6 px-5 pt-4" : "gap-5 px-5 pb-10 pt-4"}
+      contentContainerStyle={
+        settingsPage ? { paddingBottom: Math.max(insets.bottom, 18) + 18 } : undefined
+      }
       keyboardShouldPersistTaps="handled"
       scrollEventThrottle={200}
       onScroll={(event) => {
@@ -662,36 +780,78 @@ export function TeamworkSheet({
         }
       }}
     >
-      {(error || query.error) && (
-        <AppText accessibilityRole="alert" className="text-danger">
-          {error ?? query.error}
-        </AppText>
-      )}
-      {freshness !== "current" && (
+      {settingsPage ? (
         <>
-          <AppText accessibilityRole="alert">
-            {connected
-              ? "Refreshing crew facts. Execution is last known until fresh state arrives."
-              : "Disconnected. Execution is last known, not confirmed stopped. Reconnect this environment to act."}
-          </AppText>
-          <Button
-            label={connected ? "Refresh crew facts" : "Reconnect environment"}
-            onPress={() => {
-              if (connected) query.refresh();
-              else void retryEnvironment(environmentId);
-            }}
-          />
+          {(error || query.error) && (
+            <AppText accessibilityRole="alert" className="px-4 text-danger-foreground">
+              {error ?? query.error}
+            </AppText>
+          )}
+          {(freshness !== "current" || !canEdit) && (
+            <ListSection title="Access">
+              {freshness !== "current" && (
+                <ListActionRow
+                  icon="arrow.clockwise"
+                  label={connected ? "Refresh crew facts" : "Reconnect environment"}
+                  description={
+                    connected
+                      ? "Refreshing crew facts. Execution is last known until fresh state arrives."
+                      : "Disconnected. Execution is last known, not confirmed stopped. Reconnect this environment to act."
+                  }
+                  onPress={() => {
+                    if (connected) query.refresh();
+                    else void retryEnvironment(environmentId);
+                  }}
+                />
+              )}
+              {!canEdit && <ListRowLayout label="Read-only access" />}
+            </ListSection>
+          )}
+          <ListSection>
+            <ListRow
+              icon="text.bubble"
+              label="Project chat"
+              onPress={() => {
+                setView("overview");
+                openCrewPage(navigation, target);
+              }}
+            />
+          </ListSection>
         </>
-      )}
-      {!canEdit && <AppText>Read-only access</AppText>}
-      {page !== "overview" && (
-        <Button
-          label="Project chat"
-          onPress={() => {
-            setView("overview");
-            openCrewPage(navigation, target);
-          }}
-        />
+      ) : (
+        <>
+          {(error || query.error) && (
+            <AppText accessibilityRole="alert" className="text-danger">
+              {error ?? query.error}
+            </AppText>
+          )}
+          {freshness !== "current" && (
+            <>
+              <AppText accessibilityRole="alert">
+                {connected
+                  ? "Refreshing crew facts. Execution is last known until fresh state arrives."
+                  : "Disconnected. Execution is last known, not confirmed stopped. Reconnect this environment to act."}
+              </AppText>
+              <Button
+                label={connected ? "Refresh crew facts" : "Reconnect environment"}
+                onPress={() => {
+                  if (connected) query.refresh();
+                  else void retryEnvironment(environmentId);
+                }}
+              />
+            </>
+          )}
+          {!canEdit && <AppText>Read-only access</AppText>}
+          {page !== "overview" && (
+            <Button
+              label="Project chat"
+              onPress={() => {
+                setView("overview");
+                openCrewPage(navigation, target);
+              }}
+            />
+          )}
+        </>
       )}
       {!state ? (
         <AppText>Loading crew…</AppText>
@@ -897,7 +1057,13 @@ export function TeamworkSheet({
           )}
           {page === "settings" && initiative && (
             <>
-              <AppText className="text-lg font-t3-semibold">Brief and execution limits</AppText>
+              <ListSection title="Initiative">
+                <ListRowLayout
+                  icon="doc.text"
+                  label={initiative.title}
+                  description={initiative.status}
+                />
+              </ListSection>
               <TeamworkBriefEditor
                 key={`${initiative.id}:${initiative.updatedAt}`}
                 initiative={initiative}
@@ -905,31 +1071,37 @@ export function TeamworkSheet({
                 disabled={disabled}
                 act={act}
               />
-              {initiative.status === "draft" && (
-                <Button
-                  label="Approve brief and start"
-                  disabled={disabled || !state.coordinatorThreadId}
-                  onPress={() => void act({ type: "initiative.approve", id: initiative.id })}
-                />
-              )}
-              {initiative.status === "draft" &&
-                resumeBlockers.map((item) => (
-                  <AppText key={JSON.stringify(item)}>{prerequisiteText(item)}</AppText>
-                ))}
-              {initiative.mode === "swarm" && (
-                <Button
-                  label="Require plan approval"
-                  disabled={disabled}
-                  onPress={() =>
-                    void act({
-                      type: "initiative.edit",
-                      id: initiative.id,
-                      title: initiative.title,
-                      brief: initiative.brief,
-                      mode: "teamwork",
-                    })
-                  }
-                />
+              {(initiative.status === "draft" || initiative.mode === "swarm") && (
+                <ListSection title="Plan approval">
+                  {initiative.status === "draft" && (
+                    <ListActionRow
+                      icon="checkmark.circle"
+                      label="Approve brief and start"
+                      disabled={disabled || !state.coordinatorThreadId}
+                      onPress={() => void act({ type: "initiative.approve", id: initiative.id })}
+                    />
+                  )}
+                  {initiative.status === "draft" &&
+                    resumeBlockers.map((item) => (
+                      <ListRowLayout key={JSON.stringify(item)} label={prerequisiteText(item)} />
+                    ))}
+                  {initiative.mode === "swarm" && (
+                    <ListActionRow
+                      icon="doc.text"
+                      label="Require plan approval"
+                      disabled={disabled}
+                      onPress={() =>
+                        void act({
+                          type: "initiative.edit",
+                          id: initiative.id,
+                          title: initiative.title,
+                          brief: initiative.brief,
+                          mode: "teamwork",
+                        })
+                      }
+                    />
+                  )}
+                </ListSection>
               )}
               {supports("submissions") && (
                 <CrewLimits
@@ -939,37 +1111,60 @@ export function TeamworkSheet({
                   act={act}
                 />
               )}
-              <AppText>
-                These limits control execution attempts and concurrency, not spending.
+              <AppText textRole="footnote" className="px-4 text-foreground-muted">
+                These limits control execution attempts and concurrency, not spending.{"\n"}
+                {crewDeliveryNotice}
               </AppText>
-              <AppText>{crewDeliveryNotice}</AppText>
-              {initiative.status === "active" && (
-                <Button
-                  label="Complete initiative"
-                  disabled={disabled}
-                  onPress={() =>
-                    void act({ type: "initiative.status", id: initiative.id, status: "completed" })
-                  }
-                />
-              )}
-              {!["completed", "cancelled"].includes(initiative.status) && (
-                <Button
-                  label="Cancel initiative"
-                  tone="danger"
-                  disabled={disabled}
-                  onPress={() =>
-                    void act({ type: "initiative.status", id: initiative.id, status: "cancelled" })
-                  }
-                />
-              )}
-              {supports("archive") && ["completed", "cancelled"].includes(initiative.status) && (
-                <Button
-                  label="Archive initiative"
-                  disabled={disabled}
-                  onPress={() => void act({ type: "initiative.archive", id: initiative.id })}
-                />
+              {(initiative.status === "active" ||
+                !["completed", "cancelled"].includes(initiative.status) ||
+                supports("archive")) && (
+                <ListSection title="Initiative status">
+                  {initiative.status === "active" && (
+                    <ListActionRow
+                      icon="checkmark.circle"
+                      label="Complete initiative"
+                      disabled={disabled}
+                      onPress={() =>
+                        void act({
+                          type: "initiative.status",
+                          id: initiative.id,
+                          status: "completed",
+                        })
+                      }
+                    />
+                  )}
+                  {!["completed", "cancelled"].includes(initiative.status) && (
+                    <ListActionRow
+                      icon="xmark"
+                      label="Cancel initiative"
+                      tone="danger"
+                      disabled={disabled}
+                      onPress={() =>
+                        void act({
+                          type: "initiative.status",
+                          id: initiative.id,
+                          status: "cancelled",
+                        })
+                      }
+                    />
+                  )}
+                  {supports("archive") &&
+                    ["completed", "cancelled"].includes(initiative.status) && (
+                      <ListActionRow
+                        icon="archivebox"
+                        label="Archive initiative"
+                        disabled={disabled}
+                        onPress={() => void act({ type: "initiative.archive", id: initiative.id })}
+                      />
+                    )}
+                </ListSection>
               )}
             </>
+          )}
+          {page === "settings" && !initiative && (
+            <ListSection title="Initiative">
+              <ListRowLayout label="No initiative selected" />
+            </ListSection>
           )}
           {page === "tasks" && initiative && (
             <>
@@ -1207,37 +1402,43 @@ export function TeamworkSheet({
           )}
           {page === "board" && (
             <>
-              <AppText className="text-lg font-t3-semibold">Messages and delivery</AppText>
               {composer}
-              {state.board
-                .filter(
-                  (message) =>
-                    message.initiativeId === initiative?.id || message.initiativeId === null,
-                )
-                .reverse()
-                .map(renderBoardMessage)}
+              {boardMessages.length === 0 && (
+                <ListSection title="Messages and delivery">
+                  <ListRowLayout label="No board messages yet" />
+                </ListSection>
+              )}
+              {boardMessages.map(renderBoardMessage)}
             </>
           )}
           {page === "knowledge" && (
             <>
-              <AppText className="text-lg font-t3-semibold">Project knowledge</AppText>
-              <AppText>
+              <AppText textRole="footnote" className="px-4 text-foreground-muted">
                 Corrections affect future context. They do not rewrite context already received by
                 workers.
               </AppText>
               {state.knowledge.map((entry) => (
-                <View key={entry.id} className="gap-2 rounded-2xl bg-secondary p-4">
-                  <AppText className="font-t3-semibold">{entry.title}</AppText>
-                  <AppText selectable>{entry.text}</AppText>
-                  {entry.excluded && <AppText>Excluded from future context</AppText>}
+                <ListSection key={entry.id}>
+                  <ListRowLayout
+                    icon="doc.text"
+                    label={entry.title}
+                    {...(entry.excluded ? { description: "Excluded from future context" } : {})}
+                    meta={
+                      <AppText selectable textRole="footnote" className="text-foreground-muted">
+                        {entry.text}
+                      </AppText>
+                    }
+                  />
                   {entry.sourceThreadId && (
-                    <Button
+                    <ListRow
+                      icon="text.bubble"
                       label="Open knowledge source"
                       disabled={!canReadThreads}
                       onPress={() => openThread(entry.sourceThreadId!)}
                     />
                   )}
-                  <Button
+                  <ListActionRow
+                    icon="pencil"
                     label="Correct knowledge"
                     disabled={disabled}
                     onPress={() => {
@@ -1247,7 +1448,8 @@ export function TeamworkSheet({
                       setKnowledgeText(entry.text);
                     }}
                   />
-                  <Button
+                  <ListActionRow
+                    icon="doc.text"
                     label={
                       entry.excluded ? "Include in future context" : "Exclude from future context"
                     }
@@ -1263,35 +1465,44 @@ export function TeamworkSheet({
                       })
                     }
                   />
-                  <Button
+                  <ListActionRow
+                    icon="trash"
+                    tone="danger"
                     label="Forget knowledge"
                     disabled={disabled}
                     onPress={() => void act({ type: "knowledge.forget", id: entry.id })}
                   />
-                </View>
+                </ListSection>
               ))}
               {!editingKnowledge && (
-                <Button
-                  label="Save a quiet project note"
-                  disabled={disabled}
-                  onPress={() => {
-                    setKnowledgeId(null);
-                    setKnowledgeTitle("");
-                    setKnowledgeText("");
-                    setEditingKnowledge(true);
-                  }}
-                />
+                <ListSection title="Project knowledge">
+                  <ListActionRow
+                    icon="plus"
+                    label="Save a quiet project note"
+                    disabled={disabled}
+                    onPress={() => {
+                      setKnowledgeId(null);
+                      setKnowledgeTitle("");
+                      setKnowledgeText("");
+                      setEditingKnowledge(true);
+                    }}
+                  />
+                </ListSection>
               )}
               {editingKnowledge && (
-                <>
-                  <AppTextInput
+                <FormSection
+                  title={knowledgeId ? "Correct knowledge" : "Save a quiet project note"}
+                >
+                  <FormField
+                    label="Title"
                     accessibilityLabel="Knowledge title"
                     placeholder="Knowledge title"
                     value={knowledgeTitle}
                     onChangeText={setKnowledgeTitle}
                     maxLength={160}
                   />
-                  <AppTextInput
+                  <FormField
+                    label="Note"
                     accessibilityLabel="Knowledge text"
                     placeholder="Fact or decision"
                     value={knowledgeText}
@@ -1328,9 +1539,11 @@ export function TeamworkSheet({
                       setEditingKnowledge(false);
                     }}
                   />
-                </>
+                </FormSection>
               )}
-              <Button label="Received context" onPress={() => go("context")} />
+              <ListSection>
+                <ListRow icon="doc.text" label="Received context" onPress={() => go("context")} />
+              </ListSection>
             </>
           )}
           {page === "context" &&
@@ -1344,7 +1557,9 @@ export function TeamworkSheet({
                 onOpenThread={openThread}
               />
             ) : (
-              <AppText>This environment does not expose delivered context.</AppText>
+              <ListSection title="Delivered context">
+                <ListRowLayout label="This environment does not expose delivered context." />
+              </ListSection>
             ))}
           {page === "roles" && (
             <TeamworkRoles
@@ -1368,25 +1583,25 @@ export function TeamworkSheet({
           )}
           {page === "recovery" && (
             <>
-              <AppText className="text-lg font-t3-semibold">Recovery and handover</AppText>
               {supervision?.attention
                 .filter(
                   (item) => item.initiativeId === initiative?.id || item.initiativeId === null,
                 )
                 .map(renderItem)}
               {initiative && (
-                <>
-                  <AppText>
-                    {initiative.title} · {initiative.status}
-                  </AppText>
-                  <AppText>
-                    Pause progress:{" "}
-                    {summary?.pause.state === "stopping"
-                      ? "Stopping workers…"
-                      : (summary?.pause.state ?? "unknown")}
-                  </AppText>
+                <ListSection title="Initiative recovery">
+                  <ListRowLayout label={initiative.title} description={initiative.status} />
+                  <ListRowLayout
+                    label="Pause progress"
+                    description={
+                      summary?.pause.state === "stopping"
+                        ? "Stopping workers…"
+                        : (summary?.pause.state ?? "unknown")
+                    }
+                  />
                   {initiative.status === "active" && (
-                    <Button
+                    <ListActionRow
+                      icon="stop.fill"
                       label="Pause initiative workers"
                       disabled={disabled}
                       onPress={() =>
@@ -1396,15 +1611,21 @@ export function TeamworkSheet({
                   )}
                   {["paused", "completed", "cancelled"].includes(initiative.status) && (
                     <>
-                      <AppText>Before resuming:</AppText>
-                      {summary?.resume.prerequisites.map((item) => (
-                        <AppText key={JSON.stringify(item)}>{prerequisiteText(item)}</AppText>
-                      ))}
-                      <AppText>
-                        The server verifies current execution and outstanding stops when you
-                        confirm. Unmet prerequisites leave the initiative unchanged.
-                      </AppText>
-                      <Button
+                      <ListRowLayout
+                        label="Before resuming"
+                        description="The server verifies current execution and outstanding stops when you confirm. Unmet prerequisites leave the initiative unchanged."
+                        meta={summary?.resume.prerequisites.map((item) => (
+                          <AppText
+                            key={JSON.stringify(item)}
+                            textRole="footnote"
+                            className="text-foreground-muted"
+                          >
+                            {prerequisiteText(item)}
+                          </AppText>
+                        ))}
+                      />
+                      <ListActionRow
+                        icon="arrow.right.circle"
                         label={
                           initiative.status === "paused"
                             ? "Resume initiative explicitly"
@@ -1420,26 +1641,26 @@ export function TeamworkSheet({
                         }
                       />
                       {!initiative.approved && (
-                        <Button label="Review plan approval" onPress={() => go("settings")} />
+                        <ListRow label="Review plan approval" onPress={() => go("settings")} />
                       )}
                     </>
                   )}
-                </>
+                </ListSection>
               )}
               {task && (
-                <>
-                  <AppText className="font-t3-semibold">Assignment recovery · {task.title}</AppText>
-                  <AppText>
-                    Reset requests a worker stop and clears this assignment. Replacement waits for
-                    confirmed stopping and accepted dependencies. A new attempt needs a new
-                    submission and independent review; the server validates these transitions.
-                  </AppText>
-                  <Button
+                <ListSection title="Assignment recovery">
+                  <ListRowLayout
+                    label={task.title}
+                    description="Reset requests a worker stop and clears this assignment. Replacement waits for confirmed stopping and accepted dependencies. A new attempt needs a new submission and independent review; the server validates these transitions."
+                  />
+                  <ListActionRow
+                    icon="arrow.uturn.backward"
                     label="Stop and reset assignment to ready"
                     disabled={disabled}
                     onPress={() => void act({ type: "task.reset", id: task.id, status: "ready" })}
                   />
-                  <Button
+                  <ListActionRow
+                    icon="xmark"
                     label="Cancel assignment"
                     tone="danger"
                     disabled={disabled}
@@ -1447,54 +1668,65 @@ export function TeamworkSheet({
                       void act({ type: "task.reset", id: task.id, status: "cancelled" })
                     }
                   />
-                </>
+                </ListSection>
               )}
-              <AppText className="font-t3-semibold">Project coordinator handover</AppText>
-              <AppText>
-                Assignments, submissions, reviews, and history are retained. Paused initiatives
-                resume only when you explicitly resume them.
-              </AppText>
-              {state.coordinatorThreadId && (
-                <>
-                  <Button
-                    label="Open coordinator conversation"
-                    disabled={!canReadThreads}
-                    onPress={() => openThread(state.coordinatorThreadId!)}
-                  />
-                  <Button
-                    label="Pause entire crew for handover"
-                    disabled={disabled || !supports("context")}
-                    onPress={() => void act({ type: "coordinator.pause" })}
-                  />
-                </>
-              )}
-              {supervision?.handover.prerequisites.map((item) => (
-                <AppText key={JSON.stringify(item)}>{prerequisiteText(item)}</AppText>
-              ))}
-              <AppText>
-                The server checks these prerequisites when you confirm. Pending or failed stops must
-                be resolved before handover.
-              </AppText>
-              {coordinatorPicker}
-              <Button
-                label={
-                  state.coordinatorThreadId ? "Confirm coordinator handover" : "Confirm coordinator"
-                }
-                disabled={
-                  disabled ||
-                  !replacementCoordinator ||
-                  replacementCoordinator.id === state.coordinatorThreadId
-                }
-                onPress={() =>
-                  replacementCoordinator &&
-                  void act({ type: "coordinator.set", threadId: replacementCoordinator.id })
-                }
-              />
+              <ListSection
+                title="Project coordinator handover"
+                footer="Assignments, submissions, reviews, and history are retained. Paused initiatives resume only when you explicitly resume them."
+              >
+                {state.coordinatorThreadId && (
+                  <>
+                    <ListRow
+                      icon="text.bubble"
+                      label="Open coordinator conversation"
+                      disabled={!canReadThreads}
+                      onPress={() => openThread(state.coordinatorThreadId!)}
+                    />
+                    <ListActionRow
+                      icon="stop.fill"
+                      label="Pause entire crew for handover"
+                      disabled={disabled || !supports("context")}
+                      onPress={() => void act({ type: "coordinator.pause" })}
+                    />
+                  </>
+                )}
+                <ListRowLayout
+                  label="Handover prerequisites"
+                  description="The server checks these prerequisites when you confirm. Pending or failed stops must be resolved before handover."
+                  meta={supervision?.handover.prerequisites.map((item) => (
+                    <AppText
+                      key={JSON.stringify(item)}
+                      textRole="footnote"
+                      className="text-foreground-muted"
+                    >
+                      {prerequisiteText(item)}
+                    </AppText>
+                  ))}
+                />
+                {coordinatorPicker}
+                <ListActionRow
+                  icon="checkmark.circle"
+                  label={
+                    state.coordinatorThreadId
+                      ? "Confirm coordinator handover"
+                      : "Confirm coordinator"
+                  }
+                  disabled={
+                    disabled ||
+                    !replacementCoordinator ||
+                    replacementCoordinator.id === state.coordinatorThreadId
+                  }
+                  onPress={() =>
+                    replacementCoordinator &&
+                    void act({ type: "coordinator.set", threadId: replacementCoordinator.id })
+                  }
+                />
+              </ListSection>
             </>
           )}
         </>
       )}
-    </ScrollView>
+    </PageScrollView>
   );
   return embedded ? (
     content

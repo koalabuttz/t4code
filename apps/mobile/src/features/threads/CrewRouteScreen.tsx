@@ -36,7 +36,7 @@ import {
 } from "./crewProjectNavigation";
 import { CrewCoordinatorSetup } from "./CrewCoordinatorSetup";
 import { moveCrewEntryDraft } from "./CrewChat";
-import { TeamworkSheet } from "./TeamworkSheet";
+import { isCrewSettingsPage, TeamworkSheet } from "./TeamworkSheet";
 import { ThreadRouteScreen } from "./ThreadRouteScreen";
 import { useCrewRead } from "./use-crew-project";
 
@@ -113,7 +113,8 @@ function CrewProjectPageScreen({ route, routeKey }: CrewRouteProps & { routeKey:
   const page = route.params.page;
   const title = page ? pageTitles[page] : undefined;
   const query = useCrewRead(supported && !title ? scope : null);
-  const settingsPage = page === "project-settings" || page === "advanced";
+  const settingsPage =
+    page === "project-settings" || page === "advanced" || isCrewSettingsPage(page);
   const originThreadId = route.params.originThreadId
     ? ThreadId.make(route.params.originThreadId)
     : null;
@@ -212,6 +213,7 @@ function CrewProjectTabsScreen({
     search: "",
     cursor: undefined,
     requestCursor: undefined,
+    collapsedGroups: new Set(),
   });
   const threadsScroll = useRef<CrewProjectThreadsScroll | undefined>(undefined);
   const [savedScroll, setSavedScroll] = useState<CrewProjectThreadsScroll>();

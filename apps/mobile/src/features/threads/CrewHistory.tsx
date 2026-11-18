@@ -4,8 +4,14 @@ import type { EnvironmentId, ProjectId, TeamworkAction, ThreadId } from "@t3tool
 import { crewHistoryText } from "@t3tools/shared/crewHistory";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
-import { AppText, AppTextInput } from "../../components/ui/AppText";
+import { AppText } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
+import { FormField, FormSection } from "../../components/ui/FormSection";
+import { ListActionRow } from "../../components/ui/ListActionRow";
+import { ListRow } from "../../components/ui/ListRow";
+import { ListRowLayout } from "../../components/ui/ListRowLayout";
+import { ListSection } from "../../components/ui/ListSection";
+import { SegmentedControl } from "../../components/ui/SegmentedControl";
 import { CrewArtifactStatus } from "./CrewVerification";
 
 export function CrewHistory({
@@ -51,25 +57,23 @@ export function CrewHistory({
       ? data.events.at(-1)?.revision
       : undefined);
   return (
-    <View className="gap-3">
-      <AppText className="text-lg font-t3-semibold">Crew history</AppText>
+    <>
       {archiveEnabled && (
-        <>
-          <View className="flex-row gap-2">
-            {[false, true].map((value) => (
-              <Button
-                key={String(value)}
-                label={value ? "Archive" : "Activity"}
-                tone={archived === value ? "primary" : "secondary"}
-                onPress={() => {
-                  setArchived(value);
-                  setBefore(undefined);
-                  setSelected(undefined);
-                }}
-              />
-            ))}
-          </View>
-          <AppTextInput
+        <FormSection title="Filter history">
+          <SegmentedControl
+            options={[
+              { value: "activity", label: "Activity" },
+              { value: "archive", label: "Archive" },
+            ]}
+            selected={archived ? "archive" : "activity"}
+            onSelect={(value) => {
+              setArchived(value === "archive");
+              setBefore(undefined);
+              setSelected(undefined);
+            }}
+          />
+          <FormField
+            label="Search history"
             accessibilityLabel="Search Crew history"
             placeholder="Search decisions and evidence"
             value={text}
@@ -84,20 +88,29 @@ export function CrewHistory({
               setSelected(undefined);
             }}
           />
-        </>
+        </FormSection>
       )}
-      {query.error && <AppText accessibilityRole="alert">{query.error}</AppText>}
-      {!data && !query.error && <AppText>Loading history…</AppText>}
-      {data && !data.events.length && !data.archives?.length && (
-        <AppText>No matching history.</AppText>
+      {query.error && (
+        <AppText accessibilityRole="alert" className="px-4 text-danger-foreground">
+          {query.error}
+        </AppText>
       )}
+      {!query.error &&
+        (!data || (!data.events.length && !data.archives?.length && !data.archive)) && (
+          <ListSection title="History">
+            <ListRowLayout label={data ? "No matching history" : "Loading history…"} />
+          </ListSection>
+        )}
       {data?.archives?.map((entry) => (
-        <View key={entry.id} className="gap-2 rounded-2xl bg-secondary p-4">
-          <AppText>
-            {entry.title} · {entry.taskCount} tasks
-          </AppText>
-          <Button label="Inspect evidence" onPress={() => setSelected(entry.id)} />
-          <Button
+        <ListSection key={entry.id} title={entry.title}>
+          <ListRow
+            icon="doc.text"
+            label="Inspect evidence"
+            description={`${entry.taskCount} tasks`}
+            onPress={() => setSelected(entry.id)}
+          />
+          <ListActionRow
+            icon="arrow.uturn.backward"
             label="Restore paused"
             disabled={disabled}
             onPress={async () => {
@@ -107,66 +120,89 @@ export function CrewHistory({
               }
             }}
           />
-        </View>
+        </ListSection>
       ))}
       {data?.archive && (
-        <View className="gap-3">
-          <AppText className="font-t3-semibold">{data.archive.initiative.title}</AppText>
-          <AppText>{data.archive.initiative.brief}</AppText>
+        <>
+          <ListSection title="Archived initiative">
+            <ListRowLayout
+              label={data.archive.initiative.title}
+              description={data.archive.initiative.brief}
+            />
+            <ListRow
+              icon="clock"
+              label="Initiative activity"
+              onPress={() => {
+                setArchived(false);
+                setBefore(undefined);
+              }}
+            />
+          </ListSection>
           {data.archive.tasks.map((task) => (
-            <View key={task.id} className="gap-2 rounded-2xl bg-secondary p-4">
-              <AppText>
-                {task.title} · {task.status}
-              </AppText>
-              <AppText>{task.brief}</AppText>
-              <AppText>Accept when: {task.criteria}</AppText>
-              <AppText>{task.evidence}</AppText>
-              {task.review && <AppText>Review: {task.review.evidence}</AppText>}
+            <ListSection key={task.id}>
+              <ListRowLayout
+                label={task.title}
+                description={task.status}
+                meta={
+                  <>
+                    <AppText>{task.brief}</AppText>
+                    <AppText>Accept when: {task.criteria}</AppText>
+                    <AppText>{task.evidence}</AppText>
+                    {task.review && <AppText>Review: {task.review.evidence}</AppText>}
+                  </>
+                }
+              />
               {artifactsEnabled && task.submission && (
-                <CrewArtifactStatus
-                  key={task.submission.revision}
-                  environmentId={environmentId}
-                  input={{ projectId, artifactTaskId: task.id }}
-                />
+                <View className="px-4 pb-3">
+                  <CrewArtifactStatus
+                    key={task.submission.revision}
+                    environmentId={environmentId}
+                    input={{ projectId, artifactTaskId: task.id }}
+                  />
+                </View>
               )}
               {task.ownerThreadId && (
-                <Button label="Open worker" onPress={() => onOpenThread(task.ownerThreadId!)} />
+                <ListRow
+                  icon="text.bubble"
+                  label="Open worker"
+                  onPress={() => onOpenThread(task.ownerThreadId!)}
+                />
               )}
-            </View>
+            </ListSection>
           ))}
-          <Button
-            label="Initiative activity"
-            onPress={() => {
-              setArchived(false);
-              setBefore(undefined);
-            }}
-          />
-        </View>
+        </>
       )}
       {data?.events.map((event) => (
-        <View key={event.revision} className="gap-2 rounded-2xl bg-secondary p-4">
-          <AppText className="font-t3-semibold">
-            {event.action.type.replaceAll(".", " ")} · {new Date(event.createdAt).toLocaleString()}
-          </AppText>
-          <AppText>{crewHistoryText(event.action)}</AppText>
+        <ListSection key={event.revision}>
+          <ListRowLayout
+            icon="clock"
+            label={event.action.type.replaceAll(".", " ")}
+            description={new Date(event.createdAt).toLocaleString()}
+            meta={<AppText>{crewHistoryText(event.action)}</AppText>}
+          />
           {event.actorThreadId && (
-            <Button
+            <ListRow
+              icon="text.bubble"
               label="Open source conversation"
               onPress={() => onOpenThread(event.actorThreadId!)}
             />
           )}
-        </View>
+        </ListSection>
       ))}
-      {next != null && <Button label="Older history" onPress={() => setBefore(next)} />}
-      {(before !== undefined || selected !== undefined) && (
-        <Button
-          label="Latest history"
-          onPress={() => {
-            setBefore(undefined);
-            setSelected(undefined);
-          }}
-        />
+      {(next != null || before !== undefined || selected !== undefined) && (
+        <ListSection>
+          {next != null && <ListActionRow label="Older history" onPress={() => setBefore(next)} />}
+          {(before !== undefined || selected !== undefined) && (
+            <ListActionRow
+              label="Latest history"
+              onPress={() => {
+                setBefore(undefined);
+                setSelected(undefined);
+              }}
+            />
+          )}
+        </ListSection>
       )}
-    </View>
+    </>
   );
 }
