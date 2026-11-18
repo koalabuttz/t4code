@@ -1,5 +1,8 @@
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import type { crewMessageDraft } from "@t3tools/client-runtime/state/crew";
+import type {
+  crewMessageDraft,
+  readCrewTimelineMetadata,
+} from "@t3tools/client-runtime/state/crew";
 import {
   RunId,
   RuntimeRequestId,
@@ -27,6 +30,40 @@ import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
 import { sameCrewConversation, sameCrewProject } from "@t3tools/shared/crewConversation";
 
 type MessageDraft = Atom.Type<ReturnType<typeof crewMessageDraft>>;
+type TimelineMetadata = Awaited<ReturnType<typeof readCrewTimelineMetadata>>;
+
+export function retainMobileCrewTimelineMetadata(
+  previous: TimelineMetadata | null,
+  received: TimelineMetadata,
+): TimelineMetadata {
+  const receivedIds = new Set(received.messageIds);
+  const retainedIds = (previous?.messageIds ?? []).filter((id) => !receivedIds.has(id)).slice(-200);
+  const messageIds = [...retainedIds, ...received.messageIds];
+  const retained = new Set(messageIds);
+  const consultations = new Map(received.consultations.map((record) => [record.id, record]));
+  const handoffs = new Map(received.handoffs.map((record) => [record.id, record]));
+  for (const record of previous?.consultations ?? []) {
+    const id = record.origin.messageId;
+    if (retained.has(id) && !receivedIds.has(id) && !consultations.has(record.id))
+      consultations.set(record.id, record);
+  }
+  for (const record of previous?.handoffs ?? []) {
+    const origin = record.origin.messageId;
+    const explanation = record.explanation.messageId;
+    if (
+      (retained.has(origin) || retained.has(explanation)) &&
+      !receivedIds.has(origin) &&
+      !receivedIds.has(explanation) &&
+      !handoffs.has(record.id)
+    )
+      handoffs.set(record.id, record);
+  }
+  return {
+    messageIds,
+    consultations: [...consultations.values()],
+    handoffs: [...handoffs.values()],
+  };
+}
 
 export function mobileCrewDraftAfterSave(
   current: MessageDraft,

@@ -31,6 +31,7 @@ import {
   CREW_REQUEST_CURSOR,
   mobileCrewPendingAttention,
   mobileCrewSupervision,
+  retainMobileCrewTimelineMetadata,
 } from "./crewMobile.logic";
 
 const isTeamworkError = Schema.is(TeamworkError);
@@ -72,22 +73,26 @@ export function useCrewTimelineMetadata(
       ? (selected?.messageIds ?? [])
       : [];
   const messageIds = [...new Set([...visibleIds, ...queuedMessageIds])].sort();
-  const selection =
-    scope && threadId && messageIds.length > 0
-      ? JSON.stringify({ scope, threadId, messageIds })
-      : null;
-  const key =
-    selection && revision !== undefined
-      ? JSON.stringify({ scope, threadId, messageIds, revision, refreshVersion })
+  const identity =
+    scope && threadId && revision !== undefined
+      ? JSON.stringify({ scope, threadId, revision, refreshVersion })
       : null;
   const [result, setResult] = useState<{
-    selection: string;
+    identity: string;
     data: Awaited<ReturnType<typeof readCrewTimelineMetadata>> | null;
+    failedKey?: string;
     error: string | null;
   } | null>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch metadata for the list's visible messages and cancel obsolete scoped requests.
+  const current = identity && result?.identity === identity ? result : null;
+  const loaded = new Set(current?.data?.messageIds);
+  const missing = messageIds.filter((id) => !loaded.has(id));
+  const key =
+    identity && missing.length > 0
+      ? JSON.stringify({ scope, threadId, messageIds: missing })
+      : null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch scoped visible message metadata and retain it while the virtual list remeasures.
   useEffect(() => {
-    if (!key || !selection) return;
+    if (!key || !identity) return;
     const target = JSON.parse(key) as {
       scope: ScopedProjectRef;
       threadId: ThreadId;
@@ -117,22 +122,32 @@ export function useCrewTimelineMetadata(
       controller.signal,
     ).then(
       (data) => {
-        if (!controller.signal.aborted) setResult({ selection, data, error: null });
+        if (!controller.signal.aborted)
+          setResult((previous) => ({
+            identity,
+            data: retainMobileCrewTimelineMetadata(
+              previous?.identity === identity ? previous.data : null,
+              data,
+            ),
+            error: null,
+          }));
       },
       () => {
         if (!controller.signal.aborted)
-          setResult({
-            selection,
-            data: null,
+          setResult((previous) => ({
+            identity,
+            data: previous?.identity === identity ? previous.data : null,
+            failedKey: key,
             error: "Conversation exchanges could not be loaded.",
-          });
+          }));
       },
     );
     return () => controller.abort();
-  }, [key, selection]);
+  }, [identity, key]);
   return {
-    data: key && result?.selection === selection ? result.data : null,
-    error: key && result?.selection === selection ? result.error : null,
+    data: current?.data ?? null,
+    visibleMessageIds: messageIds,
+    error: key && current?.failedKey === key ? current.error : null,
     onVisibleMessages,
     refresh: () => setRefreshVersion((version) => version + 1),
   };

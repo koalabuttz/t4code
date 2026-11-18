@@ -117,7 +117,7 @@ function useCrewChatModel(
   );
   const queuedMessageIds = queue?.queuedRuns.map((entry) => entry.messageId) ?? [];
   const metadata = useCrewTimelineMetadata(
-    active ? scope : null,
+    active && canRead ? scope : null,
     thread.id,
     snapshot?.revision,
     queuedMessageIds,
@@ -150,14 +150,16 @@ function useCrewChatModel(
         !sameCrewProject(handoff.destination, conversation)
       )
         continue;
-      const messageId = crewHandoffMessageId(handoff, metadata.data?.messageIds ?? []);
+      const messageId =
+        crewHandoffMessageId(handoff, metadata.visibleMessageIds) ??
+        crewHandoffMessageId(handoff, metadata.data?.messageIds ?? []);
       if (!messageId) continue;
       const items = routes.get(messageId) ?? [];
       items.push(handoff);
       routes.set(messageId, items);
     }
     return { byOrigin, returns, routes };
-  }, [conversation, metadata.data]);
+  }, [conversation, metadata.data, metadata.visibleMessageIds]);
   const initiatives = snapshot?.initiatives ?? [];
   const actionInitiative =
     initiatives.findLast((initiative) => initiative.status === "active") ??

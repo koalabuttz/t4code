@@ -24,8 +24,9 @@ import {
   mobileCrewPendingAttention,
   mobileCrewRequestState,
   mobileCrewWorkstreamGroups,
+  retainMobileCrewTimelineMetadata,
 } from "./crewMobile.logic";
-import type { CrewConsultation } from "@t3tools/contracts/crewConversation";
+import type { CrewConsultation, CrewHandoff } from "@t3tools/contracts/crewConversation";
 
 const worker = ThreadId.make("worker");
 const coordinator = ThreadId.make("coordinator");
@@ -115,6 +116,43 @@ describe("mobile Crew source adaptation", () => {
     } satisfies CrewConsultation;
     const text = `Crew consultation example answered. From specialist. Canonical source: ${JSON.stringify(response)}\nThe answer.`;
     const returned = { id: "exact-delivery:return", text, senderThreadId: destination.threadId };
+
+    const explanation = { ...question, messageId: MessageId.make("explanation") };
+    const handoff = {
+      id: "handoff",
+      origin: question,
+      explanation,
+      destination,
+      context: consultation.context,
+      consultationId: consultation.id,
+      ownership: { state: "discussion-only" },
+      state: "ready",
+      createdAt: now,
+      updatedAt: now,
+    } satisfies CrewHandoff;
+    const initial = {
+      messageIds: [question.messageId],
+      consultations: [consultation],
+      handoffs: [handoff],
+    };
+    const next = { messageIds: [MessageId.make("neighbor")], consultations: [], handoffs: [] };
+    const scrolled = retainMobileCrewTimelineMetadata(initial, next);
+    expect(scrolled.consultations).toEqual([consultation]);
+    expect(scrolled.handoffs).toEqual([handoff]);
+    expect(
+      retainMobileCrewTimelineMetadata(scrolled, {
+        ...next,
+        messageIds: [explanation.messageId],
+      }).handoffs,
+    ).toEqual([]);
+    const longPage = {
+      ...next,
+      messageIds: Array.from({ length: 200 }, (_, i) => MessageId.make(`row-${i}`)),
+    };
+    expect(
+      retainMobileCrewTimelineMetadata(retainMobileCrewTimelineMetadata(initial, longPage), next)
+        .consultations,
+    ).toEqual([]);
 
     expect(mobileCrewReturnedAnswer(conversation, consultation, returned)).toBe("The answer.");
     expect(mobileCrewReturnedAnswer(destination, consultation, returned)).toBeNull();
