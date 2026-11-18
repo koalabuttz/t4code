@@ -88,7 +88,7 @@ export function useCrewTimelineMetadata(
   const missing = messageIds.filter((id) => !loaded.has(id));
   const key =
     identity && missing.length > 0
-      ? JSON.stringify({ scope, threadId, messageIds: missing })
+      ? JSON.stringify({ scope, threadId, messageIds: missing, selectedMessageIds: messageIds })
       : null;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Fetch scoped visible message metadata and retain it while the virtual list remeasures.
   useEffect(() => {
@@ -97,6 +97,7 @@ export function useCrewTimelineMetadata(
       scope: ScopedProjectRef;
       threadId: ThreadId;
       messageIds: MessageId[];
+      selectedMessageIds: MessageId[];
     };
     const controller = new AbortController();
     void readCrewTimelineMetadata(
@@ -128,6 +129,7 @@ export function useCrewTimelineMetadata(
             data: retainMobileCrewTimelineMetadata(
               previous?.identity === identity ? previous.data : null,
               data,
+              target.selectedMessageIds,
             ),
             error: null,
           }));

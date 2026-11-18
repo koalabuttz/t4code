@@ -23,6 +23,7 @@ import * as SqlStatement from "effect/sql/Statement";
 import * as Sqlite from "../persistence/Sqlite.ts";
 import crewVisibleMessageIndexes from "../persistence/Migrations/100_CrewVisibleMessageIndexes.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import { StopConfirmationError } from "../orchestration-v2/StopConfirmation.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";
 import { ServerEnvironmentIdentity } from "../environment/ServerEnvironment.ts";
 import { CrewArtifacts } from "./CrewArtifacts.ts";
@@ -52,7 +53,9 @@ it.effect(
     let failed = false;
     let queueHeldAfterStop: boolean | undefined;
     const discussionAfterStop = RunId.make("discussion-after-stop");
-    const dispatchedStops = new Set<CommandId>();
+    const dispatchedStops = new Map<CommandId, RunId>();
+    let stopTarget = source.runId;
+    let confirmationFails = false;
     let questionStatus: "pending" | "resolved" = "pending";
     let coordinatorMode: "approval-required" | "full-access" = "approval-required";
     let coordinatorActiveRunId = source.runId;
@@ -618,8 +621,22 @@ it.effect(
           ),
         ),
       );
+      confirmationFails = true;
       yield* mutate("pause", { type: "initiative.status", id: "implementation", status: "paused" });
       yield* teams.drain;
+      const timedOut = (yield* teams.read(projectId)).deliveries.find(
+        (delivery) => delivery.kind === "stop" && delivery.taskId === "owned",
+      );
+      assert.equal(timedOut?.status, "failed");
+      stopTarget = null;
+      confirmationFails = false;
+      yield* mutate("retry-idle-stop", { type: "delivery.retry", id: timedOut!.id });
+      yield* teams.drain;
+      assert.equal(
+        (yield* teams.read(projectId)).deliveries.find((delivery) => delivery.id === timedOut!.id)
+          ?.status,
+        "delivered",
+      );
       yield* mutate("release", { type: "task.reset", id: "owned", status: "ready" });
       yield* teams.drain;
       queueHeldAfterStop = false;
@@ -631,17 +648,59 @@ it.effect(
         ),
       );
       queueHeldAfterStop = true;
-      yield* change("reconciled-transfer", { type: "handoff.complete", id: "owned-route" });
+      const transfer = yield* Effect.result(
+        change("reconciled-transfer", { type: "handoff.complete", id: "owned-route" }),
+      );
       const reconciled = (yield* teams.conversationQuery({
         scope,
         collection: "handoffs",
         id: "owned-route",
       })).handoffs[0];
+      yield* mutate("resume-for-reuse", {
+        type: "initiative.status",
+        id: "implementation",
+        status: "active",
+      });
+      const reuseWorker = Effect.fn("ReuseWorker")(function* (attemptId: string) {
+        yield* mutate(`reserve-${attemptId}`, {
+          type: "task.reserve",
+          id: "owned",
+          delegationId: attemptId,
+        });
+        yield* mutate(`assign-${attemptId}`, {
+          type: "task.assign",
+          id: "owned",
+          delegationId: attemptId,
+          threadId: worker,
+          delegatedTaskId: NodeId.make(attemptId),
+        });
+      });
+      yield* reuseWorker("idle-attempt");
+      yield* change("stale-proposal", { ...proposal, id: "stale-owned-route" });
+      yield* mutate("release-idle", { type: "task.reset", id: "owned", status: "ready" });
+      yield* teams.drain;
+      yield* reuseWorker("later-attempt");
+      stopTarget = discussionAfterStop;
+      yield* mutate("release-later", { type: "task.reset", id: "owned", status: "ready" });
+      yield* teams.drain;
+      const staleTransfer = yield* Effect.result(
+        change("complete-stale", { type: "handoff.complete", id: "stale-owned-route" }),
+      );
+      assert.deepEqual(
+        { retriedStop: transfer._tag, laterAttemptStop: staleTransfer._tag },
+        { retriedStop: "Success", laterAttemptStop: "Failure" },
+      );
       assert.equal(reconciled?.ownership.state, "reconciled");
       if (reconciled?.ownership.state === "reconciled") {
         assert.equal(reconciled.ownership.stoppedRunId, source.runId);
+        assert.equal(reconciled.ownership.stopDeliveryId, timedOut!.id);
       }
       assert.equal(reconciled?.consultationId, retried.id);
+      yield* mutate("pause-after-reuse", {
+        type: "initiative.status",
+        id: "implementation",
+        status: "paused",
+      });
       yield* change("paused-question", {
         type: "consultation.request",
         request: { ...request, id: "paused" },
@@ -990,17 +1049,18 @@ it.effect(
                   }),
                 dispatch: (command) =>
                   Effect.sync(() => {
-                    if (command.type === "thread.stop" && command.threadId === worker)
-                      dispatchedStops.add(command.commandId);
+                    if (command.type === "thread.stop" && command.threadId === worker && stopTarget)
+                      dispatchedStops.set(command.commandId, stopTarget);
                     return {} as never;
                   }),
-                confirmStop: () => Effect.void,
-                getStopRequestedRunIds: ({ threadId, commandId }) =>
-                  Effect.succeed(
-                    threadId === worker && dispatchedStops.has(commandId) && source.runId
-                      ? [source.runId]
-                      : [],
-                  ),
+                confirmStop: ({ threadId }) =>
+                  confirmationFails
+                    ? Effect.fail(new StopConfirmationError({ threadId, reason: "Timed out" }))
+                    : Effect.void,
+                getStopRequestedRunIds: ({ threadId, commandId }) => {
+                  const run = dispatchedStops.get(commandId);
+                  return Effect.succeed(threadId === worker && run ? [run] : []);
+                },
               }),
             ),
           ),

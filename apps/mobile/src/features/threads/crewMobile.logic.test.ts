@@ -153,6 +153,15 @@ describe("mobile Crew source adaptation", () => {
       retainMobileCrewTimelineMetadata(retainMobileCrewTimelineMetadata(initial, longPage), next)
         .consultations,
     ).toEqual([]);
+    const selectedIds = [question.messageId, ...longPage.messageIds, ...next.messageIds];
+    const incremented = retainMobileCrewTimelineMetadata(
+      retainMobileCrewTimelineMetadata(initial, longPage),
+      next,
+      selectedIds,
+    );
+    expect(selectedIds.filter((id) => !incremented.messageIds.includes(id))).toEqual([]);
+    expect(incremented.consultations).toEqual([consultation]);
+    expect(incremented.handoffs).toEqual([handoff]);
 
     expect(mobileCrewReturnedAnswer(conversation, consultation, returned)).toBe("The answer.");
     expect(mobileCrewReturnedAnswer(destination, consultation, returned)).toBeNull();

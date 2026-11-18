@@ -6,6 +6,7 @@ import type {
 import {
   RunId,
   RuntimeRequestId,
+  type MessageId,
   type OrchestrationV2ThreadProjection,
   type TeamworkReadResult,
   type TeamworkSnapshot,
@@ -35,9 +36,13 @@ type TimelineMetadata = Awaited<ReturnType<typeof readCrewTimelineMetadata>>;
 export function retainMobileCrewTimelineMetadata(
   previous: TimelineMetadata | null,
   received: TimelineMetadata,
+  selectedMessageIds: readonly MessageId[] = received.messageIds,
 ): TimelineMetadata {
   const receivedIds = new Set(received.messageIds);
-  const retainedIds = (previous?.messageIds ?? []).filter((id) => !receivedIds.has(id)).slice(-200);
+  const selected = new Set(selectedMessageIds);
+  const previousIds = (previous?.messageIds ?? []).filter((id) => !receivedIds.has(id));
+  const recentOffscreen = new Set(previousIds.filter((id) => !selected.has(id)).slice(-200));
+  const retainedIds = previousIds.filter((id) => selected.has(id) || recentOffscreen.has(id));
   const messageIds = [...retainedIds, ...received.messageIds];
   const retained = new Set(messageIds);
   const consultations = new Map(received.consultations.map((record) => [record.id, record]));

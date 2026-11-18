@@ -25,6 +25,7 @@ import {
   type CrewMessageRef,
   type CrewConversationContext,
   type CrewConversationRef,
+  type CrewTaskAssignmentRef,
 } from "@t3tools/contracts/crewConversation";
 import {
   crewConsultationRequestProblem,
@@ -203,6 +204,66 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
       return yield* fail("Resolve the outstanding stop before changing workstream membership.");
     yield* deps.requireStopped([threadId]);
   });
+  const findConfirmedHandoffStop = Effect.fn("CrewConversations.findConfirmedHandoffStop")(
+    function* (projectId: ProjectId, handoffId: string, assignment: CrewTaskAssignmentRef) {
+      const proposals = yield* sql<{ revision: number }>`
+        SELECT revision FROM project_teamwork_events WHERE project_id = ${projectId}
+        AND json_extract(action_json, '$.type') = 'crew.conversation'
+        AND json_extract(json_extract(action_json, '$.command'), '$.action.type')
+          IN ('handoff.propose', 'handoff.propose-from-attention')
+        AND json_extract(json_extract(action_json, '$.command'), '$.action.id') = ${handoffId}
+        ORDER BY revision DESC LIMIT 1`;
+      const proposalRevision = proposals[0]?.revision;
+      if (proposalRevision === undefined) return;
+      // The proposal validates the exact attempt. A later assignment can reuse its thread.
+      const replacements = yield* sql<{ revision: number }>`
+        SELECT revision FROM project_teamwork_events WHERE project_id = ${projectId}
+        AND revision > ${proposalRevision}
+        AND json_extract(action_json, '$.type') = 'task.assign'
+        AND json_extract(action_json, '$.id') = ${assignment.taskId}
+        ORDER BY revision LIMIT 1`;
+      const attemptEnd = replacements[0]?.revision ?? Number.MAX_SAFE_INTEGER;
+      const stops = yield* sql<{ id: string; revision: number; retry_id: string | null }>`
+        SELECT id, revision, json_extract(payload_json, '$.stopCommandId') AS retry_id
+        FROM project_teamwork_outbox WHERE project_id = ${projectId}
+        AND thread_id = ${assignment.owner.threadId} AND kind = 'stop' AND status = 'delivered'
+        AND json_extract(payload_json, '$.initiativeId') = ${assignment.initiativeId}
+        AND json_extract(payload_json, '$.taskId') = ${assignment.taskId}
+        AND revision >= ${proposalRevision} AND revision < ${attemptEnd}
+        ORDER BY revision DESC, id DESC`;
+      if (stops.length === 0) return;
+      const { runs } = yield* deps.threads.getThreadRecords(assignment.owner.threadId, ["runs"]);
+      if (runs.some((run) => run.status === "queued" && !run.queueHeld)) return;
+
+      for (const stop of stops) {
+        // A retry may confirm that a run stopped after an earlier dispatch's confirmation failed.
+        const retries =
+          stop.retry_id === null
+            ? []
+            : yield* sql<{ command_id: string }>`
+              SELECT command_id FROM project_teamwork_events WHERE project_id = ${projectId}
+              AND revision > ${stop.revision} AND revision < ${attemptEnd}
+              AND revision <= (SELECT revision FROM project_teamwork_events
+                WHERE project_id = ${projectId} AND command_id = ${stop.retry_id})
+              AND json_extract(action_json, '$.type') = 'delivery.retry'
+              AND json_extract(action_json, '$.id') = ${stop.id}`;
+        const stopped = new Set<RunId>();
+        for (const retryId of [null, ...retries.map((retry) => retry.command_id)]) {
+          const targets = yield* deps.threads.getStopRequestedRunIds({
+            threadId: assignment.owner.threadId,
+            commandId: teamworkDeliveryCommandId(stop.id, retryId),
+          });
+          for (const target of targets) stopped.add(target);
+        }
+        const run = latestExecutedRun(runs.filter((run) => stopped.has(run.id)));
+        if (
+          run &&
+          ["completed", "cancelled", "interrupted", "failed", "rolled_back"].includes(run.status)
+        )
+          return { stopDeliveryId: CommandId.make(stop.id), stoppedRunId: run.id };
+      }
+    },
+  );
   const outbox = Effect.fn("CrewConversations.outbox")(function* (
     projectId: ProjectId,
     revision: number,
@@ -619,53 +680,11 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                 ) {
                   const assignment = current.ownership.assignment;
                   yield* ownershipGuard(state, assignment.owner.threadId);
-                  const proposals = yield* sql<{
-                    revision: number;
-                  }>`SELECT revision FROM project_teamwork_events WHERE project_id = ${projectId}
-                    AND json_extract(action_json, '$.type') = 'crew.conversation'
-                    AND json_extract(json_extract(action_json, '$.command'), '$.action.type') IN ('handoff.propose', 'handoff.propose-from-attention')
-                    AND json_extract(json_extract(action_json, '$.command'), '$.action.id') = ${current.id} ORDER BY revision DESC LIMIT 1`;
-                  const stops = yield* sql<{
-                    id: string;
-                    retry_id: string | null;
-                  }>`SELECT id, json_extract(payload_json, '$.stopCommandId') AS retry_id
-                    FROM project_teamwork_outbox WHERE project_id = ${projectId} AND thread_id = ${assignment.owner.threadId}
-                    AND kind = 'stop' AND status = 'delivered'
-                    AND json_extract(payload_json, '$.taskId') = ${assignment.taskId}
-                    AND revision >= ${proposals[0]?.revision ?? Number.MAX_SAFE_INTEGER}
-                    ORDER BY revision DESC, id DESC`;
-                  const records = yield* deps.threads.getThreadRecords(assignment.owner.threadId, [
-                    "runs",
-                  ]);
-                  const unheldQueue = records.runs.some(
-                    (run) => run.status === "queued" && !run.queueHeld,
+                  const confirmation = yield* findConfirmedHandoffStop(
+                    projectId,
+                    current.id,
+                    assignment,
                   );
-                  let confirmation: { stopDeliveryId: CommandId; stoppedRunId: RunId } | undefined;
-                  if (!unheldQueue) {
-                    for (const stop of stops) {
-                      const stopped = new Set(
-                        yield* deps.threads.getStopRequestedRunIds({
-                          threadId: assignment.owner.threadId,
-                          commandId: teamworkDeliveryCommandId(stop.id, stop.retry_id),
-                        }),
-                      );
-                      const run = latestExecutedRun(
-                        records.runs.filter((run) => stopped.has(run.id)),
-                      );
-                      if (
-                        run &&
-                        ["completed", "cancelled", "interrupted", "failed", "rolled_back"].includes(
-                          run.status,
-                        )
-                      ) {
-                        confirmation = {
-                          stopDeliveryId: CommandId.make(stop.id),
-                          stoppedRunId: run.id,
-                        };
-                        break;
-                      }
-                    }
-                  }
                   if (!confirmation)
                     return yield* fail(
                       "The exact assignment needs confirmed stop evidence before the handoff can complete.",
