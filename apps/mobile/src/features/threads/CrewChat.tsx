@@ -447,6 +447,11 @@ function ConsultationStatus({
   const [showRecordedAnswer, setShowRecordedAnswer] = useState(false);
   const name = chat.threadName(consultation.destination.threadId);
   const progress = consultation.progress;
+  const canReadAnswer =
+    chat.canRead &&
+    progress.state === "answered" &&
+    sameCrewProject(chat.conversation, consultation.destination) &&
+    sameCrewConversation(consultation.destination, progress.exchange.response.conversation);
   const returned = chat.deliveries.find(
     (delivery) =>
       delivery.id === `${consultation.deliveryId}:return` &&
@@ -498,10 +503,10 @@ function ConsultationStatus({
           <Button
             label={showRecordedAnswer ? "Hide recorded answer" : "Read recorded answer"}
             size="compact"
-            disabled={!chat.available(consultation.destination.threadId)}
+            disabled={!canReadAnswer}
             onPress={() => setShowRecordedAnswer(!showRecordedAnswer)}
           />
-          {showRecordedAnswer && chat.available(consultation.destination.threadId) && (
+          {showRecordedAnswer && canReadAnswer && (
             <CrewRecordedAnswer consultation={consultation} source={progress.exchange.response} />
           )}
           {returned?.status === "failed" && (
@@ -518,7 +523,7 @@ function ConsultationStatus({
         <Button
           label="Open specialist answer"
           size="compact"
-          disabled={!chat.available(consultation.destination.threadId)}
+          disabled={!canReadAnswer}
           onPress={() => chat.openSource(consultation.destination, progress.exchange.response)}
         />
       )}
@@ -589,7 +594,18 @@ function ConsultationAnswer({
 }) {
   const chat = useCrewChat()!;
   const [expanded, setExpanded] = useState(false);
-  const name = chat.threadName(consultation.destination.threadId);
+  const { threadId } = consultation.destination;
+  const canOpenSource =
+    chat.canRead && sameCrewProject(chat.conversation, consultation.destination);
+  const source = useCrewCollection(expanded && canOpenSource ? consultation.destination : null, {
+    collection: "workstreams",
+    threadId,
+    limit: 1,
+  });
+  const name =
+    source.data?.workstreams.find((entry) =>
+      sameCrewConversation(consultation.destination, entry.conversation),
+    )?.title ?? chat.threadName(threadId);
   if (consultation.progress.state !== "answered") return null;
   const { exchange } = consultation.progress;
   return (
@@ -611,13 +627,19 @@ function ConsultationAnswer({
           <Button
             label="Open source answer"
             size="compact"
-            disabled={!chat.available(consultation.destination.threadId)}
+            disabled={
+              !canOpenSource ||
+              !sameCrewConversation(consultation.destination, exchange.response.conversation)
+            }
             onPress={() => chat.openSource(consultation.destination, exchange.response)}
           />
           <Button
             label="Open source question"
             size="compact"
-            disabled={!chat.available(consultation.destination.threadId)}
+            disabled={
+              !canOpenSource ||
+              !sameCrewConversation(consultation.destination, exchange.request.conversation)
+            }
             onPress={() => chat.openSource(consultation.destination, exchange.request)}
           />
           <Button

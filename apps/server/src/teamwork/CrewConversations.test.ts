@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { DispatchModeLimit } from "../orchestration-v2/DispatchModeLimit.ts";
 import {
+  ChatAttachmentId,
   CommandId,
   NodeId,
   EnvironmentId,
@@ -52,10 +53,12 @@ it.effect(
     let queueHeldAfterStop: boolean | undefined;
     let questionStatus: "pending" | "resolved" = "pending";
     let coordinatorMode: "approval-required" | "full-access" = "approval-required";
+    let coordinatorActiveRunId = source.runId;
     const returnModes: Array<string | undefined> = [];
     return Effect.gen(function* () {
       const teams = yield* Teamwork.TeamworkService;
       const now = yield* DateTime.now;
+      const attachmentId = ChatAttachmentId.make("screen");
       messages.set(source.messageId, {
         id: source.messageId,
         threadId: coordinator,
@@ -63,7 +66,15 @@ it.effect(
         role: "user",
         createdBy: "user",
         creationSource: "web",
-        attachments: [],
+        attachments: [
+          {
+            type: "image",
+            id: attachmentId,
+            name: "screen.png",
+            mimeType: "image/png",
+            sizeBytes: 140,
+          },
+        ],
         text: "Why is the Android screen clipped?",
         streaming: false,
         nodeId: null,
@@ -104,15 +115,25 @@ it.effect(
         context,
         replyTo: null,
       };
-      yield* teams.conversationCommand(
-        {
-          scope,
-          expectedRevision: 2,
-          commandId: CommandId.make("consult"),
-          action: { type: "consultation.request", request },
+      const compact = {
+        scope,
+        expectedRevision: 2,
+        commandId: CommandId.make("consult"),
+        action: {
+          type: "consultation.request-from-message",
+          id: request.id,
+          destinationThreadId: worker,
         },
-        coordinator,
+      } as const;
+      const anotherQuestion = MessageId.make("second-question-in-run");
+      messages.set(anotherQuestion, { ...messages.get(source.messageId)!, id: anotherQuestion });
+      assert.isTrue(
+        Result.isFailure(yield* Effect.result(teams.conversationCommand(compact, coordinator))),
       );
+      messages.delete(anotherQuestion);
+      const compactReceipt = yield* teams.conversationCommand(compact, coordinator);
+      coordinatorActiveRunId = null;
+      assert.deepEqual(yield* teams.conversationCommand(compact, coordinator), compactReceipt);
       yield* teams.drain;
       const page = yield* teams.conversationQuery({
         scope,
@@ -120,7 +141,21 @@ it.effect(
         id: request.id,
       });
       assert.equal(page.consultations[0]?.progress.state, "delivered");
+      assert.deepEqual(page.consultations[0]?.origin, source);
+      assert.deepEqual(page.consultations[0]?.context.attachments, [
+        { message: source, attachmentId },
+      ]);
       const revision = (yield* teams.read(projectId)).snapshot.revision;
+      const wrongThread = yield* Effect.result(
+        command(revision, "wrong-thread", {
+          type: "consultation.request-from-message",
+          id: "wrong-thread",
+          originThreadId: worker,
+          originMessageId: source.messageId,
+          destinationThreadId: worker,
+        }),
+      );
+      assert.isTrue(Result.isFailure(wrongThread));
       const forged = yield* Effect.result(
         command(revision, "forged", {
           type: "consultation.request",
@@ -174,30 +209,32 @@ it.effect(
       yield* teams.drain;
       assert.equal(sent.length, count);
       queued = true;
-      const followup = {
-        ...request,
-        id: "follow-up",
-        replyTo: { consultationId: request.id, responseId: answer.id },
-      };
-      const followupRevision = (yield* teams.read(projectId)).snapshot.revision;
-      const followupReceipt = yield* command(followupRevision, "follow-up", {
-        type: "consultation.request",
-        request: followup,
+      const followupMessageId = MessageId.make("follow-up-question");
+      messages.set(followupMessageId, {
+        ...messages.get(source.messageId)!,
+        id: followupMessageId,
+        text: "What about landscape?",
+        attachments: [],
       });
+      const followup = {
+        type: "consultation.request-from-message",
+        id: "follow-up",
+        originThreadId: coordinator,
+        originMessageId: followupMessageId,
+        destinationThreadId: worker,
+        replyTo: { consultationId: request.id, responseId: answer.id },
+      } as const;
+      const followupRevision = (yield* teams.read(projectId)).snapshot.revision;
+      const followupReceipt = yield* command(followupRevision, "follow-up", followup);
       yield* teams.drain;
-      assert.deepEqual(
-        yield* command(followupRevision, "follow-up", {
-          type: "consultation.request",
-          request: followup,
-        }),
-        followupReceipt,
-      );
+      assert.deepEqual(yield* command(followupRevision, "follow-up", followup), followupReceipt);
       const followed = (yield* teams.conversationQuery({
         scope,
         collection: "consultations",
         id: "follow-up",
       })).consultations[0]!;
       assert.equal(followed.progress.state, "queued");
+      assert.equal(followed.origin.messageId, followupMessageId);
       assert.include(sent.at(-1)!.text, answer.id);
       const direct = {
         ...messages.get(source.messageId)!,
@@ -839,6 +876,7 @@ it.effect(
                     id,
                     projectId,
                     deletedAt: null,
+                    activeRunId: id === coordinator ? coordinatorActiveRunId : null,
                     status: busy ? "running" : "completed",
                     runtimeMode:
                       id === coordinator

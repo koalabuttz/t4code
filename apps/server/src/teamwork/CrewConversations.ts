@@ -271,9 +271,67 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
           const now = DateTime.formatIso(yield* DateTime.now);
           let action: Exclude<
             CrewConversationCommand["action"],
-            { type: "handoff.propose-from-attention" }
+            { type: "handoff.propose-from-attention" | "consultation.request-from-message" }
           >;
-          if (input.action.type === "handoff.propose-from-attention") {
+          if (input.action.type === "consultation.request-from-message") {
+            const request = input.action;
+            const originThreadId = request.originThreadId ?? actor;
+            if (originThreadId === null)
+              return yield* fail("Choose the conversation where the question was asked.");
+            const conversation = yield* deps.requireThread(projectId, originThreadId);
+            if (conversation.linkOrigin != null)
+              return yield* fail(
+                "Linked environment sources require their authoritative source access.",
+                "forbidden",
+              );
+            const isQuestion = (message: OrchestrationV2ConversationMessage) =>
+              message.threadId === conversation.id &&
+              message.role === "user" &&
+              message.createdBy === "user" &&
+              message.senderThreadId === undefined &&
+              !message.streaming;
+            let message: OrchestrationV2ConversationMessage | undefined;
+            if (request.originMessageId !== undefined) {
+              message = (yield* deps.threads.getMessagesById(conversation.id, [
+                request.originMessageId,
+              ])).get(request.originMessageId);
+            } else if (actor === conversation.id && conversation.activeRunId) {
+              // Only an unambiguous question in the caller's current run can supply the origin.
+              const { messages } = yield* deps.threads.getThreadRecords(
+                conversation.id,
+                ["messages"],
+                {
+                  messageRunIds: [conversation.activeRunId],
+                  messageRoles: ["user"],
+                },
+              );
+              const questions = messages.filter(isQuestion);
+              if (questions.length === 1) message = questions[0];
+            }
+            if (!message || !isQuestion(message))
+              return yield* fail(
+                "Choose the exact user message that asks the question.",
+                "forbidden",
+              );
+            const origin = messageRef(projectId, message);
+            action = {
+              type: "consultation.request",
+              request: {
+                id: request.id,
+                origin,
+                destination: ref(projectId, request.destinationThreadId),
+                context: {
+                  replyTo: null,
+                  sources: [],
+                  attachments: message.attachments.map(({ id }) => ({
+                    message: origin,
+                    attachmentId: id,
+                  })),
+                },
+                replyTo: request.replyTo ?? null,
+              },
+            };
+          } else if (input.action.type === "handoff.propose-from-attention") {
             const proposal = input.action;
             const attention = yield* get(
               projectId,

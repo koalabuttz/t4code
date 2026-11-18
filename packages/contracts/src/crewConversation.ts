@@ -229,6 +229,14 @@ export const CrewConversationAction = Schema.Union([
   }),
   Schema.Struct({ type: Schema.Literal("consultation.request"), request: CrewConsultationRequest }),
   Schema.Struct({
+    type: Schema.Literal("consultation.request-from-message"),
+    id: Id,
+    originThreadId: Schema.optional(ThreadId),
+    originMessageId: Schema.optional(MessageId),
+    destinationThreadId: ThreadId,
+    replyTo: Schema.optional(CrewConsultationReply),
+  }),
+  Schema.Struct({
     type: Schema.Literal("consultation.retry"),
     id: Id,
     previousDeliveryId: CommandId,
