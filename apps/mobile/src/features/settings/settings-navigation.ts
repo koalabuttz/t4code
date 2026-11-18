@@ -26,14 +26,17 @@ export function isSettingsRoute(name: string): boolean {
 }
 
 /**
- * Settings is open while its `Settings` route is under the topmost workspace page and that
- * page is a Settings page. A Settings page pushed without it, such as a usage account opened
- * from the Usage tab, stays a detail of the current tab.
+ * Crew and its conversations retain the Settings scope when opened from the project page.
+ * A Settings page pushed without the Settings root stays a detail of the current tab.
  */
 export function settingsOpenIn(workspaceRoutes: readonly { readonly name: string }[]): boolean {
   return (
     workspaceRoutes.some((route) => route.name === "Settings") &&
-    isSettingsRoute(workspaceRoutes.at(-1)?.name ?? "")
+    (isSettingsRoute(workspaceRoutes.at(-1)?.name ?? "") ||
+      workspaceRoutes.some(
+        (route, index) =>
+          route.name === "Crew" && workspaceRoutes[index - 1]?.name === "SettingsProjectOverview",
+      ))
   );
 }
 

@@ -63,6 +63,7 @@ import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { toastManager } from "../ui/toast";
 
 import type { ChatComposerHandle } from "./ChatComposer";
+import { scopeCrewRuntimeRequests } from "../teamwork/crewChat.logic";
 
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 const NO_PENDING_REQUESTS = { approvals: [], userInputs: [] } as const;
@@ -272,6 +273,8 @@ function makePendingCustomAnswerSetter(input: {
 export function usePendingThreadRequests(input: {
   readonly environmentId: EnvironmentId;
   readonly activeThreadId: ThreadId | null;
+  readonly requestedRuntimeRequestId?: string | undefined;
+  readonly requestedRuntimeRunId?: string | undefined;
   readonly serverProjection: ThreadStructure | null;
   readonly supportsQuestionAttachments: boolean;
   readonly composerDraftTarget: ScopedThreadRef | DraftId;
@@ -283,6 +286,8 @@ export function usePendingThreadRequests(input: {
   const {
     environmentId,
     activeThreadId,
+    requestedRuntimeRequestId,
+    requestedRuntimeRunId,
     serverProjection,
     supportsQuestionAttachments,
     composerDraftTarget,
@@ -322,14 +327,25 @@ export function usePendingThreadRequests(input: {
       : NO_PENDING_REQUESTS;
   // The projection changes on every streamed event, so shared empties keep the
   // composer and approval panel from re-rendering while nothing is pending.
-  const pendingApprovals =
+  const approvals =
     pendingRequests.approvals.length === 0
       ? NO_PENDING_APPROVALS
       : derivePendingApprovals(pendingRequests.approvals);
-  const pendingUserInputs =
+  const questions =
     pendingRequests.userInputs.length === 0
       ? NO_PENDING_USER_INPUTS
       : derivePendingUserInputs(pendingRequests.userInputs);
+  const {
+    approvals: pendingApprovals,
+    questions: pendingUserInputs,
+    status: scopedRequestStatus,
+  } = scopeCrewRuntimeRequests({
+    projection: serverProjection?.thread.id === activeThreadId ? serverProjection : null,
+    approvals,
+    questions,
+    requestId: requestedRuntimeRequestId,
+    runId: requestedRuntimeRunId,
+  });
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingRequestKey = userInputDraftKey(
     environmentId,
@@ -494,7 +510,12 @@ export function usePendingThreadRequests(input: {
   };
 
   const onDismissUserInput = async (requestId: RuntimeRequestId) => {
-    if (!activeThreadId) return;
+    if (
+      !activeThreadId ||
+      (scopedRequestStatus !== "unscoped" &&
+        !pendingUserInputs.some((input) => input.requestId === requestId))
+    )
+      return;
 
     setRespondingUserInputRequestIds((existing) =>
       existing.includes(requestId) ? existing : [...existing, requestId],
@@ -659,6 +680,7 @@ export function usePendingThreadRequests(input: {
   );
 
   return {
+    scopedRequestStatus,
     pendingApprovals,
     pendingUserInputs,
     activePendingApproval,

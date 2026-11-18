@@ -3,6 +3,30 @@
 Connect a phone, browser, or another desktop app to T3 Code running on a different
 machine. That machine must stay running and reachable while you work.
 
+## Outpost fleets
+
+In **Settings → Environments** on web or desktop, add an Outpost connection with
+its URL and a bearer token with the `machine` scope, then test the connection.
+On mobile, open the owning environment's details to manage its Outpost connections.
+The URL must be reachable from that T3 Code environment; credentials stay on that
+environment.
+
+Sessions appear under their external projects. Stopped transcripts and attachments
+can be read without resuming a daemon. When a connection fails, the last fleet view
+remains visible with a stale warning; use **Test / reconnect** to refresh it.
+If a transcript capture expires, refresh the transcript before continuing.
+
+Disconnecting or removing a connection leaves its external sessions running.
+**Stop session** terminates the external daemon; **Resume session** launches it again.
+**Reap session** also destroys its worktree and deletes its session record.
+Only operations offered by Outpost are shown. External sessions cannot currently
+be attached as T3 threads.
+
+Open **Plugin surfaces** on a running session to use its published plugin interfaces,
+inline or fullscreen. Requests travel through the owning T3 environment, so the
+Outpost token stays there. If a surface changes or its session reconnects, open
+the current surface again.
+
 ## T3 Connect
 
 T3 Connect makes an environment available to your other devices without setting

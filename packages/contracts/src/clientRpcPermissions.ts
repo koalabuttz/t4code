@@ -14,9 +14,18 @@ import {
 } from "./auth.ts";
 import { ORCHESTRATION_V2_WS_METHODS } from "./orchestrationV2.ts";
 import { WS_METHODS } from "./rpc.ts";
+import { CREW_CONVERSATION_REQUIRED_SCOPES } from "./crewConversation.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  [WS_METHODS.outpostSave]: AuthSettingsWriteScope,
+  [WS_METHODS.outpostRemove]: AuthSettingsWriteScope,
+  [WS_METHODS.outpostTest]: AuthSettingsWriteScope,
+  [WS_METHODS.outpostAction]: AuthOrchestrationOperateScope,
+  [WS_METHODS.outpostSurfaceDocument]: AuthOrchestrationOperateScope,
+  [WS_METHODS.outpostSurfaceRequest]: AuthOrchestrationOperateScope,
+  [WS_METHODS.teamworkMutate]: AuthOrchestrationOperateScope,
+  [WS_METHODS.crewConversationCommand]: CREW_CONVERSATION_REQUIRED_SCOPES.command,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.

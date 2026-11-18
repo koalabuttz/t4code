@@ -10,7 +10,8 @@ import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
-import { Atom } from "effect/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import {
   DndContext,
@@ -52,9 +53,11 @@ import {
   scopeProjectRef,
   scopeThreadRef,
   scopedThreadKey,
+  scopedProjectKey,
 } from "@t3tools/client-runtime/environment";
 import {
   AuthOrchestrationOperateScope,
+  type ContextMenuSource,
   ProjectId,
   type ScopedThreadRef,
   type ThreadId,
@@ -159,6 +162,9 @@ import { useThreadSearch } from "../state/queries";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { readEnvironmentScope, useEnvironmentScope } from "../state/session";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { hasCrewProjectFootprint } from "./teamwork/crewChat.logic";
+import { environmentShell } from "../state/shell";
+import { serverEnvironment } from "../state/server";
 import { canShareWithGuestAtom } from "./chat/guestShareAvailability";
 import { openGuestShareDialog } from "./chat/guestShareDialogState";
 import {
@@ -915,7 +921,42 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   } = useSidebarLookups();
   const delegatedUnderParent = useDelegatedUnderParent();
   const router = useRouter();
+  const projectSelection = useRef(0);
   const { isMobile, setOpenMobile } = useSidebar();
+  const openCrewProjectIfConfigured = useStableCallback(
+    async (group: SidebarProjectSnapshot | undefined) => {
+      const selection = ++projectSelection.current;
+      if (!group) return;
+      const scope = scopeProjectRef(group.environmentId, group.id);
+      if (
+        serverConfigs.get(scope.environmentId)?.environment.capabilities.projectTeamwork !== true ||
+        appAtomRegistry.get(environmentShell.statusAtom(scope.environmentId)) !== "live"
+      )
+        return;
+      const href = router.state.location.href;
+      const state = await Effect.runPromise(
+        AtomRegistry.getResult(
+          appAtomRegistry,
+          serverEnvironment.teamworkLive({
+            environmentId: scope.environmentId,
+            input: { projectId: scope.projectId },
+          }),
+        ).pipe(Effect.timeoutOption("5 seconds"), Effect.orElseSucceed(Option.none)),
+      );
+      const snapshot = Option.getOrNull(state)?.snapshot;
+      if (
+        projectSelection.current !== selection ||
+        router.state.location.href !== href ||
+        !hasCrewProjectFootprint(snapshot)
+      )
+        return;
+      if (isMobile) setOpenMobile(false);
+      void router.navigate({
+        to: "/projects/$projectKey/crew",
+        params: { projectKey: scopedProjectKey(scope) },
+      });
+    },
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -1250,7 +1291,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     void handleNewThread(scopeProjectRef(group.environmentId, group.id));
   });
   const handleProjectFolderContextMenu = useStableCallback(
-    (group: SidebarProjectSnapshot, position: { x: number; y: number }) => {
+    (
+      group: SidebarProjectSnapshot,
+      position: { x: number; y: number },
+      source: ContextMenuSource,
+    ) => {
       const api = readLocalApi();
       if (!api) return;
       void (async () => {
@@ -1267,12 +1312,24 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                   ]
                 : []),
               { id: "project-settings", label: "Project settings", icon: "settings" },
+              ...(serverConfigs.get(group.environmentId)?.environment.capabilities.projectTeamwork
+                ? [{ id: "project-crew", label: "Project crew" }]
+                : []),
             ],
             position,
+            source,
           ),
         );
         if (clicked._tag === "Failure") return;
         switch (clicked.value) {
+          case "project-crew":
+            void router.navigate({
+              to: "/projects/$projectKey/crew",
+              params: {
+                projectKey: scopedProjectKey(scopeProjectRef(group.environmentId, group.id)),
+              },
+            });
+            return;
           case "new-thread":
             startThreadInProjectFolder(group);
             return;
@@ -2283,7 +2340,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
 
   const handleMultiSelectContextMenu = useStableCallback(
-    async (position: { x: number; y: number }) => {
+    async (position: { x: number; y: number }, source: ContextMenuSource) => {
       const api = readLocalApi();
       if (!api) return;
       const selectedThreadKeys = [...useThreadSelectionStore.getState().selectedThreadKeys];
@@ -2381,6 +2438,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             },
           ],
           position,
+          source,
         ),
       );
       if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -2534,7 +2592,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
 
   const handleDraftContextMenu = useStableCallback(
-    (draftId: DraftId, position: { x: number; y: number }) => {
+    (draftId: DraftId, position: { x: number; y: number }, source: ContextMenuSource) => {
       void (async () => {
         const api = readLocalApi();
         const session = useComposerDraftStore.getState().getDraftSession(draftId);
@@ -2556,6 +2614,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               hasProject: projectGroup != null,
             }),
             position,
+            source,
           ),
         );
         if (clicked._tag === "Failure") return;
@@ -2585,14 +2644,14 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
 
   const handleThreadContextMenu = useStableCallback(
-    (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
+    (threadRef: ScopedThreadRef, position: { x: number; y: number }, source: ContextMenuSource) => {
       void (async () => {
         const api = readLocalApi();
         if (!api) return;
         const threadKey = scopedThreadKey(threadRef);
         const selectionState = useThreadSelectionStore.getState();
         if (selectionState.hasSelection() && selectionState.selectedThreadKeys.has(threadKey)) {
-          await handleMultiSelectContextMenu(position);
+          await handleMultiSelectContextMenu(position, source);
           return;
         }
         const thread = threadByKeyRef.current.get(threadKey);
@@ -2659,6 +2718,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               snoozePresets,
             }),
             position,
+            source,
           ),
         );
         if (clicked._tag === "Failure" || clicked.value === null) return;
@@ -2986,6 +3046,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     }
                     if (!item) return;
                     if (item.value === "all") {
+                      projectSelection.current++;
                       setProjectScopeKeys([]);
                     } else if (
                       eventDetails.event instanceof MouseEvent &&
@@ -2993,9 +3054,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     ) {
                       // Canceling skips Base UI's commit, which would freeze the search query, and its close.
                       eventDetails.cancel();
+                      projectSelection.current++;
                       toggleProjectScopeKey(item.value);
                     } else {
                       setProjectScopeKeys([item.value]);
+                      void openCrewProjectIfConfigured(projectGroupByScopeKey.get(item.value));
                     }
                   }}
                 >
@@ -3493,7 +3556,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 group={folder.group}
                                 collapsed={folder.collapsed}
                                 hiddenThreads={folder.hiddenThreads}
-                                onToggle={toggleProjectFolder}
+                                onToggle={(group) => {
+                                  toggleProjectFolder(group);
+                                  if (folder.collapsed) void openCrewProjectIfConfigured(group);
+                                }}
                                 onNewThread={startThreadInProjectFolder}
                                 onContextMenu={handleProjectFolderContextMenu}
                               />,

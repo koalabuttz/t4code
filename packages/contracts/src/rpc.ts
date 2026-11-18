@@ -34,6 +34,32 @@ import {
   ChatGptHandoffState,
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
+import {
+  CrewConversationCommand,
+  CrewConversationQuery,
+  CrewConversationPage,
+  CrewConversationReceipt,
+} from "./crewConversation.ts";
+import { OutpostSessionInput } from "./polytoken.ts";
+import {
+  OutpostSurfaceState,
+  OutpostSurfaceInput,
+  OutpostSurfaceDocument,
+  OutpostSurfaceRequestInput,
+  OutpostSurfaceResponseFrame,
+} from "./polytokenSurfaces.ts";
+import {
+  OutpostError,
+  OutpostFleetList,
+  OutpostFleet,
+  OutpostConnectionSaveInput,
+  OutpostConnectionInput,
+  OutpostHistoryInput,
+  OutpostHistory,
+  OutpostAttachmentInput,
+  OutpostAttachment,
+  OutpostSessionActionInput,
+} from "./polytoken.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
@@ -553,6 +579,21 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
+  outpostSubscribe: "outpost.subscribe",
+  outpostSave: "outpost.save",
+  outpostRemove: "outpost.remove",
+  outpostTest: "outpost.test",
+  outpostHistory: "outpost.history",
+  outpostAttachment: "outpost.attachment",
+  outpostAction: "outpost.action",
+  outpostSurfacesSubscribe: "outpost.surfaces.subscribe",
+  outpostSurfaceDocument: "outpost.surfaces.document",
+  outpostSurfaceRequest: "outpost.surfaces.request",
+  teamworkSubscribe: "teamwork.subscribe",
+  teamworkMutate: "teamwork.mutate",
+  teamworkHistory: "teamwork.history",
+  crewConversationCommand: "crew.conversation.command",
+  crewConversationQuery: "crew.conversation.query",
   scheduledTasksUpsert: "scheduledTasks.upsert",
   scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
   scheduledTasksDelete: "scheduledTasks.delete",
@@ -2029,6 +2070,87 @@ const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe
   stream: true,
 });
 
+const WsOutpostSubscribeRpc = Rpc.make(WS_METHODS.outpostSubscribe, {
+  payload: Schema.Struct({}),
+  success: OutpostFleetList,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsOutpostSaveRpc = Rpc.make(WS_METHODS.outpostSave, {
+  payload: OutpostConnectionSaveInput,
+  success: Schema.Void,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+});
+const WsOutpostRemoveRpc = Rpc.make(WS_METHODS.outpostRemove, {
+  payload: OutpostConnectionInput,
+  success: Schema.Void,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+});
+const WsOutpostTestRpc = Rpc.make(WS_METHODS.outpostTest, {
+  payload: OutpostConnectionInput,
+  success: OutpostFleet,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+});
+const WsOutpostHistoryRpc = Rpc.make(WS_METHODS.outpostHistory, {
+  payload: OutpostHistoryInput,
+  success: OutpostHistory,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+});
+const WsOutpostAttachmentRpc = Rpc.make(WS_METHODS.outpostAttachment, {
+  payload: OutpostAttachmentInput,
+  success: OutpostAttachment,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+});
+const WsOutpostActionRpc = Rpc.make(WS_METHODS.outpostAction, {
+  payload: OutpostSessionActionInput,
+  success: Schema.Void,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+});
+const WsOutpostSurfacesSubscribeRpc = Rpc.make(WS_METHODS.outpostSurfacesSubscribe, {
+  payload: OutpostSessionInput,
+  success: OutpostSurfaceState,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsOutpostSurfaceDocumentRpc = Rpc.make(WS_METHODS.outpostSurfaceDocument, {
+  payload: OutpostSurfaceInput,
+  success: OutpostSurfaceDocument,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+});
+const WsOutpostSurfaceRequestRpc = Rpc.make(WS_METHODS.outpostSurfaceRequest, {
+  payload: OutpostSurfaceRequestInput,
+  success: OutpostSurfaceResponseFrame,
+  error: Schema.Union([OutpostError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsTeamworkSubscribeRpc = Rpc.make(WS_METHODS.teamworkSubscribe, {
+  payload: TeamworkReadInput,
+  success: TeamworkReadResult,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsTeamworkMutateRpc = Rpc.make(WS_METHODS.teamworkMutate, {
+  payload: TeamworkMutateInput,
+  success: TeamworkReadResult,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+});
+const WsTeamworkHistoryRpc = Rpc.make(WS_METHODS.teamworkHistory, {
+  payload: TeamworkHistoryInput,
+  success: TeamworkHistoryResult,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+});
+const WsCrewConversationCommandRpc = Rpc.make(WS_METHODS.crewConversationCommand, {
+  payload: CrewConversationCommand,
+  success: CrewConversationReceipt,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+});
+const WsCrewConversationQueryRpc = Rpc.make(WS_METHODS.crewConversationQuery, {
+  payload: CrewConversationQuery,
+  success: CrewConversationPage,
+  error: Schema.Union([TeamworkError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksUpsertRpc = Rpc.make(WS_METHODS.scheduledTasksUpsert, {
   payload: ScheduledTaskUpsertInput,
   success: ScheduledTaskMutationResult,
@@ -2173,6 +2295,21 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksSubscribeRpc,
+  WsOutpostSubscribeRpc,
+  WsOutpostSaveRpc,
+  WsOutpostRemoveRpc,
+  WsOutpostTestRpc,
+  WsOutpostHistoryRpc,
+  WsOutpostAttachmentRpc,
+  WsOutpostActionRpc,
+  WsOutpostSurfacesSubscribeRpc,
+  WsOutpostSurfaceDocumentRpc,
+  WsOutpostSurfaceRequestRpc,
+  WsTeamworkSubscribeRpc,
+  WsTeamworkMutateRpc,
+  WsTeamworkHistoryRpc,
+  WsCrewConversationCommandRpc,
+  WsCrewConversationQueryRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,
@@ -2333,3 +2470,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeCommandOutputRpc,
   WsOrchestrationV2SubscribePromptSuggestionRpc,
 ).middleware(RpcScopeAuthorization);
+import {
+  TeamworkReadInput,
+  TeamworkReadResult,
+  TeamworkMutateInput,
+  TeamworkError,
+  TeamworkHistoryInput,
+  TeamworkHistoryResult,
+} from "./teamwork.ts";

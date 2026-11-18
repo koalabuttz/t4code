@@ -1,4 +1,5 @@
-import type { EnvironmentId, UnifiedSettings } from "@t3tools/contracts";
+import { type EnvironmentId, type UnifiedSettings, UsageLimitSourceId } from "@t3tools/contracts";
+import { USAGE_SOURCE_PRESETS } from "@t3tools/shared/usageLimits";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -30,7 +31,9 @@ export function UsageProviderSettings({
 }) {
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<UsageLimitSourceId | null>(null);
   const entries = Object.entries(sources);
+  const editedSource = editing ? sources[editing] : undefined;
 
   return (
     <>
@@ -40,13 +43,13 @@ export function UsageProviderSettings({
           !readOnly ? (
             <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
               <PlusIcon className="size-3" aria-hidden />
-              Add hub
+              Add source
             </Button>
           ) : null
         }
       >
         {entries.length === 0 ? (
-          <SettingsRow title="No hubs configured." />
+          <SettingsRow title="No usage sources configured." />
         ) : (
           entries.map(([id, source]) => {
             const label = source.label?.trim() || source.url;
@@ -56,16 +59,28 @@ export function UsageProviderSettings({
                 title={label}
                 description={
                   <span className="break-all">
-                    CLI Proxy{source.enabled ? "" : " · Disabled"}
+                    {USAGE_SOURCE_PRESETS[source.kind].label}
+                    {source.enabled ? "" : " · Disabled"}
                     {label !== source.url ? ` · ${source.url}` : ""}
                   </span>
                 }
                 control={
                   !readOnly ? (
-                    <RemoveUsageProviderButton
-                      label={label}
-                      onConfirm={() => updateSettings({ usageLimitSources: { [id]: null } })}
-                    />
+                    <div className="flex gap-2">
+                      {source.kind === "anthropic" ? (
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={() => setEditing(UsageLimitSourceId.make(id))}
+                        >
+                          Update session
+                        </Button>
+                      ) : null}
+                      <RemoveUsageProviderButton
+                        label={label}
+                        onConfirm={() => updateSettings({ usageLimitSources: { [id]: null } })}
+                      />
+                    </div>
                   ) : null
                 }
               />
@@ -73,13 +88,24 @@ export function UsageProviderSettings({
           })
         )}
       </SettingsSection>
-      {adding && !readOnly ? (
+      {(adding || editedSource) && !readOnly ? (
         <AddUsageLimitSourceDialog
+          key={editing ?? "new"}
           open
-          onOpenChange={setAdding}
+          onOpenChange={(open) => {
+            if (!open) {
+              setAdding(false);
+              setEditing(null);
+            }
+          }}
           environmentId={environmentId}
           environmentLabel={environmentLabel}
           sources={sources}
+          {...(editing && editedSource
+            ? {
+                initialSource: { id: editing, config: editedSource },
+              }
+            : {})}
         />
       ) : null}
     </>
@@ -104,9 +130,8 @@ function RemoveUsageProviderButton({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {label}?</AlertDialogTitle>
             <AlertDialogDescription>
-              The hub's management key is deleted from this server. Its accounts leave the Limits
-              view; the hub itself is untouched. Add it again with the URL and key to bring them
-              back.
+              The saved credential is deleted from this server and this source leaves the Limits
+              view. You can add it again at any time.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -118,7 +143,7 @@ function RemoveUsageProviderButton({
                 onConfirm();
               }}
             >
-              Remove hub
+              Remove source
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

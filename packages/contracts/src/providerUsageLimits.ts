@@ -47,6 +47,21 @@ export type ServerProviderResetCredits = typeof ServerProviderResetCredits.Type;
 export const ServerProviderUsageLimits = Schema.Struct({
   checkedAt: IsoDateTime,
   windows: ForwardCompatibleArray(ServerProviderUsageWindow),
+  balances: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        currency: TrimmedNonEmptyString,
+        remaining: Schema.Number.check(Schema.isFinite()),
+      }),
+    ),
+  ),
+  accountLabel: Schema.optional(TrimmedNonEmptyString),
+  monthlySpend: Schema.optional(
+    Schema.Struct({
+      amount: Schema.NullOr(Schema.Number.check(Schema.isFinite())),
+      currency: TrimmedNonEmptyString,
+    }),
+  ),
   /** A $0 monthly spend cap has no percentage, so it cannot be a window. */
   zeroSpendCap: Schema.optional(Schema.Boolean),
   credentialFingerprint: Schema.optional(TrimmedNonEmptyString),
@@ -82,9 +97,19 @@ export const UsageLimitSourceAccount = Schema.Struct({
 });
 export type UsageLimitSourceAccount = typeof UsageLimitSourceAccount.Type;
 
+export const UsageLimitSourceKind = Schema.Literals([
+  "cliproxy",
+  "deepseek",
+  "zai-coding",
+  "zai-api",
+  "abliteration",
+  "anthropic",
+]);
+export type UsageLimitSourceKind = typeof UsageLimitSourceKind.Type;
+
 export const UsageLimitSourceSnapshot = Schema.Struct({
   id: UsageLimitSourceId,
-  kind: Schema.Literal("cliproxy"),
+  kind: UsageLimitSourceKind,
   label: TrimmedNonEmptyString,
   /** Origin of the hub, which also serves the agents sent through it. */
   origin: Schema.optional(TrimmedNonEmptyString),
@@ -92,6 +117,7 @@ export const UsageLimitSourceSnapshot = Schema.Struct({
   endpoint: Schema.optional(TrimmedNonEmptyString),
   checkedAt: IsoDateTime,
   accounts: ForwardCompatibleArray(UsageLimitSourceAccount),
+  usageLimits: Schema.optional(ServerProviderUsageLimits),
   error: Schema.optional(TrimmedNonEmptyString),
 });
 export type UsageLimitSourceSnapshot = typeof UsageLimitSourceSnapshot.Type;

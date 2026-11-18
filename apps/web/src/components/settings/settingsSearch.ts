@@ -626,6 +626,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["speech voice stt advanced gpu cpu acceleration memory unload idle"],
   },
   {
+    id: "speech-streaming",
+    title: "Streaming transcription",
+    to: "/settings/voice",
+    searchTerms: ["speech voice stt advanced native live preview batch after stopping slow lag"],
+  },
+  {
     id: "microphone-test",
     title: "Test microphone",
     to: "/settings/voice",
@@ -976,7 +982,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Providers",
     to: "/settings/providers",
     searchTerms: [
-      "agents cli codex claude cursor grok fx kiro opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory codex_home shadow home endpoint arguments environment variables display name accent color custom favorite hidden auto compact native sessions import resume",
+      "agents cli codex claude cursor grok fx kiro opencode antigravity albedo daemon profiles google sign in sign out install subscription instances authentication api key models configuration binary path config directory codex_home albedo_home shadow home endpoint arguments environment variables display name accent color custom favorite hidden auto compact native sessions import resume",
     ],
   },
   {
@@ -984,7 +990,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Usage providers",
     to: "/settings/providers",
     searchTerms: [
-      "usage sources CLIProxyAPI CLI proxy hub quota subscription limits management key add remove",
+      "usage sources CLIProxyAPI CLI proxy hub quota subscription limits management key add remove DeepSeek GLM Z.ai Abliteration Claude Anthropic API balance credits prepaid Console session spend",
     ],
     providerSettingsOnly: true,
   },
@@ -1331,6 +1337,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Environments",
     to: "/settings/connections",
     searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+  },
+  {
+    id: "outpost-fleets",
+    title: "Outpost fleets",
+    to: "/settings/connections",
+    searchTerms: ["polytoken sessions projects plugin surfaces stopped transcripts attachments"],
   },
   {
     id: "load-balancing",

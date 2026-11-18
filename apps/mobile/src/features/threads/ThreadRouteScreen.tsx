@@ -6,10 +6,13 @@ import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTu
 import { useWorktreeSetup } from "./use-worktree-setup";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { AppBar } from "../../components/ui/AppBar";
+import { AppText } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
 import {
   StackActions,
   useNavigation,
   useRoute,
+  type RouteProp,
   type StaticScreenProps,
 } from "@react-navigation/native";
 import {
@@ -30,6 +33,7 @@ import {
   EnvironmentId,
   isProviderNativeSubagentThread,
   MessageId,
+  ProjectId,
   ThreadId,
   type ProjectScript,
 } from "@t3tools/contracts";
@@ -52,6 +56,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { useDelayedStatus } from "../../lib/useDelayedStatus";
+import { connectionRetryLabel } from "./floating-working-status";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useThreadShell } from "../../state/entities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
@@ -82,6 +87,9 @@ import {
 } from "../terminal/terminalLaunchContext";
 import type { ThreadDetailScreenProps } from "./ThreadDetailScreen";
 import { ThreadScreenBinding, ThreadScreenFallback, ThreadScreenHost } from "./ThreadScreenHost";
+import { CrewConversationReturn } from "./CrewConversationReturn";
+import { mobileCrewRequestState, type CrewRequestTarget } from "./crewMobile.logic";
+import { openCrewPage, type CrewPage } from "./crewProjectNavigation";
 import { draftRouteIdentity } from "./thread-route-state";
 import { NewTaskDraftRouteScreen, type NewTaskDraftRouteParams } from "./NewTaskDraftRouteScreen";
 import { GitOverviewSheet } from "./git/GitOverviewSheet";
@@ -136,11 +144,20 @@ function firstRouteParam(value: string | string[] | undefined): string | null {
   return first === undefined || first.trim().length === 0 ? null : first;
 }
 
+const RECONNECT_ERROR_DELAY_MS = 5_000;
+
 // The inspector pane's bar belongs to ThreadInspectorHeader; the fallback must not draw its own.
 const InspectorHeaderShownContext = createContext(false);
 
 function ThreadRouteFallbackLayout(props: { readonly children: ReactNode }) {
-  const goBack = useWorkspaceBackNavigation();
+  const route = useRoute<RouteProp<ReactNavigation.RootParamList, "Thread">>();
+  const goBack = useWorkspaceBackNavigation(
+    Boolean(
+      route.params?.crewCoordinatorProjectId ??
+      route.params?.crewSourceProjectId ??
+      route.params?.crewProjectId,
+    ),
+  );
   const inspectorHeaderShown = use(InspectorHeaderShownContext);
   return (
     <ThreadScreenFallback
@@ -169,6 +186,11 @@ type ThreadRouteScreenRouteProps = StaticScreenProps<{
   readonly draft?: NewTaskDraftRouteParams;
   readonly inspector?: ThreadInspectorTarget;
   readonly prompt?: string | string[];
+  readonly crewProjectId?: string;
+  readonly crewPage?: CrewPage;
+  readonly crewCoordinatorProjectId?: string;
+  readonly crewSourceProjectId?: string;
+  readonly crewRequest?: CrewRequestTarget;
 }>;
 
 interface ThreadRouteScreenProps extends ThreadRouteScreenRouteProps {
@@ -232,6 +254,16 @@ function UnavailableThreadDraftRedirect(props: { readonly environmentId: Environ
 export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
   return (
     <ThreadScreenHost>
+      {props.route.params?.crewProjectId &&
+        props.route.params.environmentId &&
+        props.route.params.threadId && (
+          <CrewConversationReturn
+            environmentId={EnvironmentId.make(props.route.params.environmentId)}
+            projectId={ProjectId.make(props.route.params.crewProjectId)}
+            threadId={ThreadId.make(props.route.params.threadId)}
+            page={props.route.params.crewPage ?? "overview"}
+          />
+        )}
       {props.route.params?.draft ? (
         <NewTaskDraftRouteScreen
           key={draftRouteIdentity(props.route.params.draft)}
@@ -245,7 +277,11 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps) {
 }
 
 function LiveThreadRouteController(props: ThreadRouteScreenProps) {
-  useAndroidWorkspaceBack();
+  const crewProject =
+    props.route.params?.crewCoordinatorProjectId ??
+    props.route.params?.crewSourceProjectId ??
+    props.route.params?.crewProjectId;
+  useAndroidWorkspaceBack(crewProject !== undefined);
   const connectionsReady = useConnectionsReady();
   const { connectionState } = useRemoteConnectionStatus();
   const { selectedThread } = useThreadSelection();
@@ -294,6 +330,16 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
   }
 
   if (selectedThread !== null && selectedThreadKey === routeThreadKey) {
+    if (
+      crewProject &&
+      (selectedThread.projectId !== crewProject || selectedThread.deletedAt !== null)
+    ) {
+      return (
+        <ThreadRouteFallbackLayout>
+          <AppText className="p-5">The source conversation is unavailable in this project.</AppText>
+        </ThreadRouteFallbackLayout>
+      );
+    }
     // ThreadRouteContent draws its own inspector header so it can show the sync status.
     return (
       <InspectorHeaderShownContext value={props.inspectorPresentation !== undefined}>
@@ -325,6 +371,7 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
 
   if (
     routeName === "Thread" &&
+    !crewProject &&
     !props.inspectorPresentation &&
     threadRouteOpensDraft({
       connectionState: routeConnectionState,
@@ -332,6 +379,30 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
     })
   ) {
     return <UnavailableThreadDraftRedirect environmentId={environmentId} />;
+  }
+
+  if (crewProject) {
+    return (
+      <ThreadRouteFallbackLayout>
+        <AppText className="p-5">This project conversation is unavailable.</AppText>
+        {props.route.params?.crewCoordinatorProjectId && (
+          <Button
+            label="Open coordinator recovery"
+            onPress={() =>
+              openCrewPage(
+                navigation,
+                {
+                  environmentId,
+                  projectId: ProjectId.make(crewProject),
+                },
+                "recovery",
+              )
+            }
+          />
+        )}
+        <Button label="Return to origin" onPress={() => navigation.goBack()} />
+      </ThreadRouteFallbackLayout>
+    );
   }
 
   return withInspectorHeader(
@@ -385,7 +456,18 @@ function ThreadRouteContent(
   const composer = useThreadComposerState({ startSideChat });
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
-  const requests = useSelectedThreadRequests();
+  const crewRequest = mobileCrewRequestState(
+    props.route.params?.crewRequest,
+    selectedThreadDetailState.status === "deleted" ? null : selectedThreadDetail,
+    selectedThreadDetailState.status === "live" || selectedThreadDetailState.status === "deleted",
+  );
+  const requests = useSelectedThreadRequests(
+    crewRequest.kind === "ordinary"
+      ? undefined
+      : crewRequest.kind === "pending"
+        ? crewRequest.requestId
+        : null,
+  );
   useThreadStatusAnnouncements({
     threadKey:
       selectedThread === null || isProviderNativeSubagentThread(selectedThread.source)
@@ -857,7 +939,7 @@ function ThreadRouteContent(
     );
   };
   const setupTurnStartedAt = composer.selectedThreadActivityRun?.startedAt ?? null;
-  const { snapshot: worktreeSetupSnapshot, visible: worktreeSetup } = useWorktreeSetup({
+  const { visible: worktreeSetup } = useWorktreeSetup({
     environmentId: selectedThread?.environmentId ?? null,
     threadId: selectedThread?.id ?? null,
     preparing:
@@ -961,18 +1043,33 @@ function ThreadRouteContent(
           detailDeleted: selectedThreadDetailState.status === "deleted",
           connectionState: routeConnectionState,
         });
-  // Shown in the header subtitle so the composer's status slot doesn't jump while history syncs.
-  const threadSyncLabel = useDelayedStatus(
-    selectedThread === null ? "" : scopedThreadKey(selectedThread.environmentId, selectedThread.id),
-    // A thread this client is creating has nothing older to sync.
+  const connectionRetrying =
+    routeConnectionState === "connecting" || routeConnectionState === "reconnecting";
+  // Connection failures survive retries and app suspension.
+  const retryConnectionError = useDelayedStatus(
+    `${environmentId}:${connectionRetrying && routeConnectionError !== null}`,
+    connectionRetrying ? routeConnectionError : null,
+    RECONNECT_ERROR_DELAY_MS,
+  );
+  const connectionStatusLabel = connectionRetryLabel({
+    connectionError: retryConnectionError,
+    connectionState: routeConnectionState,
+    connectionAwaitingApproval: routeEnvironmentRuntime?.connectionAwaitingApproval === true,
+  });
+  // A thread this client is creating has nothing older to sync.
+  const threadSyncLabel =
     creationState === null
       ? threadSyncStatusLabel(selectedThreadDetailState.status, contentPresentation.kind)
-      : null,
+      : null;
+  // Transient states go in the header subtitle so the composer's status slot doesn't jump.
+  const threadStatusLabel = useDelayedStatus(
+    selectedThread === null ? "" : scopedThreadKey(selectedThread.environmentId, selectedThread.id),
+    connectionStatusLabel !== null ? connectionStatusLabel : threadSyncLabel,
   );
   const inspectorHeader = props.inspectorPresentation ? (
     <ThreadInspectorHeader
       title={selectedThread?.title ?? "Thread"}
-      subtitle={threadSyncLabel ?? undefined}
+      subtitle={threadStatusLabel ?? undefined}
       {...props.inspectorPresentation}
     />
   ) : null;
@@ -996,11 +1093,33 @@ function ThreadRouteContent(
 
       <>
         <ThreadScreenBinding
+          crewRoute={
+            serverConfig?.environment.capabilities.projectTeamwork &&
+            !props.inspectorPresentation &&
+            !isProviderNativeSubagentThread(selectedThread.source) &&
+            selectedThreadProject
+              ? {
+                  projectTitle: selectedThreadProject.title,
+                  coordinator:
+                    props.route.params?.crewCoordinatorProjectId === selectedThread.projectId,
+                  source: props.route.params?.crewSourceProjectId === selectedThread.projectId,
+                }
+              : undefined
+          }
           header={
             props.inspectorPresentation ? null : (
               <ThreadHeader
                 title={selectedThread.title}
-                subtitle={threadSyncLabel ?? headerSubtitle}
+                {...(serverConfig?.environment.capabilities.projectTeamwork
+                  ? {
+                      teamwork: {
+                        environmentId: selectedThread.environmentId,
+                        projectId: selectedThread.projectId,
+                        threadId: selectedThread.id,
+                      },
+                    }
+                  : {})}
+                subtitle={threadStatusLabel ?? headerSubtitle}
                 gitControls={threadGitControlProps}
                 hasThreadCwd={selectedThreadCwd !== null}
                 inspectorMode={inspectorMode}
@@ -1010,6 +1129,7 @@ function ThreadRouteContent(
             )
           }
           canOperateThread={canOperateThread}
+          crewRequest={crewRequest}
           selectedThread={selectedThreadWithDraftSettings ?? selectedThread}
           selectedThreadDetailRef={selectedThreadDetailRef}
           contentPresentation={contentPresentation}
@@ -1036,21 +1156,10 @@ function ThreadRouteContent(
           extensionStatuses={composer.extensionStatuses}
           providerSubagentStatus={composer.providerSubagentStatus}
           creationState={creationState}
-          setupWorkingStartedAt={
-            composer.activeWorkStartedAt !== null &&
-            worktreeSetupSnapshot !== null &&
-            composer.selectedThreadFeed.filter(
-              (entry) => entry.type === "message" && entry.message.role === "user",
-            ).length <= 1
-              ? composer.activeWorkStartedAt
-              : null
-          }
           worktreeSetup={
             worktreeSetup
               ? {
                   snapshot: worktreeSetup,
-                  turnStartedAt: setupTurnStartedAt,
-                  working: composer.activeWorkStartedAt !== null,
                   turnStarted: setupTurnStartedAt !== null,
                   onCancel: handleCancelWorktreeSetup,
                   onWorkLocally: setupMessage && selectedThreadProject ? handleWorkLocally : null,
@@ -1065,7 +1174,6 @@ function ThreadRouteContent(
           activePendingUserInputAnswers={requests.activePendingUserInputAnswers}
           respondingUserInputId={requests.respondingUserInputId}
           connectionStateLabel={routeConnectionState}
-          connectionAwaitingApproval={routeEnvironmentRuntime?.connectionAwaitingApproval === true}
           historyControls={historyControls}
           activeThreadBusy={composer.activeThreadBusy}
           canStopThread={awaitingBootstrapTurn || composer.interruptibleRunId !== null}

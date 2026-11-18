@@ -34,6 +34,32 @@ import { forkParked } from "../serverActivation.ts";
 
 export const OrchestrationEffectRequestV2 = Schema.Union([
   Schema.Struct({
+    type: Schema.Literal("provider-runtime.steer"),
+    providerSessionId: ProviderSessionId,
+    providerThreadId: ProviderThreadId,
+    providerTurnId: ProviderTurnId,
+    runId: RunId,
+    attemptId: RunAttemptId,
+    messageId: MessageId,
+    modelSelection: Schema.optional(ModelSelection),
+    steerFollowUpAfterRunOrdinal: Schema.optional(NonNegativeInt),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("provider-runtime.stop"),
+    providerSessionId: ProviderSessionId,
+    providerThreadId: ProviderThreadId,
+    runId: RunId,
+    attemptId: RunAttemptId,
+    providerTurnId: Schema.NullOr(ProviderTurnId),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("provider-runtime.reattach"),
+    providerSessionId: ProviderSessionId,
+    providerThreadId: ProviderThreadId,
+    runId: RunId,
+    attemptId: RunAttemptId,
+  }),
+  Schema.Struct({
     type: Schema.Literal("provider-runtime.continue"),
     sourceRunId: RunId,
     processLossCount: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -140,6 +166,9 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
 export type OrchestrationEffectRequestV2 = typeof OrchestrationEffectRequestV2.Type;
 
 export const REPLAY_SAFE_EFFECT_TYPES_AFTER_PROCESS_LOSS = [
+  "provider-runtime.steer",
+  "provider-runtime.stop",
+  "provider-runtime.reattach",
   "provider-runtime.continue",
   "provider-session.detach",
   "provider-thread.rollback",

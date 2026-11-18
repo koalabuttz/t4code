@@ -24,6 +24,71 @@ import * as UsageLimitSources from "./UsageLimitSources.ts";
 
 const encodeConfigEvent = Schema.encodeSync(ServerConfigStreamEvent);
 
+it.effect("reads API balances separately from pooled provider accounts", () =>
+  Effect.gen(function* () {
+    const sources = yield* UsageLimitSources.make;
+    yield* sources.refresh;
+    const [snapshot] = yield* sources.current;
+    expect(snapshot?.accounts).toEqual([]);
+    expect(snapshot?.usageLimits?.balances).toEqual([
+      { currency: "USD", remaining: 12.5 },
+      { currency: "CNY", remaining: 0 },
+    ]);
+    expect(snapshot?.usageLimits?.windows).toEqual([]);
+    expect(snapshot?.error).toBeUndefined();
+    expect(
+      JSON.stringify(
+        encodeConfigEvent({
+          version: 1,
+          type: "usageLimitSourcesUpdated",
+          payload: { sources: snapshot ? [snapshot] : [] },
+        }),
+      ),
+    ).not.toContain("private-api-key");
+  }).pipe(
+    Effect.provide([
+      ServerSettings.layerTest({
+        usageLimitSources: {
+          [UsageLimitSourceId.make("deepseek")]: {
+            kind: "deepseek",
+            url: "https://api.deepseek.com",
+            managementKey: "private-api-key",
+            enabled: true,
+          },
+        },
+      }),
+      Layer.mock(BackgroundPolicy.BackgroundPolicy)({
+        shouldRunScopeWork: () => Effect.succeed(false),
+      }),
+      Layer.succeed(SecretResolver.SecretResolver, {
+        label: (provider) => Effect.succeed(provider),
+        read: (references) => Effect.succeed(references.map(() => undefined)),
+        invalidate: () => Effect.void,
+      }),
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.sync(() => {
+            expect(request.url).toBe("https://api.deepseek.com/user/balance");
+            expect(request.headers.authorization).toBe("Bearer private-api-key");
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                is_available: true,
+                balance_infos: [
+                  { currency: "USD", total_balance: "12.50" },
+                  { currency: "CNY", total_balance: "0" },
+                ],
+              }),
+            );
+          }),
+        ),
+      ),
+      NodeCrypto.layer,
+    ]),
+  ),
+);
+
 it.effect("keeps malformed source URLs encodable for config subscribers", () =>
   Effect.gen(function* () {
     const sources = yield* UsageLimitSources.make;

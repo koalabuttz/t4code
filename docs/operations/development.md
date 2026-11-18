@@ -43,6 +43,23 @@ skill for PRs, issues, reviews, and CI, and leave GitHub's API alone. Pull reque
 merge on GitHub, so GitHub's required checks and reviews still apply. Numbers can differ between
 the two forges; in text that reaches GitHub, use the GitHub number.
 
+## Keeping this fork current
+
+On `koalabuttz/t4code`, the **Sync upstream** workflow checks `pingdotgg/t3code` daily at
+06:17 UTC. It can also be run manually from Actions. Updates go to one
+`automation/upstream-sync` pull request; main changes only when a maintainer merges it.
+Use a merge commit to retain upstream ancestry and avoid replaying updates later.
+
+The workflow explicitly starts CI on the update branch. Wait for the required **Check**
+result and review the diff before merging. A conflict stops before pushing: resolve it on
+the update branch, then rerun Sync upstream. Manual fixes on that branch are preserved.
+If main advances during preparation, rerun against its new head.
+
+Repository Actions settings must allow GitHub Actions to create pull requests. Default token
+permissions can remain read-only; the sync job requests the writes it needs. Protect main
+with an up-to-date **Check** requirement and disallow force pushes. Disabling **Sync upstream**
+in Actions pauses updates without changing either branch. No additional token is needed.
+
 ## Choosing a dev process
 
 Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron client.

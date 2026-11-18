@@ -1069,6 +1069,30 @@ it.effect("bounds runtime provider-thread reads by ownership and preserves recov
     ] as const;
     for (const entry of cases) {
       const id = ProviderThreadId.make(`provider-thread:ownership:${entry.name}`);
+      const sessionId = ProviderSessionId.make(`session:ownership:${entry.name}`);
+      yield* projections.apply({
+        id: EventId.make(`event:${sessionId}`),
+        type: "provider-session.attached",
+        threadId: other,
+        driver,
+        providerInstanceId,
+        occurredAt: now,
+        payload: {
+          id: sessionId,
+          driver,
+          providerInstanceId,
+          status: entry.ownership === "direct" ? "error" : "stopped",
+          cwd: "/workspace",
+          model: modelSelection.model,
+          capabilities: {
+            ...CodexProviderCapabilitiesV2,
+            sessions: { ...CodexProviderCapabilitiesV2.sessions, runtimeSurvivesServerExit: true },
+          },
+          createdAt: now,
+          updatedAt: now,
+          lastError: null,
+        },
+      });
       yield* projections.apply({
         id: EventId.make(`event:${id}`),
         type: "provider-thread.updated",
@@ -1088,7 +1112,7 @@ it.effect("bounds runtime provider-thread reads by ownership and preserves recov
             entry.ownership === "owner" || entry.ownership === "all" ? ownerNodeId : null,
           driver,
           providerInstanceId,
-          providerSessionId: null,
+          providerSessionId: sessionId,
           nativeThreadRef: null,
           nativeConversationHeadRef: null,
           status: entry.status,
@@ -1143,6 +1167,13 @@ it.effect("bounds runtime provider-thread reads by ownership and preserves recov
       .getRuntimeRecoveryProjection(threadId)
       .pipe(Effect.provideService(Statement.CurrentTransformer, observe));
     assert.equal(nodeStatements.length, 1);
+    assert.deepEqual(
+      projection.providerSessions.map((row) => row.id).toSorted(),
+      cases
+        .filter((entry) => entry.included)
+        .map((entry) => `session:ownership:${entry.name}`)
+        .toSorted(),
+    );
     const nodePlan = yield* sql.unsafe<{ detail: string }>(
       `EXPLAIN QUERY PLAN ${nodeStatements[0]![0]}`,
       nodeStatements[0]![1],

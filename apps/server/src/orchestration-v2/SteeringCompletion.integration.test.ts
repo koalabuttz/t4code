@@ -23,6 +23,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -32,6 +33,7 @@ import * as EventSink from "./EventSink.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -514,16 +516,23 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
     turn: ProviderAdapter.ProviderAdapterV2SteerInput,
   ) => Effect.Effect<void, ProviderAdapter.ProviderAdapterV2Error> = () => Effect.void,
   extraAdapters: ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]> = [],
+  external = false,
 ) {
   const driver = ProviderDriverKind.make(nativeGoals === undefined ? "codex" : "opencode");
   const cwd = yield* checkpointWorkspace(name);
   const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
   const started: ProviderAdapter.ProviderAdapterV2TurnInput[] = [];
+  const resumed: ProviderAdapter.ProviderAdapterV2ResumeTurnInput[] = [];
   const steered: string[] = [];
   const steeredSelections: Array<ModelSelection | undefined> = [];
   const interrupted: ProviderTurnId[] = [];
   const capabilities = {
     ...CodexProviderCapabilitiesV2,
+    sessions: {
+      ...CodexProviderCapabilitiesV2.sessions,
+      ...(external ? { supportsMultipleProviderThreadsPerSession: false } : {}),
+      runtimeSurvivesServerExit: external,
+    },
     turns: {
       ...CodexProviderCapabilitiesV2.turns,
       supportsActiveSteering: canSteer,
@@ -540,6 +549,8 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
     openSession: (input) =>
       Effect.gen(function* () {
         const now = yield* DateTime.now;
+        const closed = yield* Deferred.make<void>();
+        yield* Effect.addFinalizer(() => Deferred.succeed(closed, undefined));
         const turnUpdated = (
           turn: ProviderAdapter.ProviderAdapterV2TurnInput,
           status: "running" | "interrupted",
@@ -584,7 +595,7 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
             updatedAt: now,
             lastError: null,
           },
-          events: Stream.fromQueue(events),
+          events: Stream.fromQueue(events).pipe(Stream.interruptWhen(Deferred.await(closed))),
           ensureThread: ({ threadId }) =>
             Effect.succeed({
               id: ProviderThreadId.make(`provider-thread:${threadId}`),
@@ -606,6 +617,18 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
           resumeThread: ({ providerThread }) => Effect.succeed(providerThread),
           startTurn,
           compactThread: startTurn,
+          ...(external
+            ? {
+                resumeTurn: (turn: ProviderAdapter.ProviderAdapterV2ResumeTurnInput) =>
+                  Effect.suspend(() => {
+                    resumed.push(turn);
+                    const original = started.find((candidate) => candidate.runId === turn.runId);
+                    return original === undefined
+                      ? Effect.die("Missing native turn during recovery")
+                      : turnUpdated(original, "running").pipe(Effect.asVoid);
+                  }),
+              }
+            : {}),
           steerTurn: (turn) =>
             Effect.sync(() => {
               steered.push(turn.message.text);
@@ -697,7 +720,17 @@ const nextTurnSelectionHarness = Effect.fn("nextTurnSelectionHarness")(function*
     yield* (yield* ThreadCommandExecutor.ThreadCommandExecutor).withLock(threadId, Effect.void);
     return threadId;
   });
-  return { cwd, events, started, steered, steeredSelections, interrupted, layer, startFirstTurn };
+  return {
+    cwd,
+    events,
+    started,
+    resumed,
+    steered,
+    steeredSelections,
+    interrupted,
+    layer,
+    startFirstTurn,
+  };
 });
 
 it.effect.each([
@@ -1423,6 +1456,8 @@ it.effect("starts a steer that missed the turn on the saved next-turn selection"
 );
 
 const declinedSteerTimings = [
+  "external-restart",
+  "external-accepted",
   "complete",
   "stop-before-decline",
   "stop-after-decline",
@@ -1431,11 +1466,13 @@ const declinedSteerTimings = [
 ] as const;
 
 it.effect.each(declinedSteerTimings)(
-  "persists a declined steer without blocking the worker: %s",
+  "persists steering delivery without blocking the worker: %s",
   (timing) =>
     Effect.gen(function* () {
+      const external = timing.startsWith("external-");
+      const accepted = timing === "external-accepted";
       let beforeDecline: Effect.Effect<void> = Effect.void;
-      const { events, started, layer, startFirstTurn } = yield* nextTurnSelectionHarness(
+      const { events, started, resumed, layer, startFirstTurn } = yield* nextTurnSelectionHarness(
         `steering-declined-${timing}`,
         false,
         true,
@@ -1443,17 +1480,21 @@ it.effect.each(declinedSteerTimings)(
         true,
         undefined,
         (turn) =>
-          Effect.suspend(() => beforeDecline).pipe(
-            Effect.andThen(
-              Effect.fail(
-                new ProviderAdapter.ProviderAdapterSteerDeclinedError({
-                  driver,
-                  providerThreadId: turn.providerThread.id,
-                  providerTurnId: turn.providerTurnId,
-                }),
+          accepted
+            ? Effect.void
+            : Effect.suspend(() => beforeDecline).pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new ProviderAdapter.ProviderAdapterSteerDeclinedError({
+                      driver,
+                      providerThreadId: turn.providerThread.id,
+                      providerTurnId: turn.providerTurnId,
+                    }),
+                  ),
+                ),
               ),
-            ),
-          ),
+        [],
+        external,
       );
       yield* Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
@@ -1534,6 +1575,24 @@ it.effect.each(declinedSteerTimings)(
           createdBy: "user",
           creationSource: "web",
         });
+        if (external) {
+          const outbox = yield* EffectOutbox.EffectOutboxV2;
+          if (accepted) {
+            const claimed = yield* outbox.claimNext({ workerId: "lost-acknowledgement" });
+            if (Option.isNone(claimed)) return yield* Effect.die("Missing steering effect");
+            assert.equal(claimed.value.request.type, "provider-runtime.steer");
+            yield* (yield* EffectWorker.OrchestrationEffectExecutorV2).execute(claimed.value);
+          }
+          const projection = yield* orchestrator.getThreadProjection(threadId);
+          const nativeThread = projection.providerThreads.find(
+            (candidate) => candidate.id === first.providerThread.id,
+          )!;
+          yield* (yield* ProviderSessionManager.ProviderSessionManagerV2).detach({
+            threadId,
+            providerSessionId: nativeThread.providerSessionId!,
+          });
+          yield* (yield* EffectOutbox.EffectOutboxV2).reconcileAfterProcessLoss;
+        }
         yield* worker.drain();
         const pending = yield* orchestrator.getThreadProjection(threadId);
         const queued = pending.runs.find(
@@ -1544,15 +1603,25 @@ it.effect.each(declinedSteerTimings)(
         );
         assert.deepEqual(
           effects.map((effect) => [effect.request.type, effect.status]),
-          [["provider-turn.steer", "succeeded"]],
+          [[external ? "provider-runtime.steer" : "provider-turn.steer", "succeeded"]],
+          JSON.stringify(effects.map((effect) => effect.lastError)),
         );
         assert.equal(started.length, 1);
+        assert.deepEqual(
+          resumed.map((turn) => [turn.runId, turn.attemptId, turn.messageId]),
+          external ? [[first.runId, first.attemptId, first.message.messageId]] : [],
+        );
         if (timing === "stop-before-decline") {
           assert.isUndefined(queued);
           return;
         }
-        assert.equal(queued?.status, "queued");
-        assert.equal(queued?.userMessageId, messageId);
+        if (accepted) {
+          assert.isUndefined(queued);
+          assert.equal(effects[0]?.attemptCount, 2);
+        } else {
+          assert.equal(queued?.status, "queued");
+          assert.equal(queued?.userMessageId, messageId);
+        }
         if (timing === "queued-model") {
           assert.deepEqual(queued?.modelSelection, steerSelection);
           assert.deepEqual(
@@ -1627,9 +1696,11 @@ it.effect.each(declinedSteerTimings)(
         yield* worker.drain();
         yield* orchestrator.resumeQueuedRuns;
         yield* worker.drain();
-        assert.equal(started.length, 2);
-        assert.equal(started[1]?.message.messageId, messageId);
-        assert.equal(started[1]?.runId, queued?.id);
+        assert.equal(started.length, accepted ? 1 : 2);
+        if (!accepted) {
+          assert.equal(started[1]?.message.messageId, messageId);
+          assert.equal(started[1]?.runId, queued?.id);
+        }
       }).pipe(Effect.provide(layer));
     }),
 );

@@ -7,6 +7,7 @@ import {
   matchComposerThreadItems,
 } from "@t3tools/client-runtime/composerThreadItems";
 import { useAtomValue } from "@effect/atom-react";
+import { serverEnvironment } from "../../state/server";
 import { useState } from "react";
 import type {
   EnvironmentId,
@@ -106,6 +107,9 @@ export function useComposerMenuItems({
     readonly modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   };
 }) {
+  const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
+  const crewAvailable =
+    pullRequestProjectId !== null && config?.environment.capabilities.projectTeamwork === true;
   // Thread mentions rank by recency as of when the composer mounted.
   const [now] = useState(() => Date.now());
   const composerTriggerKind = composerTrigger?.kind ?? null;
@@ -247,6 +251,16 @@ export function useComposerMenuItems({
           label: "/model",
           description: "Switch response model for this thread",
         },
+        ...(crewAvailable
+          ? (["crew", "swarm"] as const).map((command) => ({
+              id: `slash:${command}`,
+              type: "slash-command" as const,
+              command,
+              label: `/${command}`,
+              description:
+                command === "crew" ? "Open project crew" : "Start a swarm in the project workspace",
+            }))
+          : []),
         ...(sideChatAvailable
           ? ([
               {
@@ -308,7 +322,8 @@ export function useComposerMenuItems({
       const visibleProviderSlashCommandItems = providerSlashCommandItems.filter(
         (item) =>
           (item.command.name !== "compact" || compactSlashCommandAvailable) &&
-          (item.command.name !== "clear" || !freshSessionAvailable),
+          (item.command.name !== "clear" || !freshSessionAvailable) &&
+          (!crewAvailable || !["crew", "swarm"].includes(item.command.name)),
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],

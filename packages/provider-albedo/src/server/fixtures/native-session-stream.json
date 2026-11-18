@@ -1,0 +1,769 @@
+{
+  "source": {
+    "revision": "fb84ee05f9284c8820e1ae5eb3fceed464aafc23",
+    "scenario": "Native daemon turn using the upstream scripted OpenAI fixture; workspace paths anonymized."
+  },
+  "batches": [
+    {
+      "snapshot": {
+        "id": "01a1e5c0-408b-7592-8a52-aab45721e74d",
+        "name": "T3 protocol proof",
+        "automatic_name": "new session",
+        "workspace": "/albedo-proof",
+        "location": {
+          "host": null,
+          "user": null,
+          "path": "/albedo-proof",
+          "label": null
+        },
+        "root_id": "01a1e5c0-408b-7592-8a52-aab45721e74d",
+        "parent_id": null,
+        "role": "",
+        "started_by": null,
+        "address": null,
+        "depth": 0,
+        "closed": false,
+        "preferences": {
+          "opens": 0,
+          "pinned": false,
+          "pin_order": null,
+          "archived": false
+        },
+        "created_at": "2026-11-16T19:05:44.373Z",
+        "activity_at": "2026-11-16T19:05:44.373Z",
+        "provider_profile": "t3-proof",
+        "model": "fixture-model",
+        "effort": "inherit",
+        "fast": false,
+        "cyber_access": null,
+        "status": {
+          "phase": "idle",
+          "run_id": null,
+          "interrupt_requested": false,
+          "blocking_reason": null,
+          "compaction": null
+        },
+        "current_progress": [],
+        "activity": {
+          "lines": [],
+          "output_scalars": 0,
+          "output_utf8_bytes": 0,
+          "observed_at": "2026-11-16T19:05:44.419Z",
+          "current_request": null,
+          "latest_progress": null,
+          "latest_input": null,
+          "latest_answer": null
+        },
+        "cursor": {
+          "generation": "oYbGvcm6GlhCgxlEx1d15g",
+          "sequence": 0
+        },
+        "preview": {
+          "text": "",
+          "transcript_count": 0,
+          "truncated": false
+        },
+        "moved": null,
+        "move_pending": null,
+        "active_output": [],
+        "creation": {
+          "submitted": {
+            "effort": null,
+            "kind": "new",
+            "model": "fixture-model",
+            "name": "T3 protocol proof",
+            "provider_profile": "t3-proof",
+            "workspace": "/albedo-proof"
+          },
+          "resolved": {
+            "effort": "inherit",
+            "model": "fixture-model",
+            "provider_profile": "t3-proof",
+            "workspace": "/albedo-proof"
+          }
+        },
+        "revision": "config-01a1e5c0-408b-7592-8a52-aab45721e74d-1",
+        "family_revision": "family-01a1e5c0-408b-7592-8a52-aab45721e74d-0",
+        "configuration_resource": {
+          "url": "/sessions/01a1e5c0-408b-7592-8a52-aab45721e74d?view=configuration",
+          "etag": "\"30fe7e3520fbebc58e8fbd7f9f1180f2f2d788d6d01f61b087612d8b302fbf75\"",
+          "value": {
+            "id": "01a1e5c0-408b-7592-8a52-aab45721e74d",
+            "name": "T3 protocol proof",
+            "workspace": "/albedo-proof",
+            "provider_profile": "t3-proof",
+            "model": "fixture-model",
+            "effort": "inherit",
+            "fast": false,
+            "cyber_access": null,
+            "context_window": null,
+            "preferences": {
+              "pinned": false,
+              "pin_order": null,
+              "archived": false
+            },
+            "selection": {
+              "extensions": {},
+              "skills": {},
+              "instructions": {},
+              "mcp": {}
+            },
+            "revision": "config-01a1e5c0-408b-7592-8a52-aab45721e74d-1"
+          }
+        },
+        "workspace_change": null,
+        "selection": {
+          "overrides": {
+            "extensions": {},
+            "skills": {},
+            "instructions": {},
+            "mcp": {}
+          },
+          "effective": {
+            "extensions": {
+              "run": true,
+              "work": true,
+              "mail": true,
+              "jj": true,
+              "git": true,
+              "worktrees": true,
+              "agents": true,
+              "schedule": true,
+              "paperclips": true,
+              "checklist": false,
+              "artifacts": true,
+              "files": true,
+              "memory": true,
+              "links": true,
+              "instructions": true,
+              "commands": true,
+              "skills": true,
+              "antigravity": true,
+              "opencode-go": true,
+              "opencode-zen": true,
+              "github-copilot": true,
+              "bedrock": true,
+              "anthropic-api": true,
+              "claude": true,
+              "vertex": true,
+              "perplexity": true,
+              "mistral": true,
+              "codex": true,
+              "openai": true,
+              "models": true,
+              "snapcompact": false,
+              "rolling": true,
+              "lcm-memory": true,
+              "snapcompact-memory": true,
+              "coding-lcm": false,
+              "persistent-agent": false,
+              "notes": true,
+              "mcp": false,
+              "editor-mcp": true,
+              "remote": true,
+              "colab": false,
+              "browser": true,
+              "cua": false,
+              "view": false,
+              "proxy": false,
+              "webhooks": false,
+              "discord": false,
+              "hooks": false,
+              "warm": true,
+              "exa": true,
+              "web-search": true,
+              "imagegen": false
+            },
+            "skills": {
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/complexity-review/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/customize-albedo/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/design-preflight/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/imagegen/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/orchestrating-agents/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/research/SKILL.md": true,
+              "skills:/home/david/.cache/t3-albedo-proof-20261116/source/priv/skills/running-experiments/SKILL.md": true
+            },
+            "instructions": {
+              "instructions:global:albedo/python-cells.md:/home/david/.cache/t3-albedo-proof-20261116/source/priv/instructions/python-cells.md": true
+            },
+            "mcp": {}
+          }
+        },
+        "composition": {
+          "desired_revision": "fb8c1841c2aad9786d21839934fa2cca1e1505fd5aaf3456636c7c187d541ead",
+          "loaded_revision": null,
+          "needs_reload": false,
+          "dependencies": {
+            "schedule": [],
+            "mail": [],
+            "checklist": [],
+            "jj": [],
+            "memory": [],
+            "hooks": [],
+            "antigravity": [],
+            "snapcompact-memory": [],
+            "openai": ["models"],
+            "exa": [],
+            "coding-lcm": ["lcm-memory"],
+            "paperclips": [],
+            "web-search": [],
+            "links": [],
+            "work": [],
+            "discord": [],
+            "persistent-agent": ["lcm-memory"],
+            "editor-mcp": [],
+            "artifacts": [],
+            "remote": [],
+            "mcp": [],
+            "warm": [],
+            "mistral": ["models"],
+            "opencode-go": ["models"],
+            "claude": ["models"],
+            "imagegen": [],
+            "agents": ["mail"],
+            "git": [],
+            "skills": ["commands"],
+            "codex": ["openai"],
+            "models": [],
+            "snapcompact": ["snapcompact-memory"],
+            "opencode-zen": ["models"],
+            "browser": [],
+            "bedrock": ["models"],
+            "proxy": [],
+            "view": ["run", "files"],
+            "instructions": [],
+            "webhooks": [],
+            "colab": ["remote"],
+            "run": [],
+            "cua": [],
+            "files": ["run"],
+            "lcm-memory": [],
+            "rolling": [],
+            "vertex": ["models"],
+            "worktrees": [],
+            "github-copilot": ["models"],
+            "commands": [],
+            "anthropic-api": ["models"],
+            "perplexity": ["models"],
+            "notes": []
+          },
+          "quarantine": [],
+          "availability": {
+            "schedule": false,
+            "mail": false,
+            "checklist": false,
+            "jj": false,
+            "memory": false,
+            "hooks": false,
+            "antigravity": false,
+            "snapcompact-memory": false,
+            "openai": false,
+            "exa": false,
+            "coding-lcm": false,
+            "paperclips": false,
+            "web-search": false,
+            "links": false,
+            "work": false,
+            "discord": false,
+            "persistent-agent": false,
+            "editor-mcp": false,
+            "artifacts": false,
+            "remote": false,
+            "mcp": false,
+            "warm": false,
+            "mistral": false,
+            "opencode-go": false,
+            "claude": false,
+            "imagegen": false,
+            "agents": false,
+            "git": false,
+            "skills": false,
+            "codex": false,
+            "models": false,
+            "snapcompact": false,
+            "opencode-zen": false,
+            "browser": false,
+            "bedrock": false,
+            "proxy": false,
+            "view": false,
+            "instructions": false,
+            "webhooks": false,
+            "colab": false,
+            "run": false,
+            "cua": false,
+            "files": false,
+            "lcm-memory": false,
+            "rolling": false,
+            "vertex": false,
+            "worktrees": false,
+            "github-copilot": false,
+            "commands": false,
+            "anthropic-api": false,
+            "perplexity": false,
+            "notes": false
+          }
+        },
+        "kernel": {
+          "instance_id": null,
+          "build": null,
+          "state": "none",
+          "stage": null,
+          "stale": false,
+          "staleness_reasons": [],
+          "live_job_count": 0,
+          "running_jobs": []
+        },
+        "side_question": null,
+        "shell_commands": [],
+        "pending_inputs": [],
+        "input_order": 0,
+        "usage": {
+          "model": null,
+          "observed_at": null,
+          "prompt_tokens": null,
+          "cached_prompt_tokens": null,
+          "cache_write_tokens": null,
+          "completion_tokens": null,
+          "total_tokens": null,
+          "elapsed_ms": null,
+          "tokens_per_second": null,
+          "size": null,
+          "cache_miss_tokens": null,
+          "cache_drift_tokens": null,
+          "spent": null,
+          "context_window_tokens": null,
+          "cache_ttl_seconds": null,
+          "cache_fade": []
+        },
+        "history": {
+          "items": [],
+          "older": null,
+          "newer": null,
+          "high_water": 0
+        },
+        "glances": []
+      },
+      "events": [
+        {
+          "type": "reset",
+          "data": {
+            "reason": "initial"
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 0
+    },
+    {
+      "events": [],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 0
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 1,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 2,
+          "data": {
+            "input": {
+              "id": "01a1e5c0-419d-7136-99e5-84ba9eb9497f",
+              "session_id": "01a1e5c0-408b-7592-8a52-aab45721e74d",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:05:44.636Z",
+              "acceptance_order": 1,
+              "delivery": "pending",
+              "blocking_reason": null,
+              "transcript_position": null,
+              "turn": null,
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 3,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c0-408b-7592-8a52-aab45721e74d/queue"
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 4,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c0-408b-7592-8a52-aab45721e74d/queue"
+          }
+        },
+        {
+          "type": "status",
+          "sequence": 5,
+          "data": {
+            "phase": "preparing",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 5
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 6,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 7,
+          "data": {
+            "input": {
+              "id": "01a1e5c0-419d-7136-99e5-84ba9eb9497f",
+              "session_id": "01a1e5c0-408b-7592-8a52-aab45721e74d",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:05:44.636Z",
+              "acceptance_order": 1,
+              "delivery": "pending",
+              "blocking_reason": null,
+              "transcript_position": null,
+              "turn": null,
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "status",
+          "sequence": 8,
+          "data": {
+            "phase": "preparing",
+            "run_id": "df43a39cf9ba51b16c9360253caf87bc",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 8
+    },
+    {
+      "events": [
+        {
+          "type": "message",
+          "sequence": 9,
+          "data": {
+            "entry": {
+              "id": "1",
+              "position": 1,
+              "kind": "user",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "df43a39cf9ba51b16c9360253caf87bc",
+              "input_id": "01a1e5c0-419d-7136-99e5-84ba9eb9497f",
+              "created_at": "2026-11-16T19:05:44.819Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "Return the scripted protocol proof."
+                }
+              ],
+              "checkpoint_id": "1",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": null,
+              "phase": null
+            },
+            "replaces_live_ids": []
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 10,
+          "data": {
+            "high_water": 1,
+            "replaces_live_ids": [],
+            "replaces_all_live": false
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 11,
+          "data": {
+            "input": {
+              "id": "01a1e5c0-419d-7136-99e5-84ba9eb9497f",
+              "session_id": "01a1e5c0-408b-7592-8a52-aab45721e74d",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:05:44.636Z",
+              "acceptance_order": 1,
+              "delivery": "committed",
+              "blocking_reason": null,
+              "transcript_position": 1,
+              "turn": {
+                "id": "df43a39cf9ba51b16c9360253caf87bc",
+                "state": "running",
+                "started_at": "2026-11-16T19:05:44.819Z",
+                "ended_at": null,
+                "outcome": null
+              },
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "invalidate",
+          "sequence": 12,
+          "data": {
+            "kind": "extension",
+            "url": "/extensions/mail/sessions/01a1e5c0-408b-7592-8a52-aab45721e74d/queue"
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 12
+    },
+    {
+      "events": [
+        {
+          "type": "invalidate",
+          "sequence": 13,
+          "data": {
+            "kind": "context",
+            "url": "/sessions/01a1e5c0-408b-7592-8a52-aab45721e74d/context?view=summary"
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 13
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 14,
+          "data": {
+            "phase": "generating",
+            "run_id": "df43a39cf9ba51b16c9360253caf87bc",
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 14
+    },
+    {
+      "events": [
+        {
+          "type": "thinking",
+          "sequence": 15,
+          "data": {
+            "run_id": "df43a39cf9ba51b16c9360253caf87bc",
+            "message_id": "oYbGvcm6GlhCgxlEx1d15g:1:df43a39cf9ba51b16c9360253caf87bc:0:thinking",
+            "text": "Checking the native stream."
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 15
+    },
+    {
+      "events": [
+        {
+          "type": "text",
+          "sequence": 16,
+          "data": {
+            "run_id": "df43a39cf9ba51b16c9360253caf87bc",
+            "message_id": "oYbGvcm6GlhCgxlEx1d15g:1:df43a39cf9ba51b16c9360253caf87bc:0:0:0",
+            "text": "T3 native Albedo proof: café 🌍"
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 16
+    },
+    {
+      "events": [
+        {
+          "type": "message",
+          "sequence": 17,
+          "data": {
+            "entry": {
+              "id": "2-thinking",
+              "position": 2,
+              "kind": "thinking",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "df43a39cf9ba51b16c9360253caf87bc",
+              "input_id": null,
+              "created_at": "2026-11-16T19:05:44.990Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "Checking the native stream."
+                }
+              ],
+              "checkpoint_id": null,
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": 13,
+              "phase": null
+            },
+            "replaces_live_ids": [
+              "oYbGvcm6GlhCgxlEx1d15g:1:df43a39cf9ba51b16c9360253caf87bc:0:thinking"
+            ]
+          }
+        },
+        {
+          "type": "message",
+          "sequence": 18,
+          "data": {
+            "entry": {
+              "id": "2",
+              "position": 2,
+              "kind": "assistant",
+              "turn_type": "user",
+              "mail": null,
+              "turn_id": "df43a39cf9ba51b16c9360253caf87bc",
+              "input_id": null,
+              "created_at": "2026-11-16T19:05:44.990Z",
+              "content": [
+                {
+                  "kind": "text",
+                  "text": "T3 native Albedo proof: café 🌍"
+                }
+              ],
+              "checkpoint_id": "2",
+              "content_complete": true,
+              "tool": null,
+              "thinking_duration_ms": 13,
+              "phase": "final"
+            },
+            "replaces_live_ids": ["oYbGvcm6GlhCgxlEx1d15g:1:df43a39cf9ba51b16c9360253caf87bc:0:0:0"]
+          }
+        },
+        {
+          "type": "committed",
+          "sequence": 19,
+          "data": {
+            "high_water": 2,
+            "replaces_live_ids": [
+              "oYbGvcm6GlhCgxlEx1d15g:1:df43a39cf9ba51b16c9360253caf87bc:0:thinking",
+              "oYbGvcm6GlhCgxlEx1d15g:1:df43a39cf9ba51b16c9360253caf87bc:0:0:0"
+            ],
+            "replaces_all_live": true
+          }
+        },
+        {
+          "type": "usage",
+          "sequence": 20,
+          "data": {
+            "model": "fixture-model",
+            "observed_at": "2026-11-16T19:05:44.990Z",
+            "prompt_tokens": null,
+            "cached_prompt_tokens": null,
+            "cache_write_tokens": null,
+            "completion_tokens": null,
+            "total_tokens": null,
+            "elapsed_ms": 79,
+            "tokens_per_second": null,
+            "size": null,
+            "cache_miss_tokens": null,
+            "cache_drift_tokens": null,
+            "spent": null,
+            "context_window_tokens": null,
+            "cache_ttl_seconds": null,
+            "cache_fade": []
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 20
+    },
+    {
+      "events": [
+        {
+          "type": "status",
+          "sequence": 21,
+          "data": {
+            "phase": "idle",
+            "run_id": null,
+            "interrupt_requested": false,
+            "blocking_reason": null,
+            "compaction": null
+          }
+        },
+        {
+          "type": "input",
+          "sequence": 22,
+          "data": {
+            "input": {
+              "id": "01a1e5c0-419d-7136-99e5-84ba9eb9497f",
+              "session_id": "01a1e5c0-408b-7592-8a52-aab45721e74d",
+              "kind": "message",
+              "admission": "accepted",
+              "http_status": 202,
+              "problem": null,
+              "accepted_at": "2026-11-16T19:05:44.636Z",
+              "acceptance_order": 1,
+              "delivery": "committed",
+              "blocking_reason": null,
+              "transcript_position": 1,
+              "turn": {
+                "id": "df43a39cf9ba51b16c9360253caf87bc",
+                "state": "completed",
+                "started_at": "2026-11-16T19:05:44.819Z",
+                "ended_at": "2026-11-16T19:05:45.002Z",
+                "outcome": null
+              },
+              "client_id": null
+            }
+          }
+        },
+        {
+          "type": "turn_completed",
+          "sequence": 23,
+          "data": {
+            "run_id": "df43a39cf9ba51b16c9360253caf87bc",
+            "state": "completed",
+            "input_ids": ["01a1e5c0-419d-7136-99e5-84ba9eb9497f"],
+            "input_count": 1,
+            "truncated": false
+          }
+        }
+      ],
+      "generation": "oYbGvcm6GlhCgxlEx1d15g",
+      "cursor": 23
+    }
+  ]
+}

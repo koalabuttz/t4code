@@ -1,4 +1,6 @@
 import { ChildThreadApprovals } from "./ChildThreadApprovals";
+import { Button } from "../../components/ui/Button";
+import { AppText } from "../../components/ui/AppText";
 import { useOpenThreadInspector } from "./thread-inspector-navigation";
 import { useSidebarWorkspaceTabs } from "../layout/workspace/useSystemWorkspaceTabBar";
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
@@ -15,7 +17,7 @@ import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entitie
 import { createThreadVisitTracker } from "@t3tools/client-runtime/state/thread-visits";
 import { useChildThreadInputs, useThreadReportedModelSelection } from "../../state/entities";
 import { UsageLimitRecoveryCard } from "./UsageLimitRecoveryCard";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import {
   effectiveSnoozed,
   threadWokeAt,
@@ -120,6 +122,7 @@ import { useBarOverlap } from "../../components/ui/useBarInset";
 import {
   useWorkspaceContentWidth,
   WorkspaceSettledContentWidthContext,
+  useWorkspaceSettledContentWidth,
 } from "../layout/workspace-content-width";
 import { useAdaptiveWorkspaceLayout } from "../layout/adaptive-workspace-context";
 import { useNativeWorkspaceColumnsSupported } from "../../native/NativeWorkspaceColumns";
@@ -167,7 +170,6 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { threadStreamHaptics } from "./threadStreamHaptics";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { orchestrationEnvironment } from "../../state/orchestration";
-import { useDelayedStatus } from "../../lib/useDelayedStatus";
 import type { PendingUserInputDraftAnswer } from "@t3tools/client-runtime/state/pending-user-input";
 import type { RunStopPresentation } from "@t3tools/client-runtime/state/thread-execution";
 import type {
@@ -190,6 +192,7 @@ import {
   FloatingWorkingControl,
 } from "./floating-working-control";
 import { connectionFloatingStatus, type FloatingWorkingStatus } from "./floating-working-status";
+import type { ThreadStatusLineModel } from "./thread-context-divider";
 import {
   derivePendingUserInputMaxHeight,
   ESTIMATED_KEYBOARD_HEIGHT,
@@ -211,11 +214,15 @@ import { ThreadGuestShareBar } from "./ThreadGuestShareBar";
 import { ThreadSideChatsRow } from "./ThreadSideChatsRow";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-scroll-position";
+import { CrewChatStatus, type CrewChatRoute, useCrewChat } from "./CrewChat";
+import type { CrewRequestState } from "./crewMobile.logic";
 import { useOpenLinkedThread } from "./useOpenLinkedThread";
 import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
 import type { OrchestrationV2ProviderSession } from "@t3tools/contracts";
 
 export interface ThreadDetailScreenProps {
+  readonly crewRoute?: CrewChatRoute | undefined;
+  readonly crewRequest?: CrewRequestState;
   readonly header?: React.ReactNode;
   readonly draftMode?: {
     /** viewportHeight excludes the composer so draft chrome can resize it without feedback. */
@@ -230,7 +237,6 @@ export interface ThreadDetailScreenProps {
     readonly interactionLocked: boolean;
   };
   readonly worktreeSetup?: WorktreeSetupCardProps | null;
-  readonly setupWorkingStartedAt?: string | null;
   readonly canOperateThread: boolean;
   readonly selectedThread: EnvironmentThreadShell;
   /** Use this for detail reads; it stays null until queued creation reaches the server. */
@@ -267,7 +273,6 @@ export interface ThreadDetailScreenProps {
   readonly activePendingUserInputAnswers: Record<string, string | ReadonlyArray<string>> | null;
   readonly respondingUserInputId: RuntimeRequestId | null;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
-  readonly connectionAwaitingApproval?: boolean;
   readonly historyControls?: ThreadFeedHistoryControls;
   readonly activeThreadBusy: boolean;
   readonly canStopThread: boolean;
@@ -328,17 +333,20 @@ export interface ThreadDetailScreenProps {
 // iOS questions overlay the controls; Android questions stack with child approvals.
 const ComposerPanels = Platform.OS === "android" ? Animated.ScrollView : Animated.View;
 
-/** Hands the feed the screen width measured for a native column; elsewhere keeps the inherited one. */
+/**
+ * Hands the feed the screen width measured for a native column; elsewhere keeps the inherited one.
+ * Always the same element, so the feed below is not remounted when the width arrives.
+ */
 function ColumnWidth(props: { readonly width: number | null; readonly children: React.ReactNode }) {
-  return props.width === null ? (
-    props.children
-  ) : (
-    <WorkspaceSettledContentWidthContext value={props.width}>
+  const inherited = useWorkspaceSettledContentWidth();
+  return (
+    <WorkspaceSettledContentWidthContext value={props.width ?? inherited}>
       {props.children}
     </WorkspaceSettledContentWidthContext>
   );
 }
 const USAGE_LIMITS_PANEL_GAP = 12;
+const FEED_END_GAP = 12;
 const USAGE_LIMITS_PANEL_MIN_HEIGHT = 44;
 
 const USER_INPUT_TOGGLE_TIMING = {
@@ -380,9 +388,6 @@ const NO_RUN_STOP_ATOM = Atom.make<RunStopPresentation | null>(null).pipe(
   Atom.withLabel("mobile-thread-run-stop:empty"),
 );
 
-// Connection failures survive retries and app suspension.
-const RECONNECT_ERROR_DELAY_MS = 5_000;
-
 // Anchors, the submitted message, follow state and pending scrolls belong to
 // one thread, so the body remounts when the thread changes.
 export function ThreadDetailScreen(props: ThreadDetailScreenProps) {
@@ -408,6 +413,8 @@ function ThreadDetailBody(
   },
 ) {
   const usesNativeWorkspaceColumns = useNativeWorkspaceColumnsSupported();
+  const crewChat = useCrewChat();
+  const requestFocused = props.crewRequest !== undefined && props.crewRequest.kind !== "ordinary";
   const { layout } = useAdaptiveWorkspaceLayout();
   const deviceType = useDeviceType();
   const workspace = useWorkspaceTabs();
@@ -566,14 +573,6 @@ function ThreadDetailBody(
   );
   const composerKeyboardOffset = composerBottomInset;
   const contentPresentationKind = props.contentPresentation.kind;
-  const connectionRetrying =
-    props.connectionStateLabel === "connecting" || props.connectionStateLabel === "reconnecting";
-  const retryError = connectionRetrying ? props.connectionError : null;
-  const retryConnectionError = useDelayedStatus(
-    `${props.environmentId}:${retryError !== null}`,
-    retryError,
-    RECONNECT_ERROR_DELAY_MS,
-  );
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
@@ -742,16 +741,75 @@ function ThreadDetailBody(
   );
   const extensionStatus = props.extensionStatuses?.length
     ? {
-        label: `Pi · ${props.extensionStatuses.map((status) => status.text).join(" · ")}`,
+        label: props.extensionStatuses.map((status) => status.text).join(" · "),
         onPress: () =>
-          Dialog.alert("Pi", props.extensionStatuses?.map((status) => status.text).join("\n\n")),
+          Dialog.alert(
+            "Runtime status",
+            props.extensionStatuses?.map((status) => status.text).join("\n\n"),
+          ),
       }
     : null;
+  const backgroundLine = ((): ThreadStatusLineModel | null => {
+    if (pendingBackgroundWork === null || contentPresentationKind !== "ready") return null;
+    return {
+      key: "background",
+      icon: pendingBackgroundWork.waiting ? "person.2" : "terminal",
+      label: pendingBackgroundWork.title,
+      accessibilityLabel: `${pendingBackgroundWork.title}: ${pendingBackgroundWork.items
+        .map((item) => item.label)
+        .join(", ")}`,
+      onOpen: () => {
+        Keyboard.dismiss();
+        navigation.navigate("ThreadBackgroundWork", {
+          environmentId: props.environmentId,
+          threadId: props.selectedThread.id,
+        });
+      },
+      action: {
+        label: statusPending ? "Stopping..." : "Stop",
+        accessibilityLabel: "Stop background work",
+        disabled: !props.canOperateThread || statusPending,
+        onPress: () => void runStatusAction("stop"),
+      },
+    };
+  })();
+  const lifecycleLine = ((): ThreadStatusLineModel | null => {
+    if (contentPresentationKind !== "ready" || !(lifecycleSnoozed || settled || woke)) return null;
+    const actionLabel = lifecycleSnoozed ? "Wake now" : settled ? "Un-settle" : "Dismiss";
+    const wake =
+      lifecycleSnoozed && snoozedUntil !== null
+        ? snoozeWakeLabel(snoozedUntil, { now: lifecycleNow })
+        : "now";
+    return {
+      key: "lifecycle",
+      icon: settled && !lifecycleSnoozed ? "checkmark.circle" : "alarm",
+      label: lifecycleSnoozed
+        ? wake === "now"
+          ? "Snoozed"
+          : `Snoozed, ${wake} left`
+        : settled
+          ? "Settled"
+          : "Woke from snooze",
+      action: {
+        label: statusPending
+          ? lifecycleSnoozed
+            ? "Waking..."
+            : settled
+              ? "Un-settling..."
+              : "Dismissing..."
+          : actionLabel,
+        accessibilityLabel: actionLabel,
+        disabled: !props.canOperateThread || statusPending,
+        onPress: () =>
+          void runStatusAction(lifecycleSnoozed ? "wake" : settled ? "unsettle" : "dismiss"),
+      },
+    };
+  })();
+  const statusLines = [backgroundLine, lifecycleLine].filter((line) => line !== null);
   const floatingStatus = ((): FloatingWorkingStatus | null => {
     const connectionStatus = connectionFloatingStatus({
-      connectionError: connectionRetrying ? retryConnectionError : props.connectionError,
+      connectionError: props.connectionError,
       connectionState: props.connectionStateLabel,
-      connectionAwaitingApproval: props.connectionAwaitingApproval === true,
       environmentLabel: props.environmentLabel,
       onReconnect: props.onReconnectEnvironment,
     });
@@ -807,67 +865,6 @@ function ThreadDetailBody(
         },
       };
     }
-    if (props.isCompacting && contentPresentationKind === "ready") {
-      return { kind: "compacting" };
-    }
-    if (props.activeWorkStartedAt !== null && contentPresentationKind === "ready") {
-      return {
-        kind: "working",
-        environmentId: props.environmentId,
-        startedAt: props.activeWorkStartedAt,
-      };
-    }
-    if (pendingBackgroundWork !== null && contentPresentationKind === "ready") {
-      return {
-        kind: "background",
-        label: pendingBackgroundWork.title,
-        accessibilityLabel: `${pendingBackgroundWork.title}: ${pendingBackgroundWork.items
-          .map((item) => item.label)
-          .join(", ")}`,
-        waiting: pendingBackgroundWork.waiting,
-        onPress: () => {
-          Keyboard.dismiss();
-          navigation.navigate("ThreadBackgroundWork", {
-            environmentId: props.environmentId,
-            threadId: props.selectedThread.id,
-          });
-        },
-        action: {
-          label: statusPending ? "Stopping..." : "Stop",
-          accessibilityLabel: "Stop background work",
-          disabled: !props.canOperateThread || statusPending,
-          onPress: () => void runStatusAction("stop"),
-        },
-      };
-    }
-    if (contentPresentationKind === "ready" && (lifecycleSnoozed || settled || woke)) {
-      const state = lifecycleSnoozed ? "snoozed" : settled ? "settled" : "woke";
-      const label =
-        lifecycleSnoozed && snoozedUntil !== null
-          ? `Snoozed, wakes in ${snoozeWakeLabel(snoozedUntil, { now: lifecycleNow })}`
-          : settled
-            ? "Settled"
-            : "Woke from snooze";
-      const actionLabel = lifecycleSnoozed ? "Wake now" : settled ? "Un-settle" : "Dismiss";
-      return {
-        kind: "lifecycle",
-        state,
-        label,
-        action: {
-          label: statusPending
-            ? lifecycleSnoozed
-              ? "Waking..."
-              : settled
-                ? "Un-settling..."
-                : "Dismissing..."
-            : actionLabel,
-          accessibilityLabel: actionLabel,
-          disabled: !props.canOperateThread || statusPending,
-          onPress: () =>
-            void runStatusAction(lifecycleSnoozed ? "wake" : settled ? "unsettle" : "dismiss"),
-        },
-      };
-    }
     if (props.selectedThread.goal !== null && contentPresentationKind === "ready") {
       const goal = presentProviderGoal(props.selectedThread.goal, false);
       return {
@@ -882,23 +879,12 @@ function ThreadDetailBody(
     return null;
   })();
   const showWorkingControl = floatingStatus !== null;
-  // A pending message holds the pill's row for its Starting/Working pill. Worktree setup reports
-  // progress in the feed instead, so holding the row there only leaves a gap that later closes.
-  const worktreeSetupInFeed =
-    props.worktreeSetup?.snapshot.phase === "running" ||
-    (props.creationState?.kind === "preparing" && props.creationState.preparingWorktree);
   const showFloatingStatus =
     showWorkingControl ||
     queuedCount > 0 ||
     agentsSegment !== null ||
     devicePreviews.length > 0 ||
-    browserTabs.tabs.length > 0 ||
-    props.connectionStateLabel !== "connected" ||
-    (!worktreeSetupInFeed &&
-      (props.queuedMessages.length > 0 ||
-        props.selectedThreadFeed.some(
-          (entry) => "acknowledged" in entry && entry.acknowledged === true,
-        )));
+    browserTabs.tabs.length > 0;
   const selectedThreadFeed = props.selectedThreadFeed;
   // A palette message result opens the thread at that message: earlier
   // history loads until the message is in the feed, which then scrolls to it.
@@ -964,7 +950,7 @@ function ThreadDetailBody(
   const activeUserInputRequestId = props.activePendingUserInput?.requestId ?? null;
   const questionInFlow = Platform.OS === "android" && activeUserInputRequestId !== null;
   const composerSlotHidden =
-    activeUserInputRequestId !== null || props.creationState?.kind === "failed";
+    requestFocused || activeUserInputRequestId !== null || props.creationState?.kind === "failed";
   const pendingMessageEditBlocked =
     queuedRunEditBlockedReason({ openQuestionCount: activeUserInputRequestId === null ? 0 : 1 }) !==
     null;
@@ -1147,7 +1133,8 @@ function ThreadDetailBody(
       questionInFlow
         ? 0
         : contentInsetEndAdjustment.value +
-          floatingControlCoverage.value +
+          // The feed's last row keeps a gap above the composer; the status row grows from it.
+          Math.max(FEED_END_GAP, floatingControlCoverage.value) +
           (userInputCoverageApplies
             ? userInputInsetProgress.value * userInputCardCoverage.value
             : 0),
@@ -1476,8 +1463,8 @@ function ThreadDetailBody(
                   workspaceRoot={props.threadCwd}
                   feed={props.selectedThreadFeed}
                   pendingHandoff={props.pendingHandoff}
+                  statusLines={statusLines}
                   worktreeSetup={props.worktreeSetup}
-                  setupWorkingStartedAt={props.setupWorkingStartedAt}
                   preparingWorktree={
                     props.creationState?.kind === "preparing" &&
                     props.creationState.preparingWorktree &&
@@ -1488,10 +1475,11 @@ function ThreadDetailBody(
                   // A native subagent has no composer to edit a pending message in;
                   // Cancel on the edit banner would discard it.
                   onEditPendingMessage={
-                    isProviderSubagent || pendingMessageEditBlocked
+                    requestFocused || isProviderSubagent || pendingMessageEditBlocked
                       ? null
                       : handleEditPendingMessage
                   }
+                  crewRequestFocused={requestFocused}
                   contentPresentation={props.contentPresentation}
                   threadTitle={props.selectedThread.title}
                   latestRun={props.activityRun}
@@ -1510,7 +1498,7 @@ function ThreadDetailBody(
                     questionInFlow
                       ? 0
                       : estimatedOverlayHeight +
-                        (showFloatingStatus ? FLOATING_WORKING_CONTROL_COVERAGE : 0)
+                        (showFloatingStatus ? FLOATING_WORKING_CONTROL_COVERAGE : FEED_END_GAP)
                   }
                   contentMaxWidth={contentMaxWidth}
                   historyControls={props.historyControls}
@@ -1602,12 +1590,7 @@ function ThreadDetailBody(
                     colorScheme={isDarkMode ? "dark" : "light"}
                     status={floatingStatus}
                     extensionStatus={
-                      floatingStatus !== null &&
-                      (floatingStatus.kind === "working" ||
-                        floatingStatus.kind === "compacting" ||
-                        floatingStatus.kind === "background" ||
-                        floatingStatus.kind === "goal" ||
-                        floatingStatus.kind === "lifecycle")
+                      floatingStatus !== null && floatingStatus.kind === "goal"
                         ? extensionStatus
                         : null
                     }
@@ -1647,6 +1630,34 @@ function ThreadDetailBody(
                     keyboardShouldPersistTaps="handled"
                     nestedScrollEnabled
                   >
+                    {requestFocused ? (
+                      <View className="mx-4 mb-2 gap-1 rounded-xl border border-border bg-screen px-3 py-2">
+                        <AppText accessibilityRole="alert">
+                          {props.crewRequest?.kind === "loading"
+                            ? props.connectionStateLabel === "connected"
+                              ? "Checking the linked request…"
+                              : "Reconnect to check the linked request."
+                            : props.activePendingApproval || props.activePendingUserInput
+                              ? "Linked request"
+                              : "This linked request is unavailable."}
+                        </AppText>
+                        <Button
+                          label="Open conversation"
+                          size="compact"
+                          onPress={() =>
+                            navigation.dispatch(
+                              StackActions.replace("Thread", {
+                                environmentId: props.environmentId,
+                                threadId: props.selectedThread.id,
+                                crewSourceProjectId: props.selectedThread.projectId,
+                              }),
+                            )
+                          }
+                        />
+                      </View>
+                    ) : (
+                      <CrewChatStatus />
+                    )}
                     {props.queuedRunEdit !== null ? (
                       <Animated.View
                         className="shrink-0"
@@ -1667,10 +1678,12 @@ function ThreadDetailBody(
                       thread={props.selectedThread}
                       environmentId={props.environmentId}
                     />
-                    <ChildThreadApprovals
-                      threadRef={props.selectedThreadDetailRef}
-                      maxHeight={pendingUserInputMaxHeight}
-                    />
+                    {!requestFocused && (
+                      <ChildThreadApprovals
+                        threadRef={props.selectedThreadDetailRef}
+                        maxHeight={pendingUserInputMaxHeight}
+                      />
+                    )}
                     <ThreadGuestShareBar
                       threadRef={props.selectedThreadDetailRef}
                       canOperateThread={props.canOperateThread}
@@ -1853,7 +1866,11 @@ function ThreadDetailBody(
                             ? props.activePendingApproval.supportsFeedback
                               ? "Send feedback to decline this request"
                               : "Send a message to decline and redirect the agent"
-                            : "Ask anything"
+                            : crewChat?.route.coordinator
+                              ? "Message your project"
+                              : crewChat?.workstream
+                                ? "Message this work thread"
+                                : "Ask anything"
                         }
                         contentMaxWidth={contentMaxWidth}
                         draftControls={props.draftMode?.controls(draftViewportHeight)}

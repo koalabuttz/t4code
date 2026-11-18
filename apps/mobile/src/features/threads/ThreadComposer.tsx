@@ -30,8 +30,10 @@ import {
   hasProviderUsageLimits,
   isUsageLimitsCommand,
 } from "@t3tools/shared/usageLimits";
-import { parseSideChatCommand } from "@t3tools/shared/composerTrigger";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
+import { prepareCrewEntry, readCrewCommand } from "@t3tools/client-runtime/state/crew";
+import { useCrewChat } from "./CrewChat";
+import { appAtomRegistry } from "../../state/atom-registry";
 import type { ReactNode } from "react";
 import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import { I18nManager, Keyboard, Platform, View, type ViewStyle } from "react-native";
@@ -101,7 +103,10 @@ import { useComposerTextRole, type ScaledTextRole } from "../settings/appearance
 import type { RemoteClientConnectionState } from "../../lib/connection";
 import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
 import { Menu } from "../../components/ui/Menu";
-import type { ActiveTurnComposerAction } from "@t3tools/client-runtime/state/composer-dispatch";
+import {
+  composerRunsDraftLocally,
+  type ActiveTurnComposerAction,
+} from "@t3tools/client-runtime/state/composer-dispatch";
 import type { FollowUpBehavior } from "../../lib/followUpBehavior";
 import {
   resolveComposerSendPresentation,
@@ -464,6 +469,7 @@ function ComposerSurface(props: {
 export const THREAD_COMPOSER_BOTTOM_GUTTER = 6;
 
 export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps) {
+  const crewChat = useCrewChat();
   const project = useProject(scopeProjectRef(props.environmentId, props.selectedThread.projectId));
   const { themeVariables: materialTheme } = useAppearancePreferences();
   const composerPanel = materialTheme["--color-composer-panel"];
@@ -502,7 +508,11 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
   const composerOwnerKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
   const composerDraftKey = props.draftKey ?? composerOwnerKey;
-  const { text: draftMessage, attachments: draftAttachments } = useComposerDraft(composerDraftKey);
+  const {
+    text: draftMessage,
+    attachments: draftAttachments,
+    context: draftContext,
+  } = useComposerDraft(composerDraftKey);
   const queuedEdit = props.queuedEdit ?? null;
   const hasContent =
     draftMessage.trim().length > 0 ||
@@ -534,18 +544,6 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       serverConfig: props.serverConfig,
       states: uploadStates,
     });
-  const sendPresentation = resolveComposerSendPresentation({
-    editingQueuedMessage: queuedEdit !== null,
-    // A side-chat command starts a side chat; it never queues or steers the running turn.
-    running:
-      props.activeThreadBusy &&
-      (props.redirectsApproval || parseSideChatCommand(draftMessage) === null),
-    canSteer: props.canSteerActiveTurn,
-    followUpBehavior: props.followUpBehavior,
-    deliveryDeferred:
-      props.connectionState !== "connected" || props.queueCount > 0 || attachmentsUploading,
-  });
-  const sendLabel = sendPresentation.label;
   const currentModelSelection = props.selectedThread.modelSelection;
   const modelUnavailable =
     props.connectionState === "connected" &&
@@ -582,6 +580,25 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       props.serverConfig?.providers ?? [],
       props.serverConfig?.usageLimitSources ?? [],
     );
+  const draftRunsLocally = composerRunsDraftLocally({
+    text: draftMessage,
+    holdsOnlyText: draftAttachments.length === 0,
+    // A redirect's text answers its approval, so `/side` there is that text.
+    sideChat: !props.redirectsApproval,
+    usageLimits: usageLimitsOffered,
+    codexFeedback: selectedProviderStatus?.driver === "codex",
+    freshSession: props.onFreshSession !== undefined && draftContext === undefined,
+  });
+  const sendPresentation = resolveComposerSendPresentation({
+    editingQueuedMessage: queuedEdit !== null,
+    running: props.activeThreadBusy && !draftRunsLocally,
+    canSteer: props.canSteerActiveTurn,
+    followUpBehavior: props.followUpBehavior,
+    deliveryDeferred:
+      !draftRunsLocally &&
+      (props.connectionState !== "connected" || props.queueCount > 0 || attachmentsUploading),
+  });
+  const sendLabel = sendPresentation.label;
   const openUsageLimits = () => {
     const report = collectProviderUsageLimits(
       currentModelSelection.instanceId,
@@ -630,6 +647,27 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     modelProviders: props.serverConfig?.providers,
     ...(props.onFreshSession === undefined ? {} : { onFreshSession: props.onFreshSession }),
     offersSideChat: props.offersSideChat === true,
+    onCrew: props.serverConfig?.environment.capabilities.projectTeamwork
+      ? () => {
+          if (crewChat?.route.coordinator) {
+            crewChat.go("threads");
+            return;
+          }
+          prepareCrewEntry(
+            appAtomRegistry,
+            {
+              environmentId: props.environmentId,
+              projectId: props.selectedThread.projectId,
+            },
+            { threadId: props.selectedThread.id },
+          );
+          navigation.navigate("Crew", {
+            environmentId: props.environmentId,
+            projectId: props.selectedThread.projectId,
+            originThreadId: props.selectedThread.id,
+          });
+        }
+      : undefined,
   });
   const voiceInput = useVoiceInputController({
     ownerKey: composerDraftKey,
@@ -748,6 +786,34 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     inFlightThreadIdsRef.current.add(threadKey);
     await inputRef.current?.flushPendingInput();
     const draftAtSend = getComposerDraftSnapshot(composerDraftKey);
+    const crewCommand = readCrewCommand(draftAtSend.text);
+    if (
+      crewCommand &&
+      props.serverConfig?.environment.capabilities.projectTeamwork &&
+      draftAtSend.attachments.length === 0
+    ) {
+      if (crewChat?.route.coordinator) {
+        onChangeDraftMessage(crewCommand.brief);
+        inFlightThreadIdsRef.current.delete(threadKey);
+        return;
+      }
+      prepareCrewEntry(
+        appAtomRegistry,
+        {
+          environmentId: props.environmentId,
+          projectId: props.selectedThread.projectId,
+        },
+        { threadId: props.selectedThread.id, brief: crewCommand.brief },
+      );
+      onChangeDraftMessage("");
+      inFlightThreadIdsRef.current.delete(threadKey);
+      navigation.navigate("Crew", {
+        environmentId: props.environmentId,
+        projectId: props.selectedThread.projectId,
+        originThreadId: props.selectedThread.id,
+      });
+      return;
+    }
     const stillSendable = () => {
       const draft = getComposerDraftSnapshot(composerDraftKey);
       return (

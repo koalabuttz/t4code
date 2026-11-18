@@ -29,6 +29,7 @@ import { resolveSettingsSecrets } from "../secrets/settingsSecretValue.ts";
 import * as Settings from "../serverSettings.ts";
 import { windowLimitsModel } from "../provider/claudeUsageLimits.ts";
 import { makeCliproxyApi } from "./cliproxyApi.ts";
+import { makeBillingApi } from "./billingApi.ts";
 
 export class UsageLimitSources extends Context.Service<
   UsageLimitSources,
@@ -61,6 +62,7 @@ function missingManagementKey(config: UsageLimitSourceConfig): string {
 /** @public */
 export const make = Effect.gen(function* () {
   const api = yield* makeCliproxyApi;
+  const billingApi = yield* makeBillingApi;
   const settingsService = yield* Settings.ServerSettingsService;
   const secrets = yield* SecretResolver.SecretResolver;
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
@@ -95,6 +97,32 @@ export const make = Effect.gen(function* () {
       checkedAt,
     } as const;
     const managementKey = yield* readManagementKey(config);
+    if (config.kind !== "cliproxy") {
+      if (!managementKey) {
+        return {
+          ...base,
+          accounts: [],
+          error:
+            config.kind === "anthropic"
+              ? "No Claude Console session key is available. Check the source's credential settings."
+              : "No API key is available. Check the source's credential settings.",
+        };
+      }
+      const result = yield* billingApi.read(config, managementKey).pipe(Effect.result);
+      if (result._tag === "Failure") {
+        return {
+          ...base,
+          accounts: [],
+          error:
+            result.failure._tag === "ClaudeConsoleReadError"
+              ? result.failure.message
+              : config.kind === "anthropic"
+                ? "Could not refresh Claude API billing. Check the Console session key and try again."
+                : "Could not refresh balance or quota. Check the API key and try again.",
+        };
+      }
+      return { ...base, accounts: [], usageLimits: result.success };
+    }
     if (managementKey.length === 0) {
       return { ...base, accounts: [], error: missingManagementKey(config) };
     }
@@ -142,7 +170,7 @@ export const make = Effect.gen(function* () {
       Effect.mapError(() => new UsageLimitSourceError({ detail: "Could not read hub settings." })),
     );
     const config = settings.usageLimitSources[input.sourceId];
-    if (!config?.enabled) {
+    if (!config?.enabled || config.kind !== "cliproxy") {
       return yield* new UsageLimitSourceError({
         detail: "The usage limit source is missing or disabled.",
       });

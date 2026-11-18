@@ -3,6 +3,26 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./crewArtifacts": {
+      "types": "./src/crewArtifacts.ts",
+      "import": "./src/crewArtifacts.ts"
+    },
+    "./crewSupervision": {
+      "types": "./src/crewSupervision.ts",
+      "import": "./src/crewSupervision.ts"
+    },
+    "./crewHistory": {
+      "types": "./src/crewHistory.ts",
+      "import": "./src/crewHistory.ts"
+    },
+    "./crewConversation": {
+      "types": "./src/crewConversation.ts",
+      "import": "./src/crewConversation.ts"
+    },
+    "./crewExecution": {
+      "types": "./src/crewExecution.ts",
+      "import": "./src/crewExecution.ts"
+    },
     "./png": {
       "types": "./src/png.ts",
       "import": "./src/png.ts"

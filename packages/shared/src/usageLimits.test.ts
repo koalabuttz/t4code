@@ -5,6 +5,7 @@ import {
   ProviderInstanceId,
   type ServerProvider,
   UsageLimitSourceId,
+  type UsageLimitSourceSnapshot,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -16,6 +17,7 @@ import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
   collectLimitAccounts,
+  collectBillingSources,
   collectExternalUsageLinks,
   collectLimitNotices,
   collectLimitPools,
@@ -28,6 +30,79 @@ import {
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
+
+it("deduplicates billing keys across environments, keeping billing types and unrelated accounts separate", () => {
+  const source = (
+    id: string,
+    kind: UsageLimitSourceSnapshot["kind"],
+    fingerprint: string,
+    checkedAt: string,
+  ): UsageLimitSourceSnapshot => ({
+    id: UsageLimitSourceId.make(id),
+    kind,
+    label: id,
+    accounts: [],
+    checkedAt,
+    usageLimits: {
+      checkedAt,
+      windows: [],
+      balances: [{ currency: "USD", remaining: 12 }],
+      credentialFingerprint: fingerprint,
+    },
+  });
+  const older = "2026-09-03T10:00:00Z";
+  const newer = "2026-09-03T11:00:00Z";
+  const presentations = new Map([
+    [
+      EnvironmentId.make("desk"),
+      {
+        entry: { target: { label: "Desk" } },
+        serverConfig: {
+          providers: [],
+          usageLimitSources: [
+            source("account", "deepseek", "same-key", older),
+            source("coding", "zai-coding", "zai-key", older),
+          ],
+        },
+      },
+    ],
+    [
+      EnvironmentId.make("remote"),
+      {
+        entry: { target: { label: "Remote" } },
+        serverConfig: {
+          providers: [],
+          usageLimitSources: [
+            source("same account", "deepseek", "same-key", newer),
+            source("other account", "deepseek", "other-key", newer),
+            source("prepaid", "zai-api", "zai-key", newer),
+            {
+              id: UsageLimitSourceId.make("failed"),
+              kind: "abliteration" as const,
+              label: "Failed account",
+              accounts: [],
+              checkedAt: newer,
+              error: "Refresh failed",
+            },
+          ],
+        },
+      },
+    ],
+  ]);
+  const accounts = collectBillingSources(presentations);
+  expect(accounts).toHaveLength(5);
+  expect(accounts[0]?.limits?.checkedAt).toBe(newer);
+  expect(accounts[0]?.environments).toEqual(["Desk", "Remote"]);
+  expect(accounts.at(-1)?.error).toBe("Refresh failed");
+  expect(collectLimitNotices(presentations)).toEqual([]);
+  expect(collectLimitAccounts(presentations)).toEqual([]);
+  expect(
+    withUsageLimitsCommands(
+      [provider({})],
+      presentations.get(EnvironmentId.make("remote"))!.serverConfig.usageLimitSources,
+    )[0]?.slashCommands,
+  ).toEqual([]);
+});
 
 const window = {
   id: "five_hour",

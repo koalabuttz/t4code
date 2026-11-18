@@ -12,6 +12,7 @@ import {
   ProviderSessionId,
   ProviderThreadId,
   ProviderTurnId,
+  RunAttemptId,
   RuntimeRequestId,
   ScheduledTaskId,
   ThreadId,
@@ -1307,49 +1308,192 @@ it.effect("a delegated task that cannot be stopped fails the walk after its sibl
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect("thread.stop marks a turn it cannot interrupt so a late agent watch is refused", () =>
-  Effect.gen(function* () {
-    const orchestrator = yield* Orchestrator.OrchestratorV2;
-    const projections = yield* ProjectionStore.ProjectionStoreV2;
-    const threadId = ThreadId.make("thread:stop-lost-session");
-    yield* createWatchingThread(threadId, 11);
-    yield* send(threadId, "work", "start_immediately");
-    const now = yield* DateTime.now;
-    const run = (yield* orchestrator.getThreadProjection(threadId)).runs[0]!;
-    yield* projections.apply({
-      id: EventId.make("event:stop-lost-session:running"),
-      type: "run.updated",
-      threadId,
-      runId: run.id,
-      occurredAt: now,
-      payload: { ...run, status: "running", startedAt: now },
-    });
-    yield* projections.apply({
-      id: EventId.make("event:stop-lost-session:turn"),
-      type: "provider-turn.updated",
-      threadId,
-      occurredAt: now,
-      payload: {
-        id: ProviderTurnId.make("provider-turn:stop-lost-session"),
-        providerThreadId: run.providerThreadId!,
-        nodeId: run.rootNodeId!,
-        runAttemptId: run.activeAttemptId!,
-        nativeTurnRef: null,
-        ordinal: 1,
-        status: "running",
-        startedAt: now,
-        completedAt: null,
-      },
-    });
+it.effect.each([
+  "unrecorded",
+  "external",
+  "external-unbound",
+  "external-unacknowledged",
+  "external-starting",
+  "external-preparing",
+  "external-replaced",
+] as const)(
+  "thread.stop preserves an unconfirmed %s turn and refuses a late agent watch",
+  (state) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const threadId = ThreadId.make("thread:stop-lost-session");
+      yield* createWatchingThread(threadId, 11);
+      yield* send(threadId, "work", "start_immediately");
+      const now = yield* DateTime.now;
+      const before = yield* orchestrator.getThreadProjection(threadId);
+      const run = before.runs[0]!;
+      const beforeStart = state === "external-starting" || state === "external-preparing";
+      const runStatus =
+        state === "external-starting"
+          ? "starting"
+          : state === "external-preparing"
+            ? "preparing"
+            : "running";
+      const unacknowledged = state === "external-unacknowledged" || beforeStart;
+      if (state !== "unrecorded") {
+        const providerThread = before.providerThreads.find(
+          (thread) => thread.id === run.providerThreadId,
+        )!;
+        const sessionId = ProviderSessionId.make("session:external-stop");
+        yield* projections.apply({
+          id: EventId.make("event:external-stop:session"),
+          type: "provider-session.attached",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: sessionId,
+            providerInstanceId: instanceId,
+            driver: adapter.driver,
+            cwd: "/workspace",
+            model: modelSelection.model,
+            status: "error",
+            capabilities: {
+              ...CodexProviderCapabilitiesV2,
+              sessions: {
+                ...CodexProviderCapabilitiesV2.sessions,
+                runtimeSurvivesServerExit: true,
+              },
+            },
+            createdAt: now,
+            updatedAt: now,
+            lastError: "Connection lost",
+          },
+        });
+        yield* projections.apply({
+          id: EventId.make("event:external-stop:provider-thread"),
+          type: "provider-thread.updated",
+          threadId,
+          occurredAt: now,
+          payload: { ...providerThread, status: "active", providerSessionId: sessionId },
+        });
+        yield* projections.apply({
+          id: EventId.make("event:external-stop:attempt"),
+          type: "run-attempt.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            ...before.attempts[0]!,
+            status: beforeStart ? "pending" : "running",
+            startedAt: beforeStart ? null : now,
+          },
+        });
+        yield* projections.apply({
+          id: EventId.make("event:external-stop:node"),
+          type: "node.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            ...before.nodes.find((node) => node.id === run.rootNodeId)!,
+            status: "running",
+            startedAt: now,
+          },
+        });
+        if (state === "external-unbound")
+          yield* projections.apply({
+            id: EventId.make("event:external-stop:detached"),
+            type: "provider-session.detached",
+            threadId,
+            occurredAt: now,
+            payload: { providerSessionId: sessionId, detachedAt: now, reason: "Connection lost" },
+          });
+      }
+      yield* projections.apply({
+        id: EventId.make("event:stop-lost-session:running"),
+        type: "run.updated",
+        threadId,
+        runId: run.id,
+        occurredAt: now,
+        payload: { ...run, status: runStatus, startedAt: beforeStart ? null : now },
+      });
+      if (!unacknowledged)
+        yield* projections.apply({
+          id: EventId.make("event:stop-lost-session:turn"),
+          type: "provider-turn.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            id: ProviderTurnId.make("provider-turn:stop-lost-session"),
+            providerThreadId: run.providerThreadId!,
+            nodeId: run.rootNodeId!,
+            runAttemptId: run.activeAttemptId!,
+            nativeTurnRef: null,
+            ordinal: 1,
+            status: "running",
+            startedAt: now,
+            completedAt: null,
+          },
+        });
 
-    yield* orchestrator.dispatch({
-      type: "thread.stop",
-      commandId: CommandId.make("stop-lost-session"),
-      threadId,
-    });
-    assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 12))));
-    assert.deepEqual(yield* threadState(threadId), { runs: ["running"], watched: [] });
-  }).pipe(Effect.provide(layerTest)),
+      if (state !== "unrecorded") {
+        const threads = yield* ThreadManagementService.ThreadManagementService;
+        const forced = yield* Effect.result(threads.forceStopThread({ threadId, runId: run.id }));
+        assert.equal(forced._tag, "Failure");
+        assert.deepEqual((yield* threadState(threadId)).runs, [runStatus]);
+      }
+      yield* orchestrator.dispatch({
+        type: "thread.stop",
+        commandId: CommandId.make("stop-lost-session"),
+        threadId,
+      });
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(watch(threadId, 12))));
+      assert.deepEqual(yield* threadState(threadId), { runs: [runStatus], watched: [] });
+      if (state === "unrecorded") return;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const stop = (yield* outbox.listByCommandId(CommandId.make("stop-lost-session"))).find(
+        (effect) => effect.request.type === "provider-runtime.stop",
+      );
+      assert.isDefined(stop);
+      if (stop?.request.type !== "provider-runtime.stop") return;
+      assert.equal(stop.status, "pending");
+      assert.equal(stop.request.runId, run.id);
+      assert.equal(stop.request.attemptId, run.activeAttemptId);
+      assert.equal(stop.request.providerTurnId === null, unacknowledged);
+      if (state === "external-replaced") {
+        yield* projections.apply({
+          id: EventId.make("event:external-stop:replacement"),
+          type: "run.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            ...run,
+            status: "running",
+            activeAttemptId: RunAttemptId.make("replacement-attempt"),
+          },
+        });
+      }
+      const confirmed = yield* Effect.result(
+        orchestrator.dispatch({
+          type: "thread.background-work.settle",
+          commandId: CommandId.make(`${stop.id}:background-work-settled`),
+          threadId,
+          providerThreadId: stop.request.providerThreadId,
+          providerTurnId: stop.request.providerTurnId,
+          externalRuntime: {
+            providerSessionId: stop.request.providerSessionId,
+            runId: stop.request.runId,
+            attemptId: stop.request.attemptId,
+          },
+        }),
+      );
+      assert.equal(confirmed._tag, state === "external-replaced" ? "Failure" : "Success");
+      assert.deepEqual((yield* threadState(threadId)).runs, [
+        state === "external-replaced" ? "running" : "interrupted",
+      ]);
+      if (beforeStart) {
+        const settled = yield* orchestrator.getThreadProjection(threadId);
+        assert.equal(settled.attempts[0]!.status, "interrupted");
+        assert.equal(
+          settled.nodes.find((node) => node.id === run.rootNodeId)?.status,
+          "interrupted",
+        );
+      }
+    }).pipe(Effect.provide(layerTest)),
 );
 
 it.effect.each(["missing session", "completed", "failed", "cancelled"] as const)(

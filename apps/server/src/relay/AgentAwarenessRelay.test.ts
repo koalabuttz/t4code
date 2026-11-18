@@ -209,6 +209,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
   const catchUp = { activitySnapshotReads: 0 };
   const threads = ThreadManagementService.ThreadManagementService.of({
     getThreadShell: unused,
+    getStopRunEvidence: unused,
     getShellSnapshot: unused,
     getAgentAwarenessSnapshot: (threadId) =>
       threadId === undefined
@@ -260,6 +261,7 @@ const makeTestRelay = Effect.fnUntraced(function* (
     forceStopThread: () => Effect.die("unused forceStopThread"),
     awaitBackgroundTasks: unused,
     stopDelegatedTasks: unused,
+    confirmStop: unused,
     getThreadEventSequence: unused,
     recoverDelegatedTask: unused,
     cancelDelegatedTask: unused,

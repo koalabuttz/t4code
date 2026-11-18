@@ -10,6 +10,7 @@ import { View } from "react-native";
 
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { ThreadDetailScreen, type ThreadDetailScreenProps } from "./ThreadDetailScreen";
+import { CrewChatFrame } from "./CrewChat";
 
 type ThreadScreenContent =
   | { readonly props: ThreadDetailScreenProps }
@@ -39,11 +40,18 @@ function ThreadScreenOutlet() {
   const content = useSyncExternalStore(store.subscribe, store.getSnapshot);
   if (content === null) return null;
   const body = "props" in content ? <ThreadDetailScreen {...content.props} /> : content.fallback;
-  return (
+  const screen = (
     <>
       {"props" in content ? content.props.header : content.header}
       <ScreenContent surface="canvas">{body}</ScreenContent>
     </>
+  );
+  return "props" in content && content.props.crewRoute ? (
+    <CrewChatFrame thread={content.props.selectedThread} route={content.props.crewRoute}>
+      {screen}
+    </CrewChatFrame>
+  ) : (
+    screen
   );
 }
 

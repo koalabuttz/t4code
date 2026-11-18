@@ -1,4 +1,10 @@
 import { AppBar } from "../../components/ui/AppBar";
+import { useNavigation } from "@react-navigation/native";
+import { prepareCrewEntry } from "@t3tools/client-runtime/state/crew";
+import { appAtomRegistry } from "../../state/atom-registry";
+import type { TeamworkTarget } from "./TeamworkSheet";
+import { useCrewChat } from "./CrewChat";
+import { openCrewPage } from "./crewProjectNavigation";
 import type { AppBarAction, AppBarMenu } from "../../components/ui/AppBar.types";
 import {
   useAdaptiveWorkspaceLayout,
@@ -21,8 +27,13 @@ export function ThreadHeader(props: {
   readonly hasThreadCwd: boolean;
   readonly inspectorMode: ThreadInspectorMode | null;
   readonly onOpenFilesInspector: () => void;
+  readonly teamwork?: TeamworkTarget;
 }) {
-  const goBack = useWorkspaceBackNavigation();
+  const navigation = useNavigation();
+  const chat = useCrewChat();
+  const goBack = useWorkspaceBackNavigation(
+    chat?.route.coordinator === true || chat?.route.source === true,
+  );
   const { toggleAuxiliaryPane, startNewTask } = useAdaptiveWorkspaceLayout();
   const { panes } = useWorkspacePaneState();
   const gitMenu = useThreadGitMenuDefinition(props.gitControls);
@@ -41,12 +52,74 @@ export function ThreadHeader(props: {
       ]
     : [];
   const menus = [gitMenu, terminalMenu].filter((menu): menu is AppBarMenu => menu !== null);
+  if (chat) {
+    if (chat.route.source)
+      actions.push({
+        accessibilityLabel: "Return to origin",
+        icon: "chevron.left",
+        onPress: goBack,
+      });
+    else if (!chat.route.coordinator)
+      actions.push({
+        accessibilityLabel: "Project chat",
+        icon: "person.2",
+        onPress: () => chat.go(),
+      });
+    menus.push({
+      title: "Project conversations",
+      icon: "person.2",
+      items: [
+        ...(!chat.route.coordinator
+          ? [{ id: "chat", title: "Project chat", onPress: () => chat.go() }]
+          : []),
+        { id: "threads", title: "Threads", onPress: () => chat.go("threads") },
+        { id: "results", title: "Results", onPress: () => chat.go("results") },
+        { id: "settings", title: "Settings", onPress: () => chat.go("project-settings") },
+        { id: "memory", title: "Save a project note", onPress: () => chat.go("knowledge") },
+        ...(chat.route.coordinator
+          ? [
+              {
+                id: "pause",
+                title: chat.stop
+                  ? "Stop recovery"
+                  : chat.actionInitiative?.status === "active"
+                    ? "Pause work"
+                    : "Plan and recovery",
+                onPress: chat.pauseOrRecover,
+                disabled:
+                  chat.actionInitiative?.status === "active" &&
+                  !chat.stop &&
+                  !chat.controls.canEdit,
+              },
+            ]
+          : []),
+      ],
+    });
+  } else if (props.teamwork)
+    actions.push({
+      accessibilityLabel: "Project crew",
+      icon: "person.2",
+      onPress: () => {
+        if (!props.teamwork) return;
+        prepareCrewEntry(appAtomRegistry, props.teamwork, props.teamwork);
+        openCrewPage(navigation, props.teamwork);
+      },
+    });
 
   return (
     <AppBar
-      title={props.title}
-      subtitle={props.subtitle}
-      onBackToList={goBack}
+      title={
+        chat?.route.coordinator ? chat.route.projectTitle : (chat?.workstream?.title ?? props.title)
+      }
+      subtitle={
+        chat?.route.coordinator
+          ? `Coordinator · ${props.title} · ${props.subtitle}`
+          : chat?.workstream
+            ? `${chat.route.projectTitle} · ${props.subtitle}`
+            : props.subtitle
+      }
+      onBack={chat?.route.source || chat?.route.coordinator ? goBack : undefined}
+      onBackToList={chat?.route.source || chat?.route.coordinator ? undefined : goBack}
       onCompose={props.draft ? undefined : startNewTask}
       backInSplitView={
         props.onReturnToThread

@@ -16,6 +16,7 @@ import {
   type ServerSettings,
 } from "@t3tools/contracts";
 import { acpRegistryClient } from "@t3tools/provider-acp-registry/client";
+import { albedoClient } from "@t3tools/provider-albedo/client";
 import { cursorClient } from "@t3tools/provider-cursor/client";
 import { fxClient } from "@t3tools/provider-fx/client";
 import { grokClient } from "@t3tools/provider-grok/client";
@@ -43,6 +44,7 @@ const known = (
   ] as const;
 
 const PACKAGED_CLIENTS: ReadonlyArray<ProviderClientDefinition> = [
+  albedoClient,
   cursorClient,
   grokClient,
   fxClient,
@@ -93,6 +95,7 @@ const LAUNCH_CONFIG_FIELDS = [
   "binaryPath",
   "launchArgs",
   "homePath",
+  "homeDirectory",
   "shadowHomePath",
   "commandPath",
   "commandArgs",
@@ -168,6 +171,23 @@ export const providerHostEnvironment = (
       delete next[name];
     }
   }
+  // Drivers keep this object, so PATH reads through to the host for a refresh after launch to reach them.
+  const pathKeys = Object.keys(next).filter((name) => name.toUpperCase() === "PATH");
+  if (pathKeys.length > 0) {
+    for (const name of pathKeys) delete next[name];
+    Object.defineProperty(next, "PATH", {
+      enumerable: true,
+      configurable: true,
+      get: () => environment.PATH ?? environment.Path ?? environment.path,
+      set: (value) =>
+        Object.defineProperty(next, "PATH", {
+          value,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        }),
+    });
+  }
   return next;
 };
 
@@ -176,6 +196,7 @@ const HOME_VARIABLES: ReadonlyMap<
   ProviderDriverKind,
   { readonly variable: string; readonly fields: ReadonlyArray<string> }
 > = new Map([
+  [ProviderDriverKind.make("albedo"), { variable: "ALBEDO_HOME", fields: ["homeDirectory"] }],
   [ProviderDriverKind.make("claudeAgent"), { variable: "CLAUDE_CONFIG_DIR", fields: ["homePath"] }],
   [
     ProviderDriverKind.make("codex"),

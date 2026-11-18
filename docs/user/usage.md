@@ -108,6 +108,33 @@ show every model again.
 If the setting is invalid, Usage ignores it and shows every model, and the next save of any other
 setting removes it from `settings.json`.
 
+## Track API balances
+
+On web or desktop, open **Settings → Providers → Usage providers → Add source**.
+Choose DeepSeek, GLM Coding Plan, GLM prepaid API, or Abliteration and provide the corresponding API key.
+The key stays on the selected environment; connected web, desktop, and mobile clients
+can see the account under **Usage → Limits**. Remove the source in the same settings section.
+
+DeepSeek, GLM prepaid API, and Abliteration show provider-reported credit balances. GLM Coding Plan shows
+the quota windows its service reports, with reset times when available. These are account-wide
+figures, including usage outside T3. Adding the same key on several environments displays one
+account; different keys may still belong to the same billing account, so balances are not summed.
+
+GLM prepaid API is separate from Coding Plan; use the key for your prepaid API account.
+Its balance lookup uses an undocumented Z.ai endpoint and may become unavailable if that endpoint
+changes. A failed lookup shows an error, never a zero balance. These sources do not change which
+account an agent uses.
+
+For **Claude API**, add a source using the `sessionKey` cookie from a signed-in
+`platform.claude.com` browser session. Find it in the browser's developer tools under
+**Application → Cookies** and copy only its value. This shows remaining API credit and
+the current month's spend in UTC; Claude subscription limits remain separate. API keys and
+Admin API keys cannot read this Console balance endpoint.
+
+If you have multiple API organizations, enter the intended organization's ID. Use **Update session**
+in Usage providers to replace an expired cookie or change that selection. The Console endpoints
+are undocumented and may change. An unavailable spend report does not hide a valid credit balance.
+
 ## Track subscription limits
 
 **Usage → Limits** pools every subscription account it can see per provider, so with several Codex
@@ -173,8 +200,8 @@ using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
 ## Connect a CLIProxyAPI hub
 
-To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the
-environment that will connect to the hub and enter its URL and management key.
+To see pooled accounts, open **Settings → Providers → Usage providers → Add source** and choose
+**CLIProxyAPI hub**. Choose the environment that will connect to the hub and enter its URL and management key.
 
 The hub's Codex, Claude, xAI (shown as Grok) and Antigravity accounts appear under **Usage → Limits**;
 accounts for other providers are not read. Codex accounts show banked reset credits; select an

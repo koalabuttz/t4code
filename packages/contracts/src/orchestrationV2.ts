@@ -276,6 +276,7 @@ export const OrchestrationV2SessionCapabilities = Schema.Struct({
   supportsProviderSwitchingViaHandoff: Schema.Boolean,
   supportsRuntimeModeSwitchInSession: Schema.Boolean,
   pendingRequestsSurviveRestart: Schema.Boolean,
+  runtimeSurvivesServerExit: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2SessionCapabilities = typeof OrchestrationV2SessionCapabilities.Type;
 
@@ -1060,6 +1061,8 @@ const PendingBackgroundTaskFields = {
   parentTaskId: Schema.optional(TrimmedNonEmptyString),
   /** Native id of the turn item that started this work, when it is not `taskId`. */
   nativeItemId: Schema.optional(TrimmedNonEmptyString),
+  /** The run that was executing when the work first appeared, stamped by the projection. */
+  runId: Schema.optional(RunId),
   /**
    * The agent declared it resumes when this work ends, so the thread holds like it does for a
    * subagent. Only the agent knows whether a command is a wait or a dev server it left running.
@@ -3742,7 +3745,14 @@ const OrchestrationV2InternalCommand = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     providerThreadId: ProviderThreadId,
-    providerTurnId: ProviderTurnId,
+    providerTurnId: Schema.NullOr(ProviderTurnId),
+    externalRuntime: Schema.optional(
+      Schema.Struct({
+        providerSessionId: ProviderSessionId,
+        runId: RunId,
+        attemptId: RunAttemptId,
+      }),
+    ),
     /** Replaces the Stop's own reason on the result, as Force stop does. */
     reason: Schema.optional(Schema.String),
     subagent: Schema.optional(
@@ -4279,11 +4289,13 @@ export class OrchestrationV2ForceStopThreadError extends Schema.TaggedError<Orch
   {
     threadId: ThreadId,
     /** `superseded`: a newer run started since the user asked; nothing was stopped. */
-    reason: Schema.optional(Schema.Literal("superseded")),
+    reason: Schema.optional(Schema.Literals(["superseded", "external-runtime"])),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
+    if (this.reason === "external-runtime")
+      return "This thread uses a persistent external runtime. Use Stop to confirm its native work ended; disconnecting cannot force stop it.";
     return this.reason === "superseded"
       ? "A new turn started, so nothing was force stopped."
       : "Failed to force stop the agent.";

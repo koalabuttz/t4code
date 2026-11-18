@@ -7,6 +7,10 @@
       "types": "./src/pullRequestDiffFold.ts",
       "default": "./src/pullRequestDiffFold.ts"
     },
+    "./state/crew": {
+      "types": "./src/state/crew.ts",
+      "default": "./src/state/crew.ts"
+    },
     "./assembly-highlighting": {
       "types": "./src/assemblyHighlighting.ts",
       "default": "./src/assemblyHighlighting.ts"
@@ -175,6 +179,10 @@
       "types": "./src/state/attachments.ts",
       "default": "./src/state/attachments.ts"
     },
+    "./state/attachment-uploads": {
+      "types": "./src/state/attachmentUploads.ts",
+      "default": "./src/state/attachmentUploads.ts"
+    },
     "./text-paste": {
       "types": "./src/textPaste.ts",
       "default": "./src/textPaste.ts"
@@ -246,6 +254,14 @@
     "./state/deviceHubAccess": {
       "types": "./src/state/deviceHubAccess.ts",
       "default": "./src/state/deviceHubAccess.ts"
+    },
+    "./state/polytoken": {
+      "types": "./src/state/polytoken.ts",
+      "default": "./src/state/polytoken.ts"
+    },
+    "./state/polytoken-surfaces": {
+      "types": "./src/state/polytokenSurfaces.ts",
+      "default": "./src/state/polytokenSurfaces.ts"
     },
     "./state/peerLinks": {
       "types": "./src/state/peerLinks.ts",
@@ -515,6 +531,10 @@
       "types": "./src/mcpApps/host.ts",
       "default": "./src/mcpApps/host.ts"
     },
+    "./polytoken/surface-host": {
+      "types": "./src/polytoken/surfaceHost.ts",
+      "default": "./src/polytoken/surfaceHost.ts"
+    },
     "./state/mcp-apps": {
       "types": "./src/state/mcpApps.ts",
       "default": "./src/state/mcpApps.ts"
@@ -563,6 +583,10 @@
       "types": "./src/pullRequestReviewers.ts",
       "default": "./src/pullRequestReviewers.ts"
     },
+    "./pull-request-selection": {
+      "types": "./src/pullRequestSelection.ts",
+      "default": "./src/pullRequestSelection.ts"
+    },
     "./provider-clients": {
       "types": "./src/providerClients.ts",
       "default": "./src/providerClients.ts"
@@ -580,6 +604,7 @@
     "@pierre/diffs": "catalog:",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/provider-acp-registry": "workspace:*",
+    "@t3tools/provider-albedo": "workspace:*",
     "@t3tools/provider-core": "workspace:*",
     "@t3tools/provider-cursor": "workspace:*",
     "@t3tools/provider-fx": "workspace:*",

@@ -1,9 +1,12 @@
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
+import { prepareCrewEntry } from "@t3tools/client-runtime/state/crew";
+import { appAtomRegistry } from "../rpc/atomRegistry";
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
 import {
   scopedThreadKey,
+  scopedProjectKey,
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
@@ -19,6 +22,7 @@ import {
   getNewProjectPublishTarget,
   getNewProjectPublishTargets,
   getNewProjectRepository,
+  getAddProjectInitialQuery,
   githubIncompleteOwnerRepositoryMessage,
   normalizePastedCloneUrl,
   addProjectRemoteSourceLabel,
@@ -154,7 +158,6 @@ import {
 } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
-  ensureBrowseDirectoryPath,
   findProjectByPath,
   getBrowseDirectoryPath,
   hasTrailingPathSeparator,
@@ -683,12 +686,7 @@ function OpenCommandPaletteDialog(props: {
   const paletteMode = getCommandPaletteMode({ currentView, isBrowsing });
   const getAddProjectInitialQueryForEnvironment = (environmentId: EnvironmentId | null): string => {
     const environment = environments.find((candidate) => candidate.environmentId === environmentId);
-    const environmentSettings = environment?.serverConfig?.settings ?? null;
-    const baseDirectory = environmentSettings?.addProjectBaseDirectory?.trim() ?? "";
-    if (baseDirectory.length === 0) {
-      return "~/";
-    }
-    return ensureBrowseDirectoryPath(baseDirectory);
+    return getAddProjectInitialQuery(environment?.serverConfig?.settings.addProjectBaseDirectory);
   };
 
   const { projectByKey } = useProjectLookups();
@@ -1499,6 +1497,33 @@ function OpenCommandPaletteDialog(props: {
       icon: <UserPlusIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         openGuestShareDialog(threadRef);
+      },
+    });
+  }
+
+  if (
+    contextualProjectRef !== null &&
+    environments.find(
+      (environment) => environment.environmentId === contextualProjectRef.environmentId,
+    )?.serverConfig?.environment.capabilities.projectTeamwork
+  ) {
+    actionItems.push({
+      kind: "action",
+      value: "action:project-teamwork",
+      searchTerms: ["crew", "teamwork", "swarm", "team", "coordinator", "knowledge"],
+      title: "Open project crew",
+      icon: <UserPlusIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        if (
+          activeThread?.environmentId === contextualProjectRef.environmentId &&
+          activeThread.projectId === contextualProjectRef.projectId
+        ) {
+          prepareCrewEntry(appAtomRegistry, contextualProjectRef, { threadId: activeThread.id });
+        }
+        await navigate({
+          to: "/projects/$projectKey/crew",
+          params: { projectKey: scopedProjectKey(contextualProjectRef) },
+        });
       },
     });
   }
