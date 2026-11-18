@@ -21,7 +21,7 @@ import {
 import { AndroidHomeFabLayout } from "./AndroidHomeFab";
 import {
   AndroidHomeDrawer,
-  AndroidProjectsView,
+  AndroidCrewProjectsView,
   useAndroidHomeNavigation,
 } from "./AndroidHomeNavigation";
 import { HomeScreen } from "./HomeScreen";
@@ -200,10 +200,9 @@ export function HomeRouteScreen() {
   if (androidHome.view === "projects") {
     return (
       <>
-        <AndroidProjectsView
+        <AndroidCrewProjectsView
           navigation={androidHome}
           scopes={navigationScopes}
-          onOpenProject={openProject}
           onAddProject={() =>
             navigation.navigate(
               "AddProject",

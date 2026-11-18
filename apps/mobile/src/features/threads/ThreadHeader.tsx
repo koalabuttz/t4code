@@ -52,8 +52,14 @@ export function ThreadHeader(props: {
       ]
     : [];
   const menus = [gitMenu, terminalMenu].filter((menu): menu is AppBarMenu => menu !== null);
-  if (chat) {
-    if (!crewSource && !chat.route.coordinator)
+  if (chat?.route.coordinator) {
+    actions.push({
+      accessibilityLabel: "Project threads",
+      icon: "person.2",
+      onPress: () => chat.go("threads"),
+    });
+  } else if (chat) {
+    if (!crewSource)
       actions.push({
         accessibilityLabel: "Project chat",
         icon: "person.2",
@@ -63,30 +69,11 @@ export function ThreadHeader(props: {
       title: "Project conversations",
       icon: "person.2",
       items: [
-        ...(!chat.route.coordinator
-          ? [{ id: "chat", title: "Project chat", onPress: () => chat.go() }]
-          : []),
+        { id: "chat", title: "Project chat", onPress: () => chat.go() },
         { id: "threads", title: "Threads", onPress: () => chat.go("threads") },
         { id: "results", title: "Results", onPress: () => chat.go("results") },
         { id: "settings", title: "Settings", onPress: () => chat.go("project-settings") },
         { id: "memory", title: "Save a project note", onPress: () => chat.go("knowledge") },
-        ...(chat.route.coordinator
-          ? [
-              {
-                id: "pause",
-                title: chat.stop
-                  ? "Stop recovery"
-                  : chat.actionInitiative?.status === "active"
-                    ? "Pause work"
-                    : "Plan and recovery",
-                onPress: chat.pauseOrRecover,
-                disabled:
-                  chat.actionInitiative?.status === "active" &&
-                  !chat.stop &&
-                  !chat.controls.canEdit,
-              },
-            ]
-          : []),
       ],
     });
   } else if (props.teamwork)

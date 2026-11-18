@@ -1,11 +1,10 @@
 import { useNavigation } from "@react-navigation/native";
 import { useRef } from "react";
-import * as Effect from "effect/Effect";
-import { AtomRegistry } from "effect/reactivity";
-import type { ScopedProjectRef, TeamworkReadResult } from "@t3tools/contracts";
+import type { ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 
 import { appAtomRegistry } from "../../state/atom-registry";
+import { readCrewProjectFootprint } from "../../state/crew-project-footprints";
 import { serverEnvironment } from "../../state/server";
 import { openCrewPage } from "../threads/crewProjectNavigation";
 import type { HomeProjectScope } from "./homeThreadList";
@@ -45,35 +44,10 @@ export function useProjectListSelection(
       return;
     }
     const top = navigation.getState()?.routes.at(-1)?.key;
-    const atom = serverEnvironment.teamworkLive({
-      environmentId: scope.environmentId,
-      input: { projectId: scope.projectId },
-    });
-    const hasCrew = (read: TeamworkReadResult | null | undefined) =>
-      Boolean(
-        read?.snapshot.coordinatorThreadId ||
-        read?.snapshot.initiatives.some(
-          (initiative) =>
-            initiative.status === "active" ||
-            initiative.status === "paused" ||
-            initiative.status === "draft",
-        ),
-      );
-    const cached = appAtomRegistry.get(atom);
-    if (cached._tag === "Success") {
-      if (hasCrew(cached.value)) openCrewPage(navigation, scope);
-      else setFilter(key, exactScope);
-      return;
-    }
     if (!deferFilter) setFilter(key, exactScope);
-    void Effect.runPromise(
-      AtomRegistry.getResult(appAtomRegistry, atom).pipe(
-        Effect.timeoutOption("2 seconds"),
-        Effect.orElseSucceed(() => null),
-      ),
-    ).then((result) => {
+    void readCrewProjectFootprint(scope, AbortSignal.timeout(2_000)).then((result) => {
       if (request !== attempt.current || top !== navigation.getState()?.routes.at(-1)?.key) return;
-      if (result?._tag === "Some" && hasCrew(result.value)) openCrewPage(navigation, scope);
+      if (result?.hasCrew) openCrewPage(navigation, scope);
       else if (deferFilter) setFilter(key, exactScope);
     });
   };

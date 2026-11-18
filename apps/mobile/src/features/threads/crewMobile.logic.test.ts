@@ -365,6 +365,27 @@ describe("mobile Crew source adaptation", () => {
     const section = (groups: ReturnType<typeof mobileCrewWorkstreamGroups>) =>
       groups.find((group) => group.rows.length > 0)?.title;
     expect(section(mobileCrewWorkstreamGroups(input))).toBe("Resolved");
+    const search = mobileCrewWorkstreamGroups({
+      ...input,
+      search: "Andriod",
+      workstreams: [
+        ...input.workstreams,
+        {
+          ...input.workstreams[0]!,
+          title: "Andriod",
+          conversation: { ...conversation, environmentId: EnvironmentId.make("other") },
+        },
+        {
+          ...input.workstreams[0]!,
+          title: "Andriod",
+          status: "unlinked",
+          conversation: { ...conversation, threadId: ThreadId.make("unlinked") },
+        },
+      ],
+    });
+    expect(search.flatMap((group) => group.rows.map((row) => row.workstream.conversation))).toEqual(
+      [conversation],
+    );
     expect(section(mobileCrewWorkstreamGroups({ ...input, freshness: "disconnected" }))).toBe(
       "Needs you",
     );

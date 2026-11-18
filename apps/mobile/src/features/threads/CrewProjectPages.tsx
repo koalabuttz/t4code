@@ -1,7 +1,6 @@
 import { useNavigation } from "@react-navigation/native";
 import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
 import {
-  isCrewCoordinatorCandidate,
   crewSelectedInitiative,
   crewSelectedTask,
   crewScrollOffset,
@@ -14,7 +13,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { canLinkCrewWorkstream, sameCrewProject } from "@t3tools/shared/crewConversation";
+import { sameCrewProject } from "@t3tools/shared/crewConversation";
 import { useRef, useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,58 +25,13 @@ import { ListRow } from "../../components/ui/ListRow";
 import { ListRowLayout } from "../../components/ui/ListRowLayout";
 import { ListSection } from "../../components/ui/ListSection";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
-import { useBarOverlap } from "../../components/ui/useBarInset";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { openCrewPage, openCrewSource, type CrewProjectPage } from "./crewProjectNavigation";
-import { mobileCrewWorkstreamGroups } from "./crewMobile.logic";
-import {
-  useCrewCollection,
-  useCrewControls,
-  useCrewHumanAttention,
-  useCrewProject,
-} from "./use-crew-project";
+import { openCrewPage, openCrewSource } from "./crewProjectNavigation";
+import { useCrewCollection, useCrewProject, useCrewRead } from "./use-crew-project";
 import type { CrewMessageRef } from "@t3tools/contracts/crewConversation";
-
-export function CrewProjectDestinations({
-  scope,
-  page,
-}: {
-  scope: CrewProjectScope;
-  page?: CrewProjectPage | undefined;
-}) {
-  const navigation = useNavigation();
-  const overlap = useBarOverlap();
-  return (
-    <View
-      className="flex-row flex-wrap items-center gap-2 border-b border-border px-4 pb-2 pt-2"
-      style={{ marginTop: overlap }}
-    >
-      {(
-        [
-          [undefined, "Chat"],
-          ["threads", "Threads"],
-          ["results", "Results"],
-          ["project-settings", "Settings"],
-        ] as const
-      ).map(([target, label]) => {
-        const selected = (page === "overview" ? undefined : page) === target;
-        return (
-          <Button
-            key={label}
-            label={label}
-            size="compact"
-            tone={selected ? "primary" : "secondary"}
-            disabled={selected}
-            onPress={() => openCrewPage(navigation, scope, target)}
-          />
-        );
-      })}
-    </View>
-  );
-}
 
 function CrewPageScroll({
   scope,
@@ -93,7 +47,7 @@ function CrewPageScroll({
   const [initial] = useState(() => appAtomRegistry.get(atom));
   const scroll = useRef<React.ElementRef<typeof ScrollView>>(null);
   const restored = useRef(initial === 0);
-  const settingsPage = page === "project-settings" || page === "advanced";
+  const settingsPage = page === "project-settings" || page === "advanced" || page === "results";
   const PageScrollView = settingsPage ? ScreenScrollView : ScrollView;
   return (
     <PageScrollView
@@ -129,14 +83,13 @@ export function CrewProjectPages({
 }: {
   scope: CrewProjectScope;
   project: EnvironmentProject;
-  page: "threads" | "results" | "project-settings" | "advanced";
+  page: "results" | "project-settings" | "advanced";
 }) {
   const navigation = useNavigation();
+  const recovery = useCrewRead(page === "advanced" ? scope : null);
   return (
     <CrewPageScroll scope={scope} page={page}>
-      {page === "threads" ? (
-        <WorkstreamList scope={scope} />
-      ) : page === "results" ? (
+      {page === "results" ? (
         <ProjectResults scope={scope} />
       ) : page === "project-settings" ? (
         <>
@@ -182,7 +135,18 @@ export function CrewProjectPages({
             <ListRow
               icon="arrow.clockwise"
               label="Recovery and handover"
-              onPress={() => openCrewPage(navigation, scope, "recovery")}
+              onPress={() => {
+                const initiatives = recovery.data?.snapshot.initiatives;
+                const initiative =
+                  initiatives?.findLast((entry) => entry.status === "active") ??
+                  initiatives?.findLast((entry) => entry.status === "paused");
+                if (initiative)
+                  appAtomRegistry.set(
+                    crewSelectedInitiative(scopedProjectKey(scope)),
+                    initiative.id,
+                  );
+                openCrewPage(navigation, scope, "recovery");
+              }}
             />
           </ListSection>
           <ListSection title="Management">
@@ -404,193 +368,6 @@ function ProjectDetails({
   );
 }
 
-function WorkstreamList({ scope }: { scope: CrewProjectScope }) {
-  const navigation = useNavigation();
-  const { threads, snapshot, freshness, supervision } = useCrewProject(scope);
-  const canRead = useEnvironmentScope(scope.environmentId, AuthOrchestrationReadScope);
-  const [search, setSearch] = useState("");
-  const [linking, setLinking] = useState(false);
-  const [cursor, setCursor] = useState<string>();
-  const [requestCursor, setRequestCursor] = useState<string>();
-  const workstreams = useCrewCollection(scope, {
-    collection: "workstreams",
-    limit: 100,
-    ...(cursor ? { cursor } : {}),
-  });
-  const taskLinks = useCrewCollection(scope, { collection: "task-links", limit: 100 });
-  const attention = useCrewHumanAttention(
-    scope,
-    freshness === "current" ? (snapshot?.coordinatorThreadId ?? null) : null,
-    snapshot?.revision,
-    requestCursor,
-  );
-  const controls = useCrewControls(scope, snapshot?.revision, freshness === "current");
-  const entries = workstreams.data?.workstreams ?? [];
-  const groups = mobileCrewWorkstreamGroups({
-    scope,
-    workstreams: entries,
-    links: taskLinks.data?.taskLinks ?? [],
-    threads,
-    supervision,
-    freshness,
-    search,
-  });
-  const linkable = threads.filter(
-    (thread) =>
-      isCrewCoordinatorCandidate(scope, thread) &&
-      !thread.archivedAt &&
-      canLinkCrewWorkstream(
-        scope,
-        thread.environmentId,
-        thread.source,
-        snapshot?.coordinatorThreadId ?? null,
-      ) &&
-      !entries.some(
-        (entry) => entry.status !== "unlinked" && entry.conversation.threadId === thread.id,
-      ),
-  );
-  return (
-    <>
-      <AppTextInput
-        accessibilityLabel="Search work threads"
-        placeholder="Search work threads"
-        value={search}
-        onChangeText={setSearch}
-        className="rounded-xl border border-border px-3 py-3"
-      />
-      {freshness !== "current" && (
-        <AppText accessibilityRole="alert">
-          Updates are last known. Execution is unconfirmed.
-        </AppText>
-      )}
-      {workstreams.error && <AppText accessibilityRole="alert">{workstreams.error}</AppText>}
-      {controls.error && (
-        <AppText accessibilityRole="alert" className="text-danger">
-          {controls.error}
-        </AppText>
-      )}
-      {attention.checking && <AppText>Checking pending requests…</AppText>}
-      {attention.error && (
-        <Button label="Refresh pending requests" size="compact" onPress={attention.refresh} />
-      )}
-      {freshness === "current" &&
-        attention.requests.map((item) => {
-          const pending = item.pendingRequest;
-          const thread = threads.find(
-            (entry) => entry.id === item.source.conversation.threadId && entry.deletedAt === null,
-          );
-          return pending &&
-            item.coordinator.threadId === snapshot?.coordinatorThreadId &&
-            thread ? (
-            <Button
-              key={item.id}
-              size="compact"
-              label={`${item.reason === "approval" ? "Review request" : "Open question"} · ${thread.title}`}
-              onPress={() =>
-                openCrewSource(navigation, scope, item.source.conversation, undefined, pending)
-              }
-            />
-          ) : null;
-        })}
-      {attention.nextCursor && (
-        <Button
-          label="Check next request page"
-          size="compact"
-          onPress={() => setRequestCursor(attention.nextCursor ?? undefined)}
-        />
-      )}
-      {requestCursor && (
-        <Button
-          label="First request page"
-          size="compact"
-          onPress={() => setRequestCursor(undefined)}
-        />
-      )}
-      {groups.map(
-        ({ title, rows }) =>
-          rows.length > 0 && (
-            <View key={title} className="gap-2">
-              <AppText accessibilityRole="header" className="font-t3-semibold">
-                {title}
-              </AppText>
-              {rows.map(({ workstream, detail, unread }) => (
-                <View
-                  key={workstream.conversation.threadId}
-                  className="gap-2 rounded-xl border border-border p-3"
-                >
-                  <AppText className="font-t3-semibold">
-                    {workstream.title}
-                    {unread ? " · Unread" : ""}
-                  </AppText>
-                  <AppText className="text-foreground-muted">{detail}</AppText>
-                  <View className="flex-row flex-wrap gap-2">
-                    <Button
-                      label="Open thread"
-                      accessibilityLabel={`Open ${workstream.title}`}
-                      size="compact"
-                      disabled={!canRead}
-                      onPress={() => openCrewSource(navigation, scope, workstream.conversation)}
-                    />
-                    <Button
-                      label={workstream.status === "resolved" ? "Reopen" : "Resolve"}
-                      size="compact"
-                      disabled={!controls.canEditConversations}
-                      onPress={() =>
-                        void controls.change({
-                          type: "workstream.status",
-                          threadId: workstream.conversation.threadId,
-                          status: workstream.status === "resolved" ? "open" : "resolved",
-                        })
-                      }
-                    />
-                  </View>
-                </View>
-              ))}
-            </View>
-          ),
-      )}
-      {workstreams.data && groups.every((group) => group.rows.length === 0) && (
-        <AppText>
-          {search
-            ? "No matching work threads."
-            : "Work threads will appear here as the coordinator delegates."}
-        </AppText>
-      )}
-      {workstreams.data?.nextCursor && (
-        <Button
-          label="Next page"
-          onPress={() => setCursor(workstreams.data?.nextCursor ?? undefined)}
-        />
-      )}
-      {cursor && <Button label="First page" onPress={() => setCursor(undefined)} />}
-      <Button
-        label={linking ? "Hide available conversations" : "Link an existing conversation"}
-        onPress={() => setLinking(!linking)}
-      />
-      {linking &&
-        linkable.slice(0, 30).map((thread) => (
-          <Button
-            key={thread.id}
-            label={`Link ${thread.title}`}
-            disabled={!controls.canEditConversations}
-            onPress={() => {
-              void controls
-                .change({
-                  type: "workstream.link",
-                  threadId: thread.id,
-                  title: thread.title.slice(0, 160),
-                })
-                .then((saved) => {
-                  if (saved) setLinking(false);
-                });
-            }}
-          />
-        ))}
-      {linking && linkable.length === 0 && <AppText>No other conversations can be linked.</AppText>}
-    </>
-  );
-}
-
 function ProjectResults({ scope }: { scope: CrewProjectScope }) {
   const navigation = useNavigation();
   const { snapshot, threads, query } = useCrewProject(scope);
@@ -619,28 +396,41 @@ function ProjectResults({ scope }: { scope: CrewProjectScope }) {
   const key = scopedProjectKey(scope);
   return (
     <>
-      {query.error && <AppText accessibilityRole="alert">{query.error}</AppText>}
-      {!snapshot ? (
-        <AppText>Loading project results…</AppText>
-      ) : groups.size === 0 ? (
-        <AppText>Submitted results will appear here.</AppText>
-      ) : null}
+      {query.error && (
+        <AppText className="px-4 text-danger-foreground" accessibilityRole="alert">
+          {query.error}
+        </AppText>
+      )}
+      {groups.size === 0 && (
+        <ListSection title="Results">
+          <ListRowLayout
+            icon="doc.text"
+            label={
+              snapshot ? "No results yet" : query.error ? "Results unavailable" : "Loading results…"
+            }
+            {...(snapshot ? { description: "Submitted results will appear here." } : {})}
+          />
+        </ListSection>
+      )}
       {[...groups.entries()].map(([id, group]) => (
-        <View key={id} className="gap-2">
-          <AppText accessibilityRole="header" className="font-t3-semibold">
-            {group.title}
-          </AppText>
-          {group.tasks.map((task) => (
-            <View key={task.id} className="gap-2 rounded-xl border border-border p-3">
-              <AppText className="font-t3-semibold">{task.title}</AppText>
-              <AppText>{crewReviewLabel(task)}</AppText>
-              {task.submission?.evidence && (
-                <AppText numberOfLines={3}>{task.submission.evidence}</AppText>
-              )}
-              <Button
-                label="Open result details"
-                accessibilityLabel={`Open result details for ${task.title}`}
-                size="compact"
+        <ListSection key={id} title={group.title}>
+          {group.tasks.map((task, index) => (
+            <View key={task.id} className={index > 0 ? "border-t border-border-subtle" : undefined}>
+              <ListRow
+                icon="doc.text"
+                label={task.title}
+                description={crewReviewLabel(task)}
+                meta={
+                  task.submission?.evidence ? (
+                    <AppText
+                      textRole="footnote"
+                      className="text-foreground-muted"
+                      numberOfLines={3}
+                    >
+                      {task.submission.evidence}
+                    </AppText>
+                  ) : null
+                }
                 onPress={() => {
                   appAtomRegistry.set(crewSelectedInitiative(key), task.initiativeId);
                   appAtomRegistry.set(crewSelectedTask(key), task.id);
@@ -649,12 +439,15 @@ function ProjectResults({ scope }: { scope: CrewProjectScope }) {
               />
             </View>
           ))}
-        </View>
+        </ListSection>
       ))}
-      <Button
-        label="Integrated milestones"
-        onPress={() => openCrewPage(navigation, scope, "milestones")}
-      />
+      <ListSection>
+        <ListRow
+          icon="checkmark.circle"
+          label="Integrated milestones"
+          onPress={() => openCrewPage(navigation, scope, "milestones")}
+        />
+      </ListSection>
     </>
   );
 }

@@ -1,13 +1,15 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { LegendList } from "@legendapp/list/react-native";
+import { useNavigation } from "@react-navigation/native";
 import { AsyncResult, Atom } from "effect/reactivity";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
 import { getThreadSortTimestamp } from "@t3tools/client-runtime/state/thread-sort";
-import { isListedThreadLineage } from "@t3tools/contracts";
-import { useMemo, useState } from "react";
+import { isListedThreadLineage, type ScopedProjectRef } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import { useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Pressable, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -21,13 +23,25 @@ import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 import type { AndroidHomeView } from "../../persistence/mobile-preferences";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { serverEnvironment } from "../../state/server";
+import {
+  readCrewProjectFootprint,
+  type CrewProjectFootprint,
+} from "../../state/crew-project-footprints";
+import { workspaceConnections } from "../../state/workspace";
 import { WorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader";
+import { openCrewPage } from "../threads/crewProjectNavigation";
 import type { HomeProjectScope } from "./homeThreadList";
 import type { HomeProjectItem } from "./use-project-list-selection";
 
-const EMPTY_COORDINATORS = new Map<string, string>();
-const sameCoordinators = (left: ReadonlyMap<string, string>, right: ReadonlyMap<string, string>) =>
-  left.size === right.size && [...left].every(([key, thread]) => right.get(key) === thread);
+const EMPTY_TARGETS: readonly ScopedProjectRef[] = [];
+const CREW_PROJECTS_TITLE = "Crew Projects";
+
+const projectKey = (project: EnvironmentProject) =>
+  scopedProjectKey(project.environmentId, project.id);
+
+function isNavigationProject(project: EnvironmentProject) {
+  return project.archivedAt == null && !project.isScratch;
+}
 
 export function useAndroidHomeNavigation(
   projects: readonly EnvironmentProject[],
@@ -41,36 +55,90 @@ export function useAndroidHomeNavigation(
     enabled && AsyncResult.isSuccess(preferences)
       ? (preferences.value.androidHomeView ?? "threads")
       : "threads";
-  const projectKey = (project: EnvironmentProject) =>
-    scopedProjectKey(project.environmentId, project.id);
-  const indexAtom = useMemo(
+  const targetsAtom = useMemo(
     () =>
       Atom.make((get) => {
-        if (!enabled || !visible) return EMPTY_COORDINATORS;
-        const index = new Map<string, string>();
-        for (const project of projects) {
-          if (project.archivedAt != null || project.isScratch) continue;
-          const { id: projectId, environmentId } = project;
-          if (
-            !get(serverEnvironment.configValueAtom(environmentId))?.environment.capabilities
-              .projectTeamwork
-          )
-            continue;
-          const result = get(
-            serverEnvironment.teamworkLive({ environmentId, input: { projectId } }),
-          );
-          const coordinator =
-            result._tag === "Success" ? result.value.snapshot.coordinatorThreadId : null;
-          if (coordinator) index.set(scopedProjectKey(environmentId, projectId), coordinator);
-        }
-        return index;
-      }).pipe(Atom.withEquality(sameCoordinators)),
+        if (!enabled || !visible) return EMPTY_TARGETS;
+        const connectedCrew = new Set(
+          get(workspaceConnections.environmentsAtom)
+            .filter(
+              (environment) =>
+                environment.isEnabled &&
+                environment.connectionState === "connected" &&
+                get(serverEnvironment.configValueAtom(environment.environmentId))?.environment
+                  .capabilities.projectTeamwork === true,
+            )
+            .map((environment) => environment.environmentId),
+        );
+        return projects.flatMap((project) =>
+          connectedCrew.has(project.environmentId) && isNavigationProject(project)
+            ? [{ environmentId: project.environmentId, projectId: project.id }]
+            : [],
+        );
+      }).pipe(
+        Atom.withEquality<readonly ScopedProjectRef[]>(
+          (left, right) =>
+            left.length === right.length &&
+            left.every(
+              (scope, index) =>
+                scope.environmentId === right[index]?.environmentId &&
+                scope.projectId === right[index]?.projectId,
+            ),
+        ),
+      ),
     [enabled, projects, visible],
   );
-  const coordinators = useAtomValue(indexAtom);
+  const targets = useAtomValue(targetsAtom);
+  const [completed, setCompleted] = useState<readonly ScopedProjectRef[]>(EMPTY_TARGETS);
+  const [footprints, setFootprints] = useState<ReadonlyMap<string, CrewProjectFootprint>>(
+    () => new Map(),
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- checks each connected project's footprint once per visible navigation load and cancels when covered
+  useEffect(() => {
+    if (!targets.length) return;
+    const controller = new AbortController();
+    void Effect.runPromise(
+      Effect.forEach(
+        targets,
+        (scope) =>
+          Effect.promise(async () => {
+            if (controller.signal.aborted) return;
+            const record = await readCrewProjectFootprint(
+              scope,
+              AbortSignal.any([controller.signal, AbortSignal.timeout(3_000)]),
+            );
+            if (!record || controller.signal.aborted) return;
+            const key = scopedProjectKey(scope.environmentId, scope.projectId);
+            setFootprints((current) => {
+              const previous = current.get(key);
+              if (
+                previous?.hasCrew === record.hasCrew &&
+                previous.coordinatorThreadId === record.coordinatorThreadId
+              )
+                return current;
+              return new Map(current).set(key, record);
+            });
+          }),
+        { concurrency: 4, discard: true },
+      ),
+    ).then(() => {
+      if (!controller.signal.aborted) setCompleted(targets);
+    });
+    return () => controller.abort();
+  }, [targets]);
+  const coordinators = useMemo(
+    () =>
+      new Map(
+        [...footprints].flatMap(([key, footprint]) =>
+          footprint.coordinatorThreadId ? [[key, footprint.coordinatorThreadId] as const] : [],
+        ),
+      ),
+    [footprints],
+  );
   return {
     view,
     coordinators,
+    checkingProjects: targets.length > 0 && targets !== completed,
     drawerOpen,
     openDrawer: () => setDrawerOpen(true),
     closeDrawer: () => setDrawerOpen(false),
@@ -81,6 +149,7 @@ export function useAndroidHomeNavigation(
     isProjectChat: (thread: EnvironmentThreadShell) =>
       coordinators.get(scopedProjectKey(thread.environmentId, thread.projectId)) === thread.id,
     hasCoordinator: (project: EnvironmentProject) => coordinators.has(projectKey(project)),
+    hasCrew: (project: EnvironmentProject) => footprints.get(projectKey(project))?.hasCrew === true,
   };
 }
 
@@ -88,9 +157,7 @@ type NavigationModel = ReturnType<typeof useAndroidHomeNavigation>;
 
 function projectItems(scopes: readonly HomeProjectScope[]): HomeProjectItem[] {
   return scopes.flatMap((group) =>
-    group.projects
-      .filter((project) => !project.isScratch && project.archivedAt == null)
-      .map((project) => ({ group, project })),
+    group.projects.filter(isNavigationProject).map((project) => ({ group, project })),
   );
 }
 
@@ -122,20 +189,22 @@ function ProjectNavigationRow(props: {
   );
 }
 
-export function AndroidProjectsView(props: {
+export function AndroidCrewProjectsView(props: {
   navigation: NavigationModel;
   scopes: readonly HomeProjectScope[];
-  onOpenProject: (item: HomeProjectItem) => void;
   onAddProject: () => void;
   onOpenEnvironments: () => void;
   canAddProject: boolean;
 }) {
+  const navigation = useNavigation();
   const [search, setSearch] = useState("");
   const insets = useSafeAreaInsets();
   const query = search.trim().toLowerCase();
   const items = projectItems(props.scopes)
-    .filter(({ project }) =>
-      `${project.title} ${project.workspaceRoot}`.toLowerCase().includes(query),
+    .filter(
+      ({ project }) =>
+        props.navigation.hasCrew(project) &&
+        `${project.title} ${project.workspaceRoot}`.toLowerCase().includes(query),
     )
     .sort(
       (left, right) =>
@@ -144,15 +213,15 @@ export function AndroidProjectsView(props: {
   return (
     <View className="flex-1 bg-screen">
       <WorkspaceListHeader
-        title="Projects"
-        accessibilityLabel="Projects"
+        title={CREW_PROJECTS_TITLE}
+        accessibilityLabel={CREW_PROJECTS_TITLE}
         onOpenNavigation={props.navigation.openDrawer}
         onOpenEnvironments={props.onOpenEnvironments}
         search={{
           value: search,
           onChangeText: setSearch,
-          placeholder: "Search projects",
-          accessibilityLabel: "Search projects",
+          placeholder: "Search Crew projects",
+          accessibilityLabel: "Search Crew projects",
         }}
         filter={{ customized: false, items: [] }}
       />
@@ -176,14 +245,23 @@ export function AndroidProjectsView(props: {
         }
         ListEmptyComponent={
           <AppText className="p-4 text-center text-foreground-muted">
-            {query ? "No matching projects" : "No projects yet"}
+            {props.navigation.checkingProjects
+              ? "Checking for Crew projects…"
+              : query
+                ? "No matching Crew projects"
+                : "No known Crew projects. Start Crew from a project thread."}
           </AppText>
         }
         renderItem={({ item }) => (
           <ProjectNavigationRow
             item={item}
             hasCoordinator={props.navigation.hasCoordinator(item.project)}
-            onOpen={props.onOpenProject}
+            onOpen={({ project }) =>
+              openCrewPage(navigation, {
+                environmentId: project.environmentId,
+                projectId: project.id,
+              })
+            }
           />
         )}
       />
@@ -261,7 +339,7 @@ export function AndroidHomeDrawer(props: {
                 {(["projects", "threads"] as const).map((view) => (
                   <NavigationRow
                     key={view}
-                    title={view === "projects" ? "Projects" : "Threads"}
+                    title={view === "projects" ? CREW_PROJECTS_TITLE : "Threads"}
                     leading={
                       <SymbolView name={view === "projects" ? "folder" : "text.bubble"} size={22} />
                     }
