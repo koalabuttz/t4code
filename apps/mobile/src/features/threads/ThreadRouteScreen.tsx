@@ -151,19 +151,26 @@ const InspectorHeaderShownContext = createContext(false);
 
 function ThreadRouteFallbackLayout(props: { readonly children: ReactNode }) {
   const route = useRoute<RouteProp<ReactNavigation.RootParamList, "Thread">>();
-  const goBack = useWorkspaceBackNavigation(
-    Boolean(
-      route.params?.crewCoordinatorProjectId ??
-      route.params?.crewSourceProjectId ??
-      route.params?.crewProjectId,
-    ),
+  const crewScoped = Boolean(
+    route.params?.crewCoordinatorProjectId ??
+    route.params?.crewSourceProjectId ??
+    route.params?.crewProjectId,
   );
+  const goBack = useWorkspaceBackNavigation(crewScoped);
   const inspectorHeaderShown = use(InspectorHeaderShownContext);
   return (
     <ThreadScreenFallback
       header={
         inspectorHeaderShown ? undefined : (
-          <AppBar title="Thread" onBackToList={goBack} hideBottomBorder />
+          <AppBar
+            title="Thread"
+            onBack={crewScoped ? goBack : undefined}
+            onBackToList={goBack}
+            backInSplitView={
+              crewScoped ? { accessibilityLabel: "Back", icon: "chevron.left" } : undefined
+            }
+            hideBottomBorder
+          />
         )
       }
     >
@@ -400,7 +407,6 @@ function LiveThreadRouteController(props: ThreadRouteScreenProps) {
             }
           />
         )}
-        <Button label="Return to origin" onPress={() => navigation.goBack()} />
       </ThreadRouteFallbackLayout>
     );
   }

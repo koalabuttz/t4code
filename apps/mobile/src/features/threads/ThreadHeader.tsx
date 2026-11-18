@@ -31,9 +31,9 @@ export function ThreadHeader(props: {
 }) {
   const navigation = useNavigation();
   const chat = useCrewChat();
-  const goBack = useWorkspaceBackNavigation(
-    chat?.route.coordinator === true || chat?.route.source === true,
-  );
+  const crewSource = chat?.route.source === true;
+  const preserveStack = crewSource || chat?.route.coordinator === true;
+  const goBack = useWorkspaceBackNavigation(preserveStack);
   const { toggleAuxiliaryPane, startNewTask } = useAdaptiveWorkspaceLayout();
   const { panes } = useWorkspacePaneState();
   const gitMenu = useThreadGitMenuDefinition(props.gitControls);
@@ -53,13 +53,7 @@ export function ThreadHeader(props: {
     : [];
   const menus = [gitMenu, terminalMenu].filter((menu): menu is AppBarMenu => menu !== null);
   if (chat) {
-    if (chat.route.source)
-      actions.push({
-        accessibilityLabel: "Return to origin",
-        icon: "chevron.left",
-        onPress: goBack,
-      });
-    else if (!chat.route.coordinator)
+    if (!crewSource && !chat.route.coordinator)
       actions.push({
         accessibilityLabel: "Project chat",
         icon: "person.2",
@@ -118,8 +112,8 @@ export function ThreadHeader(props: {
             ? `${chat.route.projectTitle} · ${props.subtitle}`
             : props.subtitle
       }
-      onBack={chat?.route.source || chat?.route.coordinator ? goBack : undefined}
-      onBackToList={chat?.route.source || chat?.route.coordinator ? undefined : goBack}
+      onBack={preserveStack ? goBack : undefined}
+      onBackToList={preserveStack ? undefined : goBack}
       onCompose={props.draft ? undefined : startNewTask}
       backInSplitView={
         props.onReturnToThread
@@ -128,7 +122,9 @@ export function ThreadHeader(props: {
               icon: "chevron.left",
               onPress: props.onReturnToThread,
             }
-          : undefined
+          : crewSource
+            ? { accessibilityLabel: "Back", icon: "chevron.left" }
+            : undefined
       }
       actions={actions}
       menus={menus}
