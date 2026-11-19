@@ -213,7 +213,6 @@ function CrewProjectTabsScreen({
     search: "",
     cursor: undefined,
     requestCursor: undefined,
-    collapsedGroups: new Set(),
   });
   const threadsScroll = useRef<CrewProjectThreadsScroll | undefined>(undefined);
   const [savedScroll, setSavedScroll] = useState<CrewProjectThreadsScroll>();

@@ -1,7 +1,7 @@
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { scopedProjectKey } from "@t3tools/client-runtime/environment";
 import { crewScrollOffset, isCrewCoordinatorCandidate } from "@t3tools/client-runtime/state/crew";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
@@ -14,6 +14,7 @@ import { sortPinnedThreadsByOrderKey } from "@t3tools/client-runtime/state/threa
 import { AuthOrchestrationReadScope } from "@t3tools/contracts";
 import type { CrewProjectScope } from "@t3tools/contracts/crewConversation";
 import { canLinkCrewWorkstream, sameCrewProject } from "@t3tools/shared/crewConversation";
+import { AsyncResult } from "effect/reactivity";
 import { useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { Platform, View, type ScrollViewProps } from "react-native";
 import { GestureDetector, useNativeGesture } from "react-native-gesture-handler";
@@ -27,6 +28,7 @@ import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useContentBottomInset, useSearchToolbarInset } from "../../components/ui/useBarInset";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { threadListEnvironmentsAtom } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentScope } from "../../state/session";
@@ -64,7 +66,6 @@ export interface CrewProjectThreadsFilters {
   search: string;
   cursor: string | undefined;
   requestCursor: string | undefined;
-  collapsedGroups: ReadonlySet<CrewSection["title"]>;
 }
 
 export interface CrewProjectThreadsScroll {
@@ -113,7 +114,29 @@ export function CrewProjectThreads({
   const contentBottomInset = useContentBottomInset();
   const { threads, snapshot, freshness, supervision } = useCrewProject(scope);
   const canRead = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
-  const { search, cursor, requestCursor, collapsedGroups } = filters;
+  const { search, cursor, requestCursor } = filters;
+  const preferences = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const preferencesLoaded = AsyncResult.isSuccess(preferences);
+  const collapsedGroups = preferencesLoaded
+    ? preferences.value.collapsedCrewThreadGroups
+    : undefined;
+  const collapseKey = (title: CrewSection["title"]) =>
+    JSON.stringify([environmentId, scope.projectId, title]);
+  const toggleGroup = (title: CrewSection["title"]) => {
+    if (!preferencesLoaded) return;
+    const key = collapseKey(title);
+    savePreferences({
+      transform: (current) => {
+        const groups = current.collapsedCrewThreadGroups ?? [];
+        return {
+          collapsedCrewThreadGroups: groups.includes(key)
+            ? groups.filter((group) => group !== key)
+            : [...groups, key],
+        };
+      },
+    });
+  };
   const [linking, setLinking] = useState(false);
   const [linkIssue, setLinkIssue] = useState<string | null>(null);
   const [checkingLink, setCheckingLink] = useState(false);
@@ -172,7 +195,7 @@ export function CrewProjectThreads({
       key: title,
       title,
       count: rows.length,
-      expanded: searching || !collapsedGroups.has(title),
+      expanded: searching || !collapsedGroups?.includes(collapseKey(title)),
     };
     if (!section.expanded) return [section];
     const metadata = buildThreadListV2ListItems({
@@ -538,14 +561,7 @@ export function CrewProjectThreads({
                       count={entry.count}
                       expanded={entry.expanded}
                       searching={searching}
-                      onToggle={() => {
-                        setFilters((current) => {
-                          const collapsedGroups = new Set(current.collapsedGroups);
-                          if (collapsedGroups.has(entry.title)) collapsedGroups.delete(entry.title);
-                          else collapsedGroups.add(entry.title);
-                          return { ...current, collapsedGroups };
-                        });
-                      }}
+                      onToggle={() => toggleGroup(entry.title)}
                     />
                   );
                 const { workstream, detail } = entry.row;
