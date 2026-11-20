@@ -102,6 +102,12 @@ it("bounds continuation context and retains sources while excluding corrected, f
     ],
   };
   const packet = crewContext(state, coordinator)!;
+  const instructions =
+    /<crew_coordinator_instructions>\n(.*?)\n<\/crew_coordinator_instructions>/s.exec(
+      packet.text,
+    )?.[1];
+  assert.include(instructions, "Let work threads handle routine conversations.");
+  assert.include(instructions, "attention collection in t3_crew_conversations");
   assert.include(packet.text, "48 hours");
   assert.include(packet.text, "attempt-2");
   assert.include(packet.text, "Add exact boundary test");
@@ -112,7 +118,9 @@ it("bounds continuation context and retains sources while excluding corrected, f
   assert.equal(packet.sources.find((s) => s.id === "decision")?.revision, 40);
   assert.notInclude(crewContext({ ...state, knowledge: [] }, coordinator)!.text, "48 hours");
   assert.equal(crewContext(state, ThreadId.make("unrelated-chat")), null);
-  assert.include(crewContext(state, worker)!.text, "48 hours");
+  const workerPacket = crewContext(state, worker)!;
+  assert.include(workerPacket.text, "48 hours");
+  assert.notInclude(workerPacket.text, "<crew_coordinator_instructions>");
   const huge = {
     ...state,
     board: Array.from({ length: 60 }, (_, index) => ({

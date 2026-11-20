@@ -68,6 +68,7 @@ it.effect(
     const returnModes: Array<string | undefined> = [];
     return Effect.gen(function* () {
       const teams = yield* Teamwork.TeamworkService;
+      const sql = yield* SqlClient.SqlClient;
       const now = yield* DateTime.now;
       const attachmentId = ChatAttachmentId.make("screen");
       messages.set(source.messageId, {
@@ -258,14 +259,32 @@ it.effect(
         commandId: null,
         event: { type: "message.updated", occurredAt: now, threadId: worker, payload: direct },
       } as OrchestrationV2StoredEvent;
+      const sendsBeforeDirectMessage = sent.length;
       yield* teams.observeConversationEvent(directEvent);
       yield* teams.drain;
+      assert.equal(sent.length, sendsBeforeDirectMessage);
+      const recordedAttention = (yield* teams.conversationQuery({ scope, collection: "attention" }))
+        .attention[0]!;
+      assert.equal(recordedAttention.source.messageId, direct.id);
+      assert.deepEqual(recordedAttention.progress, { state: "pending" });
+      const legacyId = CommandId.make(`crew:${projectId}:attention:${recordedAttention.id}`);
+      yield* sql`UPDATE project_crew_conversations
+        SET payload_json = json_set(payload_json, '$.progress', json_object('state', 'queued', 'deliveryId', ${legacyId}))
+        WHERE project_id = ${projectId} AND collection = 'attention' AND id = ${recordedAttention.id}`;
+      yield* sql`INSERT INTO project_teamwork_outbox (id, project_id, revision, thread_id, kind, status, payload_json)
+        VALUES (${legacyId}, ${projectId}, 1, ${coordinator}, 'crew-attention', 'pending', ${JSON.stringify({ id: recordedAttention.id, actor: null, limit: null })})`;
       yield* teams.observeConversationEvent({ ...directEvent, sequence: 21 });
       yield* teams.drain;
-      assert.equal(
-        (yield* teams.conversationQuery({ scope, collection: "attention" })).attention.length,
-        1,
-      );
+      assert.equal(sent.length, sendsBeforeDirectMessage);
+      const afterReplay = (yield* teams.conversationQuery({ scope, collection: "attention" }))
+        .attention;
+      assert.lengthOf(afterReplay, 1);
+      assert.equal(afterReplay[0]?.id, recordedAttention.id);
+      assert.deepEqual(afterReplay[0]?.progress, { state: "pending" });
+      const legacyDelivery = yield* sql<{
+        status: string;
+      }>`SELECT status FROM project_teamwork_outbox WHERE id = ${legacyId}`;
+      assert.equal(legacyDelivery[0]?.status, "cancelled");
       const change = (id: string, action: CrewConversationAction) =>
         Effect.gen(function* () {
           return yield* command((yield* teams.read(projectId)).snapshot.revision, id, action);
@@ -443,7 +462,7 @@ it.effect(
         scope,
         collection: "attention",
       })).attention.find((a) => a.reason === "user-message")!;
-      assert.equal(directAttention.progress.state, "queued");
+      assert.equal(directAttention.progress.state, "pending");
       yield* teams.observeConversationEvent({
         sequence: 31,
         commandId: null,
@@ -466,27 +485,6 @@ it.effect(
         sequence: 33,
         event: { ...directEvent.event, type: "message.updated", payload: reflected },
       } as OrchestrationV2StoredEvent);
-      if ("deliveryId" in directAttention.progress) {
-        const delivered = messages.get(MessageId.make(directAttention.progress.deliveryId))!;
-        yield* teams.observeConversationEvent({
-          sequence: 34,
-          commandId: null,
-          event: {
-            type: "run.updated",
-            threadId: coordinator,
-            occurredAt: now,
-            payload: { id: delivered.runId, userMessageId: delivered.id, status: "completed" },
-          },
-        } as OrchestrationV2StoredEvent);
-        assert.equal(
-          (yield* teams.conversationQuery({
-            scope,
-            collection: "attention",
-            id: directAttention.id,
-          })).attention[0]?.progress.state,
-          "considered",
-        );
-      }
       assert.equal(
         (yield* teams.conversationQuery({ scope, collection: "attention" })).attention.length,
         2,
@@ -787,7 +785,6 @@ it.effect(
         "failed",
       );
       assert.equal((yield* teams.read(projectId)).snapshot.initiatives[0]?.status, "paused");
-      const sql = yield* SqlClient.SqlClient;
       const route = (yield* teams.conversationQuery({
         scope,
         collection: "handoffs",

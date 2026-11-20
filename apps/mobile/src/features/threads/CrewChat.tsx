@@ -10,7 +10,6 @@ import {
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { AuthOrchestrationReadScope, type MessageId, type ThreadId } from "@t3tools/contracts";
 import type {
-  CrewAttention,
   CrewConsultation,
   CrewHandoff,
   CrewWorkstream,
@@ -122,11 +121,6 @@ function useCrewChatModel(
     snapshot?.revision,
     queuedMessageIds,
   );
-  const attention = useCrewCollection(active && !route.coordinator ? scope : null, {
-    collection: "attention",
-    ...(route.coordinator ? {} : { threadId: thread.id }),
-    limit: 100,
-  });
   const exchange = useMemo(() => {
     const byOrigin = new Map<MessageId, CrewConsultation[]>();
     const returns = new Map<string, CrewConsultation>();
@@ -174,14 +168,6 @@ function useCrewChatModel(
     active && route.coordinator && freshness === "current" ? thread.id : null,
     snapshot?.revision,
   );
-  const coordinatorInbox = route.coordinator
-    ? []
-    : (attention.data?.attention ?? []).filter(
-        (item) =>
-          item.reason === "user-message" &&
-          sameCrewConversation(item.source.conversation, conversation),
-      );
-  const inbox = new Map(coordinatorInbox.map((item) => [item.source.messageId, item]));
   const threadName = (id: ThreadId) =>
     threads.find((shell) => shell.id === id && shell.deletedAt === null)?.title ?? "Work thread";
   const available = (id: ThreadId) =>
@@ -223,14 +209,13 @@ function useCrewChatModel(
     onVisibleMessages: metadata.onVisibleMessages,
     requests: humanAttention.requests,
     requestsComplete: !humanAttention.checking && humanAttention.nextCursor === null,
-    inbox,
     actionInitiative,
     stop,
     go,
     pauseOrRecover,
     threadName,
     available,
-    queryError: metadata.error ?? attention.error ?? humanAttention.error,
+    queryError: metadata.error ?? humanAttention.error,
     metadataError: metadata.error,
     refreshMetadata: metadata.refresh,
     deliveries: query.data?.deliveries ?? [],
@@ -371,8 +356,7 @@ export function CrewChatMessage({
   const handoffs = chat.queuedMessageIds.has(message.id)
     ? undefined
     : chat.exchange.routes.get(message.id);
-  const attention = chat.inbox.get(message.id);
-  if (!consultations && !handoffs && !attention) return children;
+  if (!consultations && !handoffs) return children;
   return (
     <>
       {children}
@@ -393,7 +377,6 @@ export function CrewChatMessage({
         {handoffs?.map((handoff) => (
           <HandoffCard key={handoff.id} handoff={handoff} />
         ))}
-        {attention && <InboxStatus attention={attention} />}
       </View>
     </>
   );
@@ -718,36 +701,6 @@ function HandoffCard({ handoff }: { handoff: CrewHandoff }) {
         disabled={!chat.canRead}
         onPress={() => chat.openSource(handoff.destination)}
       />
-    </View>
-  );
-}
-
-function InboxStatus({ attention }: { attention: CrewAttention }) {
-  const chat = useCrewChat()!;
-  const progress = attention.progress;
-  return (
-    <View className="gap-1">
-      <AppText className="text-foreground-muted">
-        {progress.state === "considered"
-          ? "Coordinator considered this message"
-          : progress.state === "failed"
-            ? "Coordinator update failed"
-            : "Waiting for coordinator review"}
-      </AppText>
-      {progress.state === "failed" && (
-        <Button
-          label="Retry coordinator update"
-          size="compact"
-          disabled={!chat.controls.canEditConversations}
-          onPress={() =>
-            void chat.controls.change({
-              type: "attention.retry",
-              id: attention.id,
-              previousDeliveryId: progress.deliveryId,
-            })
-          }
-        />
-      )}
     </View>
   );
 }

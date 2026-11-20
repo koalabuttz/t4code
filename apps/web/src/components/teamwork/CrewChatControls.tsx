@@ -11,7 +11,6 @@ import {
   type TeamworkAction,
   type ThreadId,
 } from "@t3tools/contracts";
-import type { CrewAttention } from "@t3tools/contracts/crewConversation";
 import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
 import { randomUUID } from "../../lib/utils";
 import { useQuietThreadProjection } from "../../state/entities";
@@ -100,7 +99,6 @@ export function CrewChatControls({
   const router = useRouter();
   const origin = useRouterState({ select: (state) => state.location.state.crewSource });
   const originHref = useRouterState({ select: (state) => state.location.href });
-  const direct = useCrewCollection(coordinator ? null : scope, "attention", { threadId });
   const permission = useAtomValue(
     serverEnvironment.mutateTeamwork.permissionAtom(scope.environmentId),
   );
@@ -129,12 +127,6 @@ export function CrewChatControls({
       )
     : [];
   const assignedWorkerIds = new Set(snapshot.tasks.map((task) => task.ownerThreadId));
-  const directAttention = (direct.data?.attention ?? [])
-    .filter((entry) => entry.reason === "user-message")
-    .reduce<CrewAttention | null>(
-      (latest, next) => (latest === null || next.createdAt > latest.createdAt ? next : latest),
-      null,
-    );
   const act = async (action: TeamworkAction) => {
     setBusy(true);
     setError(null);
@@ -277,12 +269,6 @@ export function CrewChatControls({
             </Button>
           ) : null}
         </div>
-      ) : directAttention && directAttention.progress.state !== "considered" ? (
-        <p className="text-xs text-muted-foreground">
-          {directAttention.progress.state === "failed"
-            ? "Coordinator delivery failed"
-            : "Coordinator attention recorded · awaiting consideration"}
-        </p>
       ) : null}
     </section>
   );
