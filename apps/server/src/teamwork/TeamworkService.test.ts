@@ -353,7 +353,10 @@ it.effect(
       for (const status of ["failed", "pending", "delivered"] as const) {
         yield* sql`UPDATE project_teamwork_outbox SET status = ${status} WHERE id = ${stop.id}`;
         const { deliveries } = yield* teams.read(projectId);
-        assert.equal(deliveries.find((row) => row.id === stop.id)?.status, status);
+        const resetStop = deliveries.find((row) => row.id === stop.id)!;
+        assert.equal(resetStop.status, status);
+        if (status === "delivered") assert.propertyVal(resetStop, "workerInactive", true);
+        else assert.notProperty(resetStop, "workerInactive");
         assert.equal(deliveries.find((row) => row.id === stop.id)?.initiativeId, "initiative");
         assert.equal(deliveries.find((row) => row.id === stop.id)?.taskId, "task");
         assert.equal(deliveries.find((row) => row.id === "window-older-failed")?.status, "failed");
@@ -426,6 +429,10 @@ it.effect(
       yield* Deferred.succeed(stopped, undefined);
       yield* teams.drain;
       stillRunning = true;
+      assert.notProperty(
+        (yield* teams.read(projectId)).deliveries.find((row) => row.id === stop.id)!,
+        "workerInactive",
+      );
       assert.isTrue(
         Result.isFailure(
           yield* Effect.result(

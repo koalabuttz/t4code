@@ -225,7 +225,7 @@ const make = Effect.gen(function* () {
             OR status IN ('pending', 'failed')
             OR id IN (SELECT id FROM stops WHERE stop_rank = 1))
         ORDER BY revision DESC, id DESC`;
-    return yield* decodeRead({
+    const result = yield* decodeRead({
       snapshot,
       deliveries: rows,
       capabilities: ["archive", "submissions", "context", "artifacts"],
@@ -234,6 +234,44 @@ const make = Effect.gen(function* () {
           ? null
           : crewContext(snapshot, actor ?? snapshot.coordinatorThreadId),
     });
+    const assigned = new Set(snapshot.tasks.map((task) => task.ownerThreadId));
+    assigned.add(snapshot.coordinatorThreadId);
+    const initiativeIds = new Set(snapshot.initiatives.map((initiative) => initiative.id));
+    const detachedStops = result.deliveries.filter(
+      (delivery) =>
+        delivery.kind === "stop" &&
+        delivery.status === "delivered" &&
+        delivery.initiativeId != null &&
+        initiativeIds.has(delivery.initiativeId) &&
+        !assigned.has(delivery.threadId),
+    );
+    if (detachedStops.length === 0) return result;
+
+    const shells = yield* Effect.forEach(
+      new Set(detachedStops.map((stop) => stop.threadId)),
+      (threadId) => threads.getThreadShell(threadId).pipe(Effect.option),
+      { concurrency: 4 },
+    );
+    const inactive = new Set(
+      shells.flatMap((shell) => {
+        const thread = Option.getOrNull(shell);
+        return thread &&
+          thread.projectId === projectId &&
+          thread.deletedAt === null &&
+          !workerBusy(thread)
+          ? [thread.id]
+          : [];
+      }),
+    );
+    const confirmed = new Set(
+      detachedStops.filter((stop) => inactive.has(stop.threadId)).map((stop) => stop.id),
+    );
+    return {
+      ...result,
+      deliveries: result.deliveries.map((delivery) =>
+        confirmed.has(delivery.id) ? { ...delivery, workerInactive: true as const } : delivery,
+      ),
+    };
   }, Effect.mapError(storageError));
   const history = Effect.fn("TeamworkService.history")(function* (
     input: typeof TeamworkHistoryInput.Type,

@@ -320,6 +320,8 @@ export const TeamworkDelivery = Schema.Struct({
   kind: Schema.Literals(["message", "stop"]),
   initiativeId: Schema.optional(Schema.NullOr(Id)),
   taskId: Schema.optional(Schema.NullOr(Id)),
+  // A project read independently observed the detached worker inactive.
+  workerInactive: Schema.optional(Schema.Literal(true)),
 });
 export const TeamworkReadResult = Schema.Struct({
   capabilities: Schema.optional(

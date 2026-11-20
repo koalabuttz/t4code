@@ -190,6 +190,22 @@ export function classifyCrewSupervision(input: CrewSupervisionInput) {
       ? input.coordinatorExecution
       : null;
   if (coordinator?.threadId) threadExecution.set(coordinator.threadId, coordinator);
+  if (current) {
+    for (const stop of deliveries) {
+      if (
+        stop.kind === "stop" &&
+        stop.status === "delivered" &&
+        stop.workerInactive === true &&
+        !threadExecution.has(stop.threadId)
+      ) {
+        threadExecution.set(stop.threadId, {
+          threadId: stop.threadId,
+          state: "stopped",
+          detail: null,
+        });
+      }
+    }
+  }
 
   const executionItem = (
     execution: Execution,
