@@ -236,6 +236,8 @@ export function makeAntigravityAcpAdapterFlavor(
       ),
     // Loading history replays tool calls; resume avoids replay.
     subagentsIdleOnTurnCompletion: true,
+    // Antigravity uses prompt and usage updates to settle its turns.
+    followAgentWorkState: false,
     // A finished background command or timer wakes the agent with no prompt open: it streams a
     // reply and asks for permissions, and no prompt response ever ends that reply.
     enablePostSettleContinuation: true,
