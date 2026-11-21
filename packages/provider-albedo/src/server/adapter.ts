@@ -877,32 +877,81 @@ export const makeAdapter = Effect.fn("AlbedoAdapter.make")(function* (options: {
           messageId: input.message.messageId,
           sessionId: nativeId,
         };
-        const receipt = yield* compactions.claim(key);
-        let result = receipt.result;
-        if (receipt.dispatch) {
-          result = yield* client
-            .compactSession(nativeId)
-            .pipe(
-              Effect.mapError((cause) =>
-                failure(
-                  "Albedo's compaction outcome is uncertain. Check the native session before requesting another compaction; T3 will not repeat it automatically.",
-                  cause,
-                ),
+        const unresolved = (cause: unknown) =>
+          new Adapter.ProviderAdapterTurnStartError({
+            driver,
+            threadId: input.threadId,
+            providerThreadId: input.providerThread.id,
+            runId: input.runId,
+            outcomeUnresolved: true,
+            cause,
+          });
+        const claim = yield* compactions.claim(key);
+        let outcome = claim.outcome;
+        if (outcome === null) {
+          const { actionId } = claim;
+          if (actionId === null)
+            return yield* unresolved(
+              failure(
+                "This compaction was started before Albedo offered durable receipts. Its effects are unknown; inspect the native session before requesting another compaction.",
               ),
             );
-          yield* compactions.complete(key, result);
-        }
-        if (result === null)
-          return yield* failure(
-            "Albedo's previous compaction outcome is uncertain. Check the native session before requesting another compaction; T3 will not repeat it automatically.",
+
+          const read = client.readCompaction(nativeId, actionId).pipe(Effect.mapError(unresolved));
+          const put = client.compactSession(nativeId, actionId);
+          const submit = put.pipe(
+            Effect.catchIf(
+              (cause) => cause._tag !== "AlbedoHttpError" || cause.status >= 500,
+              () =>
+                read.pipe(
+                  Effect.flatMap((known) =>
+                    known === null ? put.pipe(Effect.mapError(unresolved)) : Effect.succeed(known),
+                  ),
+                ),
+            ),
+            Effect.mapError((cause) =>
+              cause._tag === "AlbedoHttpError" && cause.status === 410 ? unresolved(cause) : cause,
+            ),
           );
-        snapshot = yield* client.readSession(nativeId);
+          outcome = yield* Effect.gen(function* () {
+            const existing = claim.dispatch ? null : yield* read;
+            let receipt = existing ?? (yield* submit);
+            for (let delay = 200; receipt.state === "running"; delay = Math.min(delay * 2, 2_000)) {
+              yield* Effect.sleep(delay);
+              const updated = yield* read;
+              if (updated === null)
+                return yield* unresolved(
+                  failure("Albedo's accepted compaction receipt disappeared."),
+                );
+              receipt = updated;
+            }
+            return receipt.state === "completed" ? receipt.result : ("interrupted" as const);
+          }).pipe(
+            Effect.timeout("200 seconds"),
+            Effect.catchTags({
+              TimeoutError: (cause) => Effect.fail(unresolved(cause)),
+            }),
+          );
+          yield* compactions
+            .complete({ ...key, actionId }, outcome)
+            .pipe(Effect.mapError(unresolved));
+        }
+        snapshot = yield* client.readSession(nativeId).pipe(Effect.mapError(unresolved));
         yield* observe(snapshot);
         const now = yield* DateTime.now;
-        const status = result.state === "failed" ? "failed" : "completed";
+        const result = outcome === "interrupted" ? null : outcome;
+        const compactionFailure =
+          result === null
+            ? {
+                code: "compaction_interrupted",
+                detail:
+                  "Albedo interrupted compaction. Context or strategy changes may already have been applied. Inspect the session before requesting another compaction.",
+              }
+            : result.failure;
+        const status = result === null || result.state === "failed" ? "failed" : "completed";
         const identity = `${input.providerThread.id}/compaction/${input.runId}`;
         const providerTurnId = ids.derive.providerTurn({ driver, nativeTurnId: identity });
-        const observation = result.observation;
+        const observation = result?.observation;
         yield* emit({
           type: "provider_turn.updated",
           driver,
@@ -941,10 +990,10 @@ export const makeAdapter = Effect.fn("AlbedoAdapter.make")(function* (options: {
             updatedAt: now,
             summary:
               observation?.summary ??
-              (result.state === "unchanged"
+              (result?.state === "unchanged"
                 ? "Albedo left the context unchanged."
-                : (result.failure?.detail ??
-                  (result.state === "compacted"
+                : (compactionFailure?.detail ??
+                  (result?.state === "compacted"
                     ? "Albedo compacted the session context."
                     : "Albedo could not compact this session."))),
             ...(observation?.before_tokens == null
@@ -968,8 +1017,8 @@ export const makeAdapter = Effect.fn("AlbedoAdapter.make")(function* (options: {
                 failureItemOrdinal: 2,
                 failure: {
                   class: "provider_error",
-                  code: result.failure?.code ?? "compaction_failed",
-                  message: result.failure?.detail ?? "Albedo could not compact this session.",
+                  code: compactionFailure?.code ?? "compaction_failed",
+                  message: compactionFailure?.detail ?? "Albedo could not compact this session.",
                   retryable: false,
                 },
               }

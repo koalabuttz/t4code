@@ -14,7 +14,7 @@ export const message = Effect.fn("AlbedoAttachments.message")(function* (
   const host = yield* ProviderHost;
   const fs = yield* FileSystem.FileSystem;
   const images: {
-    mime_type: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+    mime_type: "image/png" | "image/jpeg" | "image/webp";
     data: string;
   }[] = [];
   const files: { name: string; data: string }[] = [];
@@ -34,15 +34,10 @@ export const message = Effect.fn("AlbedoAttachments.message")(function* (
     const data = Base64.encode(yield* fs.readFile(path));
     if (attachment.type === "image") {
       const mime = attachment.mimeType;
-      if (
-        mime !== "image/png" &&
-        mime !== "image/jpeg" &&
-        mime !== "image/gif" &&
-        mime !== "image/webp"
-      )
+      if (mime !== "image/png" && mime !== "image/jpeg" && mime !== "image/webp")
         return yield* new AlbedoProjectionError({
           detail:
-            "Albedo supports PNG, JPEG, GIF and WebP image attachments. Convert this image before sending.",
+            "Albedo supports PNG, JPEG, and WebP image attachments. Convert this image before sending.",
         });
       images.push({ mime_type: mime, data });
     } else files.push({ name: attachment.name, data });

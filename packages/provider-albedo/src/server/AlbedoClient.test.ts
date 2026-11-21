@@ -40,7 +40,7 @@ const input = {
 const server = {
   instance_id: "daemon-1",
   pid: 123,
-  protocol: 3,
+  protocol: 4,
   state: "ready",
   capabilities: {
     durable_inputs: 1,
@@ -94,49 +94,107 @@ const daemon = (
   );
 
 describe("Albedo stream and snapshot transport", () => {
-  it.effect.each(["compacted", "unchanged", "failed", "lost_reply", "malformed"] as const)(
-    "decodes native compaction without retrying when %s",
-    (state) => {
-      let writes = 0;
-      const response = {
-        selection_applied: false,
-        effective_strategy: "rolling",
-        state: state === "unchanged" || state === "failed" ? state : "compacted",
-        observation: {
-          strategy: "rolling",
-          before_tokens: 900,
-          after_tokens: 100,
-          evicted_entries: 4,
-          summary: "Kept context.",
-        },
-        failure:
-          state === "failed" ? { code: "strategy_failed", detail: "Strategy failed." } : null,
-      };
-      return Effect.gen(function* () {
-        const client = yield* AlbedoClient.AlbedoClient;
-        const result = yield* client.compactSession("native/session").pipe(Effect.result);
-        if (state === "lost_reply" || state === "malformed") expect(result._tag).toBe("Failure");
-        else {
-          expect(result._tag).toBe("Success");
-          if (result._tag === "Success") expect(result.success).toEqual(response);
-        }
-        expect(writes).toBe(1);
-      }).pipe(
-        Effect.provide(
-          daemon((request) => {
-            writes++;
-            expect(request.method).toBe("POST");
-            expect(new URL(request.url).pathname).toBe("/sessions/native%2Fsession/compaction");
-            return state === "lost_reply"
-              ? lost(request)
-              : reply(
-                  request,
-                  state === "malformed" ? { ...response, state: "unknown" } : response,
-                );
-          }),
-        ),
-      );
-    },
+  it.effect.each([
+    "compacted",
+    "unchanged",
+    "failed",
+    "running",
+    "interrupted",
+    "lost_reply",
+    "wrong_identity",
+    "malformed",
+  ] as const)("validates the identified compaction receipt when %s", (mode) => {
+    const nativeId = "native/session";
+    const actionId = identity.inputId;
+    const receipt = {
+      id: actionId,
+      session_id: nativeId,
+      state: mode === "running" || mode === "interrupted" ? mode : "completed",
+      result:
+        mode === "running" || mode === "interrupted" || mode === "malformed"
+          ? null
+          : {
+              selection_applied: false,
+              effective_strategy: "rolling",
+              state: mode === "unchanged" || mode === "failed" ? mode : "compacted",
+              observation: {
+                strategy: "rolling",
+                before_tokens: 900,
+                after_tokens: 100,
+                evicted_entries: 4,
+                summary: "Kept context.",
+              },
+              failure:
+                mode === "failed" ? { code: "strategy_failed", detail: "Strategy failed." } : null,
+            },
+    };
+    let writes = 0;
+    return Effect.gen(function* () {
+      const client = yield* AlbedoClient.AlbedoClient;
+      const result = yield* client.compactSession(nativeId, actionId).pipe(Effect.result);
+      if (mode === "lost_reply" || mode === "malformed" || mode === "wrong_identity") {
+        expect(result._tag).toBe("Failure");
+      } else {
+        expect(result).toMatchObject({ _tag: "Success", success: receipt });
+      }
+      expect(writes).toBe(1);
+    }).pipe(
+      Effect.provide(
+        daemon((request) => {
+          writes++;
+          expect(request.method).toBe("PUT");
+          expect(new URL(request.url).pathname).toBe(
+            `/sessions/native%2Fsession/compactions/${actionId}`,
+          );
+          return mode === "lost_reply"
+            ? lost(request)
+            : reply(
+                request,
+                mode === "wrong_identity" ? { ...receipt, session_id: "other/session" } : receipt,
+                mode === "running" ? 202 : 200,
+              );
+        }),
+      ),
+    );
+  });
+
+  it.effect.each([
+    "compaction_unknown",
+    "session_not_found",
+    "identity_expired",
+    "running",
+  ] as const)("reads a compaction without resubmitting when the daemon reports %s", (mode) =>
+    Effect.gen(function* () {
+      const client = yield* AlbedoClient.AlbedoClient;
+      const result = yield* client.readCompaction(sessionId, identity.inputId).pipe(Effect.result);
+      if (mode === "compaction_unknown")
+        expect(result).toMatchObject({ _tag: "Success", success: null });
+      else if (mode === "running")
+        expect(result).toMatchObject({ _tag: "Success", success: { state: "running" } });
+      else
+        expect(result).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "AlbedoHttpError", code: mode },
+        });
+    }).pipe(
+      Effect.provide(
+        daemon((request) => {
+          expect(request.method).toBe("GET");
+          expect(new URL(request.url).pathname).toBe(
+            `/sessions/${sessionId}/compactions/${identity.inputId}`,
+          );
+          const status = mode === "identity_expired" ? 410 : 404;
+          return mode === "running"
+            ? reply(request, {
+                id: identity.inputId,
+                session_id: sessionId,
+                state: "running",
+                result: null,
+              })
+            : reply(request, problem(status, mode), status);
+        }),
+      ),
+    ),
   );
   it.effect.each([
     "confirmed",
@@ -296,12 +354,17 @@ describe("Albedo stream and snapshot transport", () => {
             failure: { _tag: "AlbedoHttpError", status: 412 },
           });
           expect(stored.provider_profile).toBe("old");
-        } else expect(stored).toMatchObject(choice);
+        } else {
+          expect(result._tag).toBe("Success");
+          expect(stored).toMatchObject(choice);
+        }
         expect(writes).toBe(1);
       }).pipe(
         Effect.provide(
           daemon((request) => {
-            expect(new URL(request.url).searchParams.get("view")).toBe("configuration");
+            const url = new URL(request.url);
+            expect(url.pathname).toBe(`/sessions/${identity.sessionId}/configuration`);
+            expect(url.search).toBe("");
             if (request.method === "GET")
               return Effect.succeed(
                 HttpClientResponse.fromWeb(
@@ -318,7 +381,14 @@ describe("Albedo stream and snapshot transport", () => {
             stored = { ...stored, ...choice };
             return mode === "lost_ack"
               ? lost(request)
-              : reply(request, { session: stored, move: null });
+              : reply(request, {
+                  resource: { url: url.pathname, etag: '"next-config"', value: stored },
+                  application: {
+                    desired_revision: "revision-2",
+                    loaded_revision: null,
+                    needs_reload: true,
+                  },
+                });
           }),
         ),
       );
@@ -347,8 +417,8 @@ describe("Albedo stream and snapshot transport", () => {
         Effect.provide(
           daemon((request) => {
             const url = new URL(request.url);
-            if (url.pathname === "/settings") {
-              expect(url.searchParams.get("group")).toBe("providers");
+            if (url.pathname === "/settings/providers") {
+              expect(url.search).toBe("");
               return reply(request, {
                 default_profile: "team/account",
                 profiles: {
@@ -433,6 +503,7 @@ describe("Albedo stream and snapshot transport", () => {
       Effect.provide(
         daemon((request) => {
           const url = new URL(request.url);
+          expect(url.pathname).toBe(`/sessions/${sessionId}/events`);
           expect(url.searchParams.get("after_generation")).toBe(generation);
           expect(url.searchParams.get("after_seq")).toBe("0");
           expect(request.headers["last-event-id"]).toBeUndefined();
@@ -768,7 +839,7 @@ describe("Albedo daemon attachment", () => {
   );
 
   it.effect.each([
-    ["old protocol", { ...server, protocol: 2 }, "incompatible"],
+    ["old protocol", { ...server, protocol: 3 }, "incompatible"],
     [
       "old replay",
       { ...server, capabilities: { ...server.capabilities, session_replay: 1 } },
@@ -954,7 +1025,7 @@ describe("Albedo durable input recovery", () => {
     }).pipe(
       Effect.provide(
         daemon((request) => {
-          if (request.method === "GET") return reply(request, problem(404, "input_not_found"), 404);
+          if (request.method === "GET") return reply(request, problem(404, "input_unknown"), 404);
           writes.push({ url: request.url, body: request.body });
           return writes.length === 1 ? lost(request) : reply(request, input, 202);
         }),
@@ -962,28 +1033,50 @@ describe("Albedo durable input recovery", () => {
     );
   });
 
-  it.effect("keeps expired identities unresolved without allocating or resending work", () => {
-    let writes = 0;
-    return Effect.gen(function* () {
+  it.effect.each([
+    [410, "identity_expired"],
+    [404, "session_not_found"],
+  ] as const)(
+    "keeps a missing receipt unresolved when the daemon returns %s %s",
+    ([status, code]) => {
+      let writes = 0;
+      return Effect.gen(function* () {
+        const client = yield* AlbedoClient.AlbedoClient;
+        const error = yield* Effect.flip(client.submitInput(submission));
+        expect(error).toMatchObject({ _tag: "AlbedoHttpError", status, code });
+        expect(writes).toBe(1);
+      }).pipe(
+        Effect.provide(
+          daemon((request) => {
+            if (request.method === "GET") return reply(request, problem(status, code), status);
+            writes++;
+            return lost(request);
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect("can read a legacy GIF receipt but will never submit that intent to protocol 4", () =>
+    Effect.gen(function* () {
       const client = yield* AlbedoClient.AlbedoClient;
-      const error = yield* Effect.flip(client.submitInput(submission));
-      expect(error).toMatchObject({
-        _tag: "AlbedoHttpError",
-        status: 410,
-        code: "identity_expired",
-      });
-      expect(writes).toBe(1);
+      expect(yield* client.readInput(identity)).toEqual(input);
+      const refused = yield* Effect.flip(
+        client.submitInput({
+          ...submission,
+          request: { ...submission.request, images: [{ mime_type: "image/gif", data: "AA==" }] },
+        }),
+      );
+      expect(refused).toMatchObject({ _tag: "AlbedoProtocolError", reason: "legacy_gif" });
     }).pipe(
       Effect.provide(
         daemon((request) => {
-          if (request.method === "GET")
-            return reply(request, problem(410, "identity_expired"), 410);
-          writes++;
-          return lost(request);
+          expect(request.method).toBe("GET");
+          return reply(request, input);
         }),
       ),
-    );
-  });
+    ),
+  );
 
   it.effect("bounds recovery if the repeated PUT also loses its response", () => {
     let writes = 0;
@@ -998,7 +1091,7 @@ describe("Albedo durable input recovery", () => {
         daemon((request) => {
           if (request.method === "GET") {
             reads++;
-            return reply(request, problem(404, "input_not_found"), 404);
+            return reply(request, problem(404, "input_unknown"), 404);
           }
           writes++;
           return lost(request);

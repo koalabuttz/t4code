@@ -1,12 +1,12 @@
 import * as Schema from "effect/Schema";
 
-// Albedo protocol 3, openapi.yaml at fb84ee05f9284c8820e1ae5eb3fceed464aafc23.
+// Albedo protocol 4, openapi.yaml at 2568dea4.
 const Id = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512));
 const Counter = Schema.Int.check(
   Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 );
 const Positive = Counter.check(Schema.isGreaterThan(0));
-const UuidV7 = Schema.String.check(
+export const UuidV7 = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
 );
 const Timestamp = Schema.String.check(
@@ -111,6 +111,7 @@ export const Interruption = Schema.Struct({
   warnings: Schema.Array(Reason).check(Schema.isMaxLength(100)),
 });
 
+// GIF is retained for decoding input intents saved by protocol 3.
 const ClientId = Schema.optional(Schema.String.check(Schema.isMaxLength(512)));
 export const InputRequest = Schema.Union([
   Schema.Struct({
@@ -174,6 +175,21 @@ export const CompactionResult = Schema.Struct({
   failure: Schema.NullOr(Reason),
 });
 
+const CompactionIdentity = { id: UuidV7, session_id: Id };
+export const CompactionReceipt = Schema.Union([
+  Schema.Struct({
+    ...CompactionIdentity,
+    state: Schema.Literals(["running", "interrupted"]),
+    result: Schema.Null,
+  }),
+  Schema.Struct({
+    ...CompactionIdentity,
+    state: Schema.Literal("completed"),
+    result: CompactionResult,
+  }),
+]);
+export type CompactionReceipt = typeof CompactionReceipt.Type;
+
 export const NewSession = Schema.Struct({
   kind: Schema.Literal("new"),
   workspace: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096)),
@@ -205,6 +221,13 @@ export const SessionConfiguration = Schema.Struct({
   provider_profile: Schema.NullOr(Id),
   model: Schema.NullOr(Id),
   effort: Schema.NullOr(Schema.String),
+});
+
+export const SessionConfigurationChange = Schema.Struct({
+  resource: Schema.Struct({
+    etag: Schema.NonEmptyString,
+    value: SessionConfiguration,
+  }),
 });
 
 export const ProviderSettings = Schema.Struct({
