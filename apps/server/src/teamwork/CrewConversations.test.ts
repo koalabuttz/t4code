@@ -21,7 +21,7 @@ import * as Result from "effect/Result";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlStatement from "effect/sql/Statement";
 import * as Sqlite from "../persistence/Sqlite.ts";
-import crewVisibleMessageIndexes from "../persistence/Migrations/100_CrewVisibleMessageIndexes.ts";
+import crewVisibleMessageIndexes from "../persistence/Migrations/106_CrewVisibleMessageIndexes.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import { StopConfirmationError } from "../orchestration-v2/StopConfirmation.ts";
 import * as Threads from "../orchestration-v2/ThreadManagementService.ts";

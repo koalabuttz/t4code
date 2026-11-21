@@ -98,6 +98,33 @@ it.layer(NodeServices.layer)("service preflight database", (it) => {
           .status,
       ).toBe("ready");
 
+      const crewPath = path.join(path.dirname(databasePath), "crew.sqlite");
+      const crewDb = new NodeSqlite.DatabaseSync(crewPath);
+      crewDb.exec(
+        "CREATE TABLE effect_sql_migrations (migration_id INTEGER PRIMARY KEY, name TEXT)",
+      );
+      const insertCrew = crewDb.prepare("INSERT INTO effect_sql_migrations VALUES (?, ?)");
+      for (const [id, name] of migrationManifest.filter(([id]) => id < 97)) {
+        insertCrew.run(id, name);
+      }
+      insertCrew.run(97, "ProjectTeamwork");
+      insertCrew.run(98, "CrewArchive");
+      const crewPreflight = () =>
+        runServicePreflight({
+          databasePath: crewPath,
+          launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
+        });
+
+      expect(crewPreflight().status).toBe("ready");
+      expect(
+        crewDb.prepare("SELECT name FROM effect_sql_migrations WHERE migration_id = 97").get()
+          ?.name,
+      ).toBe("ProjectTeamwork");
+
+      insertCrew.run(100, "CrewVisibleMessageIndexes");
+      expect(crewPreflight().status).toBe("blocked");
+      crewDb.close();
+
       const newerId = Math.max(...migrationManifest.map(([id]) => id)) + 1;
       insert.run(newerId, "FromNightly");
       db.close();

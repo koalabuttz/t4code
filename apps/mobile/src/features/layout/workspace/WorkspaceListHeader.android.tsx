@@ -1,3 +1,4 @@
+import { useGT } from "gt-react-native";
 import { useEffect, useState } from "react";
 import { useNavigation, useNavigationState } from "@react-navigation/native";
 import { BackHandler, Keyboard } from "react-native";
@@ -14,6 +15,7 @@ import {
 } from "./WorkspaceListHeader.types";
 
 export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
+  const gt = useGT();
   const navigation = useNavigation();
   const workspace = useWorkspaceTabs();
   const isTabActive = workspace?.isTabActive;
@@ -63,7 +65,7 @@ export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
       leading={
         props.onOpenNavigation ? (
           <AndroidHeaderIconButton
-            accessibilityLabel="Open workspace navigation"
+            accessibilityLabel={gt("Open workspace navigation")}
             icon="line.3.horizontal"
             onPress={props.onOpenNavigation}
           />
@@ -90,7 +92,7 @@ export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
         connectionState.hasConnections && props.filter.items.length > 0
           ? [
               {
-                title: "Filter threads",
+                title: gt("Filter threads"),
                 icon: workspaceListFilterIcon(props.filter.customized),
                 items: props.filter.items,
               },

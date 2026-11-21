@@ -1,5 +1,6 @@
 import { type EnvironmentId, type UnifiedSettings, UsageLimitSourceId } from "@t3tools/contracts";
 import { USAGE_SOURCE_PRESETS } from "@t3tools/shared/usageLimits";
+import { T, useGT, Var } from "gt-react";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -15,7 +16,7 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 export function UsageProviderSettings({
@@ -29,6 +30,8 @@ export function UsageProviderSettings({
   readonly sources: UnifiedSettings["usageLimitSources"];
   readonly readOnly: boolean;
 }) {
+  const gt = useGT();
+  const searchableSetting = useSearchableSetting();
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<UsageLimitSourceId | null>(null);
@@ -43,24 +46,24 @@ export function UsageProviderSettings({
           !readOnly ? (
             <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
               <PlusIcon className="size-3" aria-hidden />
-              Add source
+              <T>Add source</T>
             </Button>
           ) : null
         }
       >
         {entries.length === 0 ? (
-          <SettingsRow title="No usage sources configured." />
+          <SettingsRow title={gt("No usage sources configured.")} />
         ) : (
           entries.map(([id, source]) => {
             const label = source.label?.trim() || source.url;
+            const service = USAGE_SOURCE_PRESETS[source.kind].label;
             return (
               <SettingsRow
                 key={id}
                 title={label}
                 description={
                   <span className="break-all">
-                    {USAGE_SOURCE_PRESETS[source.kind].label}
-                    {source.enabled ? "" : " · Disabled"}
+                    {source.enabled ? service : gt("{name} · Disabled", { name: service })}
                     {label !== source.url ? ` · ${source.url}` : ""}
                   </span>
                 }
@@ -73,7 +76,7 @@ export function UsageProviderSettings({
                           variant="outline"
                           onClick={() => setEditing(UsageLimitSourceId.make(id))}
                         >
-                          Update session
+                          <T>Update session</T>
                         </Button>
                       ) : null}
                       <RemoveUsageProviderButton
@@ -123,19 +126,27 @@ function RemoveUsageProviderButton({
   return (
     <>
       <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
-        Remove
+        <T>Remove</T>
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove {label}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              <T>
+                Remove <Var>{label}</Var>?
+              </T>
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              The saved credential is deleted from this server and this source leaves the Limits
-              view. You can add it again at any time.
+              <T>
+                The saved credential is deleted from this server and this source leaves the Limits
+                view. You can add it again at any time.
+              </T>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>
+              <T>Cancel</T>
+            </AlertDialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -143,7 +154,7 @@ function RemoveUsageProviderButton({
                 onConfirm();
               }}
             >
-              Remove source
+              <T>Remove source</T>
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

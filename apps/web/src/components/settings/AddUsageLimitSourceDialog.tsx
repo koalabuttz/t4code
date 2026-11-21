@@ -6,6 +6,7 @@ import {
   UsageLimitSourceKind,
 } from "@t3tools/contracts";
 import { USAGE_SOURCE_PRESETS } from "@t3tools/shared/usageLimits";
+import { T, useGT, Var } from "gt-react";
 import { useId, useState } from "react";
 
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
@@ -44,6 +45,7 @@ export function AddUsageLimitSourceDialog({
     readonly config: UnifiedSettings["usageLimitSources"][UsageLimitSourceId];
   };
 }) {
+  const gt = useGT();
   const formId = useId();
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const [label, setLabel] = useState(initialSource?.config.label ?? "");
@@ -58,10 +60,10 @@ export function AddUsageLimitSourceDialog({
   const canSave = keyValid && trimmedUrl.length > 0 && managementKey !== "";
   const keyLabel =
     kind === "cliproxy"
-      ? "Management key"
+      ? gt("Management key")
       : kind === "anthropic"
-        ? "Console session key"
-        : "API key";
+        ? gt("Console session key")
+        : gt("API key");
 
   const reset = () => {
     setLabel("");
@@ -105,9 +107,14 @@ export function AddUsageLimitSourceDialog({
     >
       <DialogPopup className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{initialSource ? "Update usage source" : "Add a usage source"}</DialogTitle>
+          <DialogTitle>
+            {initialSource ? gt("Update usage source") : gt("Add a usage source")}
+          </DialogTitle>
           <DialogDescription>
-            Show account balances or quotas on {environmentLabel}. The key stays on that server.
+            <T>
+              Show account balances or quotas on <Var>{environmentLabel}</Var>. The key stays on
+              that server.
+            </T>
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
@@ -120,7 +127,9 @@ export function AddUsageLimitSourceDialog({
             }}
           >
             <div className="grid gap-1.5">
-              <Label htmlFor="usage-source-kind">Service</Label>
+              <Label htmlFor="usage-source-kind">
+                <T>Service</T>
+              </Label>
               <Select
                 disabled={!!initialSource}
                 value={kind}
@@ -147,7 +156,9 @@ export function AddUsageLimitSourceDialog({
             </div>
             {kind === "cliproxy" ? (
               <div className="grid gap-1.5">
-                <Label htmlFor="usage-source-url">Hub URL</Label>
+                <Label htmlFor="usage-source-url">
+                  <T>Hub URL</T>
+                </Label>
                 <Input
                   id="usage-source-url"
                   placeholder="https://hub.example.ts.net:8318"
@@ -173,27 +184,34 @@ export function AddUsageLimitSourceDialog({
             {kind === "anthropic" ? (
               <>
                 <p className="text-sm text-muted-foreground">
-                  Use the sessionKey cookie from platform.claude.com for API credits and monthly
-                  spend. API keys cannot read this balance. Update the session here when it expires.
+                  <T>
+                    Use the sessionKey cookie from platform.claude.com for API credits and monthly
+                    spend. API keys cannot read this balance. Update the session here when it
+                    expires.
+                  </T>
                 </p>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="usage-source-organization">Organization ID (optional)</Label>
+                  <Label htmlFor="usage-source-organization">
+                    <T>Organization ID (optional)</T>
+                  </Label>
                   <Input
                     id="usage-source-organization"
                     value={organizationId}
                     onChange={(event) => setOrganizationId(event.target.value)}
-                    placeholder="Required only if you have several API organizations"
+                    placeholder={gt("Required only if you have several API organizations")}
                   />
                 </div>
               </>
             ) : null}
             <div className="grid gap-1.5">
-              <Label htmlFor="usage-source-label">Label (optional)</Label>
+              <Label htmlFor="usage-source-label">
+                <T>Label (optional)</T>
+              </Label>
               <Input
                 id="usage-source-label"
                 placeholder={
                   kind === "cliproxy"
-                    ? "Defaults to the hub's host name"
+                    ? gt("Defaults to the hub's host name")
                     : USAGE_SOURCE_PRESETS[kind].label
                 }
                 value={label}
@@ -210,10 +228,10 @@ export function AddUsageLimitSourceDialog({
               onOpenChange(false);
             }}
           >
-            Cancel
+            <T>Cancel</T>
           </Button>
           <Button type="submit" form={formId} disabled={!canSave}>
-            {initialSource ? "Save source" : "Add source"}
+            {initialSource ? gt("Save source") : gt("Add source")}
           </Button>
         </DialogFooter>
       </DialogPopup>
