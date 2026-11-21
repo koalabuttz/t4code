@@ -3738,18 +3738,23 @@ effectIt.effect("checks the run's status without loading the thread's history", 
   }),
 );
 
-effectIt.effect("fails the run instead of replacing a native thread another client holds", () =>
+effectIt.effect.each([
+  new ProviderAdapter.ProviderAdapterThreadInUseError({
+    driver: ProviderDriverKind.make("codex"),
+    providerThreadId: ProviderThreadId.make("new-provider-thread"),
+    detail: "This conversation is open in another Codex client.",
+    cause: new Error("thread native-resume-thread already has an active writer"),
+  }),
+  new ProviderAdapter.ProviderAdapterThreadReattachError({
+    driver: ProviderDriverKind.make("albedo"),
+    providerThreadId: ProviderThreadId.make("new-provider-thread"),
+    detail: "Albedo is draining. Reconnect after the daemon is ready.",
+    cause: new Error("daemon is restarting"),
+  }),
+])("preserves a native thread after $detail", (resumeFailure) =>
   Effect.gen(function* () {
-    const detail = "This conversation is open in another Codex client.";
-    const harness = makeLocalCommandHarness({
-      text: "Continue",
-      resumeFailure: new ProviderAdapter.ProviderAdapterThreadInUseError({
-        driver: ProviderDriverKind.make("codex"),
-        providerThreadId: ProviderThreadId.make("new-provider-thread"),
-        detail,
-        cause: new Error("thread native-resume-thread already has an active writer"),
-      }),
-    });
+    const harness = makeLocalCommandHarness({ text: "Continue", resumeFailure });
+    const detail = resumeFailure.detail;
 
     const exit = yield* Effect.exit(harness.start);
 

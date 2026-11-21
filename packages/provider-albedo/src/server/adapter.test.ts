@@ -27,6 +27,7 @@ import * as Exit from "effect/Exit";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { AlbedoClient, AlbedoConnectionError, AlbedoTransportError } from "./AlbedoClient.ts";
 import * as InputStore from "./AlbedoInputStore.ts";
 import * as CompactionStore from "./AlbedoCompactionStore.ts";
 import * as SessionStore from "./AlbedoSessionStore.ts";
@@ -106,6 +107,77 @@ const setup = Effect.gen(function* () {
 });
 
 describe("Albedo T3 adapter", () => {
+  it.effect("resumes the same native session after the daemon endpoint changes", () =>
+    Effect.gen(function* () {
+      const fake = yield* fakeDaemon;
+      const fs = yield* FileSystem.FileSystem;
+      const homeDirectory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-albedo-reconnect-" });
+      let endpoint: "original" | "offline" | "replacement" = "original";
+      const adapter = yield* makeAdapter({
+        instanceId,
+        homeDirectory,
+        connect: Effect.suspend(() => {
+          if (endpoint === "offline") {
+            return Effect.fail(new AlbedoConnectionError({ reason: "discovery_unavailable" }));
+          }
+          const connectedEndpoint = endpoint;
+          return Effect.succeed(
+            AlbedoClient.of({
+              ...fake.client,
+              createSession: (creation) =>
+                Effect.suspend(() =>
+                  connectedEndpoint === endpoint
+                    ? fake.client.createSession(creation)
+                    : Effect.fail(
+                        new AlbedoTransportError({
+                          operation: "session.create",
+                          cause: "The daemon endpoint changed",
+                        }),
+                      ),
+                ),
+            }),
+          );
+        }),
+      });
+      const open = {
+        threadId,
+        providerSessionId,
+        modelSelection: selection,
+        runtimePolicy: policy,
+      };
+      const providerThread = yield* Effect.scoped(
+        adapter.openSession(open).pipe(Effect.flatMap((runtime) => runtime.ensureThread(open))),
+      );
+      const runtime = yield* adapter.openSession(open);
+      const resume = {
+        threadId,
+        providerThread,
+        modelSelection: selection,
+        runtimePolicy: policy,
+      };
+
+      endpoint = "offline";
+      const offline = yield* Effect.flip(runtime.resumeThread(resume));
+      expect(fake.creations).toHaveLength(1);
+      expect(fake.submissions).toHaveLength(0);
+
+      endpoint = "replacement";
+      const reattached = yield* runtime.resumeThread(resume);
+      expect(reattached.nativeThreadRef).toEqual(providerThread.nativeThreadRef);
+      yield* runtime.startTurn(turnInput(reattached));
+
+      const sessionId = providerThread.nativeThreadRef!.nativeId;
+      expect(new Set(fake.creations.map((creation) => creation.sessionId))).toEqual(
+        new Set([sessionId]),
+      );
+      expect(fake.submissions).toMatchObject([{ sessionId }]);
+      expect(offline).toMatchObject({
+        _tag: "ProviderAdapterThreadReattachError",
+        detail: expect.stringContaining("Albedo daemon discovery is unavailable"),
+      });
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+
   it.effect.each([
     "compacted",
     "unchanged",
