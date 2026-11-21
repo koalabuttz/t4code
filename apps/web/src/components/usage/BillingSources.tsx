@@ -1,9 +1,10 @@
 import {
-  collectBillingSources,
+  type collectBillingSources,
   formatUsageBalance,
-  formatResetsIn,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
+import { formatResetsIn } from "@t3tools/shared/usageLimitsCopy";
+import { T, useGT, useMessages } from "gt-react";
 import { ensureLocalApi } from "../../localApi";
 import { Button } from "../ui/button";
 
@@ -14,6 +15,8 @@ export function BillingSources({
   readonly sources: ReturnType<typeof collectBillingSources>;
   readonly now: number;
 }) {
+  const gt = useGT();
+  const m = useMessages();
   return sources.map((source) => (
     <section key={source.key} className="space-y-3 rounded-xl border p-4">
       <div>
@@ -33,22 +36,28 @@ export function BillingSources({
       ) : null}
       {source.limits?.balances?.map((balance) => (
         <p key={balance.currency} className="text-lg font-medium tabular-nums">
-          {formatUsageBalance(balance)} remaining
+          {gt("{amount} remaining", { amount: formatUsageBalance(balance) })}
         </p>
       ))}
       {source.limits?.monthlySpend ? (
         <p className="text-sm text-muted-foreground">
-          This month (UTC):{" "}
           {source.limits.monthlySpend.amount === null
-            ? "Spend unavailable"
-            : `${formatUsageBalance({ currency: source.limits.monthlySpend.currency, remaining: source.limits.monthlySpend.amount })} spent`}
+            ? gt("This month (UTC): Spend unavailable")
+            : gt("This month (UTC): {amount} spent", {
+                amount: formatUsageBalance({
+                  currency: source.limits.monthlySpend.currency,
+                  remaining: source.limits.monthlySpend.amount,
+                }),
+              })}
         </p>
       ) : null}
       {source.limits?.windows.map((window) => (
         <div key={window.id} className="space-y-1">
           <div className="flex justify-between gap-3 text-xs">
             <span>{window.label}</span>
-            <span className="tabular-nums">{remainingPercent(window)}% left</span>
+            <span className="tabular-nums">
+              {gt("{percent}% left", { percent: remainingPercent(window) })}
+            </span>
           </div>
           <div
             role="meter"
@@ -61,13 +70,13 @@ export function BillingSources({
             <div className="h-full bg-primary" style={{ width: `${remainingPercent(window)}%` }} />
           </div>
           {window.resetsAt ? (
-            <p className="text-xs text-muted-foreground">{formatResetsIn(window, now)}</p>
+            <p className="text-xs text-muted-foreground">{formatResetsIn(window, now, m)}</p>
           ) : null}
         </div>
       ))}
       {source.limits && !source.limits.unavailable ? (
         <p className="text-xs text-muted-foreground">
-          Updated {new Date(source.limits.checkedAt).toLocaleString()}
+          {gt("Updated {time}", { time: new Date(source.limits.checkedAt).toLocaleString() })}
         </p>
       ) : null}
       {source.limits?.externalUsage ? (
@@ -79,7 +88,7 @@ export function BillingSources({
             if (url) void ensureLocalApi().shell.openExternal(url);
           }}
         >
-          Manage billing
+          <T>Manage billing</T>
         </Button>
       ) : null}
     </section>

@@ -18,6 +18,7 @@ const Operation = Schema.Literals([
   "session.read",
   "session.configure",
   "session.compact",
+  "session.compaction.read",
   "session.watch",
   "collection.read",
   "collection.watch",
@@ -65,12 +66,15 @@ export class AlbedoProtocolError extends Schema.TaggedError<AlbedoProtocolError>
       "response_too_large",
       "identity_mismatch",
       "invalid_submission",
+      "legacy_gif",
       "operation_unconfirmed",
     ]),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message() {
+    if (this.reason === "legacy_gif")
+      return "Albedo no longer accepts GIF attachments. If this existing request has no daemon receipt, resend it with a PNG, JPEG, or WebP image.";
     if (this.reason === "operation_unconfirmed")
       return "Albedo has not confirmed that the requested work stopped. Keep this assignment unresolved and reconcile the same work before reassigning it.";
     return "Albedo returned an incompatible response. Check daemon compatibility before retrying the existing input.";
@@ -113,7 +117,7 @@ export class AlbedoConnectionError extends Schema.TaggedError<AlbedoConnectionEr
       case "invalid_discovery":
         return "Albedo's daemon.json is invalid. Check the configured Albedo home directory.";
       case "incompatible":
-        return "Albedo requires protocol 3, durable inputs, session replay v2, collection invalidation, and tool progress. Update the daemon before connecting.";
+        return "Albedo requires protocol 4, durable inputs, session replay v2, collection invalidation, and tool progress. Update the daemon before connecting.";
       case "draining":
         return "Albedo is draining. Reconnect after the daemon is ready.";
       case "target_changed":
@@ -146,7 +150,12 @@ export class AlbedoClient extends Context.Service<
     ) => Effect.Effect<SessionProtocol.Session, RequestError>;
     readonly compactSession: (
       sessionId: string,
-    ) => Effect.Effect<typeof Protocol.CompactionResult.Type, RequestError>;
+      actionId: string,
+    ) => Effect.Effect<Protocol.CompactionReceipt, RequestError>;
+    readonly readCompaction: (
+      sessionId: string,
+      actionId: string,
+    ) => Effect.Effect<Protocol.CompactionReceipt | null, RequestError>;
     readonly readSessions: (input?: {
       readonly familyId?: string;
       readonly next?: string;
@@ -322,7 +331,7 @@ const make = Effect.fn("AlbedoClient.make")(function* (homeDirectory: string) {
   if (response.status !== 200) return yield* rejectResponse(response, "server");
   const server = yield* decode(Protocol.Server, response.body, "server");
   if (
-    server.protocol !== 3 ||
+    server.protocol !== 4 ||
     (server.capabilities.durable_inputs ?? 0) < 1 ||
     (server.capabilities.session_replay ?? 0) < 2 ||
     (server.capabilities.collection_invalidation ?? 0) < 1 ||
@@ -348,7 +357,7 @@ const make = Effect.fn("AlbedoClient.make")(function* (homeDirectory: string) {
           reason: "invalid_response",
         });
       }
-      return null;
+      if (problem.code === "input_unknown") return null;
     }
     if (response.status !== 200) return yield* rejectResponse(response, "input.read");
     const input = yield* decode(Protocol.Input, response.body, "input.read");
@@ -466,6 +475,15 @@ const make = Effect.fn("AlbedoClient.make")(function* (homeDirectory: string) {
           }),
       ),
     );
+    if (
+      intent.request.kind === "message" &&
+      intent.request.images?.some(({ mime_type }) => mime_type === "image/gif")
+    ) {
+      return yield* new AlbedoProtocolError({
+        operation: "input.submit",
+        reason: "legacy_gif",
+      });
+    }
     const body = yield* encodeInputRequest(intent.request).pipe(
       Effect.mapError(
         (cause) =>
@@ -587,7 +605,7 @@ const make = Effect.fn("AlbedoClient.make")(function* (homeDirectory: string) {
   });
 
   const readProviderSettings = Effect.gen(function* () {
-    const response = yield* request("settings.read", "GET", "/settings?group=providers");
+    const response = yield* request("settings.read", "GET", "/settings/providers");
     if (response.status !== 200) return yield* rejectResponse(response, "settings.read");
     return yield* decode(Protocol.ProviderSettings, response.body, "settings.read");
   });
@@ -761,7 +779,7 @@ const make = Effect.fn("AlbedoClient.make")(function* (homeDirectory: string) {
     sessionId: string,
     selection: typeof Protocol.SessionSelection.Type,
   ) {
-    const resource = `/sessions/${encodeURIComponent(sessionId)}?view=configuration`;
+    const resource = `/sessions/${encodeURIComponent(sessionId)}/configuration`;
     const matches = (value: typeof Protocol.SessionConfiguration.Type) =>
       value.id === sessionId &&
       value.provider_profile === selection.provider_profile &&
@@ -806,11 +824,11 @@ const make = Effect.fn("AlbedoClient.make")(function* (homeDirectory: string) {
     if (response === null) return;
     if (response.status !== 200) return yield* rejectResponse(response, "session.configure");
     const result = yield* decode(
-      Schema.Struct({ session: Protocol.SessionConfiguration }),
+      Protocol.SessionConfigurationChange,
       response.body,
       "session.configure",
     );
-    if (!matches(result.session))
+    if (!matches(result.resource.value))
       return yield* new AlbedoProtocolError({
         operation: "session.configure",
         reason: "identity_mismatch",
@@ -919,23 +937,54 @@ const make = Effect.fn("AlbedoClient.make")(function* (homeDirectory: string) {
       query.set("after_generation", cursor.generation);
       query.set("after_seq", String(cursor.sequence));
     }
+    const resource = `/sessions/${encodeURIComponent(sessionId)}/events`;
     return watch(
-      `/sessions/${encodeURIComponent(sessionId)}?${query}`,
+      cursor === undefined ? resource : `${resource}?${query}`,
       "session.watch",
       decodeBatch,
     );
   };
 
+  const compactionPath = (sessionId: string, actionId: string) =>
+    `/sessions/${encodeURIComponent(sessionId)}/compactions/${encodeURIComponent(actionId)}`;
+  const decodeCompaction = Effect.fn("AlbedoClient.decodeCompaction")(function* (
+    body: unknown,
+    operation: "session.compact" | "session.compaction.read",
+    sessionId: string,
+    actionId: string,
+  ) {
+    const receipt = yield* decode(Protocol.CompactionReceipt, body, operation);
+    if (receipt.id !== actionId || receipt.session_id !== sessionId) {
+      return yield* new AlbedoProtocolError({ operation, reason: "identity_mismatch" });
+    }
+    return receipt;
+  });
+
   return AlbedoClient.of({
-    compactSession: Effect.fn("AlbedoClient.compactSession")(function* (sessionId) {
+    compactSession: Effect.fn("AlbedoClient.compactSession")(function* (sessionId, actionId) {
       const response = yield* request(
         "session.compact",
-        "POST",
-        `/sessions/${encodeURIComponent(sessionId)}/compaction`,
+        "PUT",
+        compactionPath(sessionId, actionId),
         "{}",
       );
-      if (response.status !== 200) return yield* rejectResponse(response, "session.compact");
-      return yield* decode(Protocol.CompactionResult, response.body, "session.compact");
+      if (response.status !== 200 && response.status !== 202)
+        return yield* rejectResponse(response, "session.compact");
+      return yield* decodeCompaction(response.body, "session.compact", sessionId, actionId);
+    }),
+    readCompaction: Effect.fn("AlbedoClient.readCompaction")(function* (sessionId, actionId) {
+      const response = yield* request(
+        "session.compaction.read",
+        "GET",
+        compactionPath(sessionId, actionId),
+      );
+      if (response.status === 404) {
+        const problem = yield* decode(Protocol.Problem, response.body, "session.compaction.read");
+        if (problem.status === 404 && problem.code === "compaction_unknown") return null;
+      }
+      if (response.status !== 200)
+        return yield* rejectResponse(response, "session.compaction.read");
+      return yield* decodeCompaction(response.body, "session.compaction.read", sessionId, actionId);
     }),
     server,
     readProviderSettings,

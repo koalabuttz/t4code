@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { LegendList } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -9,6 +9,7 @@ import type {
 import { getThreadSortTimestamp } from "@t3tools/client-runtime/state/thread-sort";
 import { isListedThreadLineage, type ScopedProjectRef } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import { useGT } from "gt-react-native";
 import { useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Pressable, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,12 +22,13 @@ import { NavigationRow } from "../../components/ui/NavigationRow";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 import type { AndroidHomeView } from "../../persistence/mobile-preferences";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
 import { serverEnvironment } from "../../state/server";
 import {
   readCrewProjectFootprint,
   type CrewProjectFootprint,
 } from "../../state/crew-project-footprints";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { workspaceConnections } from "../../state/workspace";
 import { WorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader";
 import { openCrewPage } from "../threads/crewProjectNavigation";
@@ -34,7 +36,6 @@ import type { HomeProjectScope } from "./homeThreadList";
 import type { HomeProjectItem } from "./use-project-list-selection";
 
 const EMPTY_TARGETS: readonly ScopedProjectRef[] = [];
-const CREW_PROJECTS_TITLE = "Crew Projects";
 
 const projectKey = (project: EnvironmentProject) =>
   scopedProjectKey(project.environmentId, project.id);
@@ -49,7 +50,7 @@ export function useAndroidHomeNavigation(
 ) {
   const enabled = Platform.OS === "android";
   const preferences = useAtomValue(mobilePreferencesAtom);
-  const save = useAtomSet(updateMobilePreferencesAtom);
+  const save = useAtomCommand(saveMobilePreferences);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const view =
     enabled && AsyncResult.isSuccess(preferences)
@@ -144,7 +145,7 @@ export function useAndroidHomeNavigation(
     closeDrawer: () => setDrawerOpen(false),
     setView: (next: AndroidHomeView) => {
       setDrawerOpen(false);
-      if (view !== next) save({ androidHomeView: next });
+      if (enabled) void save({ androidHomeView: next });
     },
     isProjectChat: (thread: EnvironmentThreadShell) =>
       coordinators.get(scopedProjectKey(thread.environmentId, thread.projectId)) === thread.id,
@@ -167,6 +168,7 @@ function ProjectNavigationRow(props: {
   shortcut?: boolean;
   onOpen: (item: HomeProjectItem) => void;
 }) {
+  const gt = useGT();
   const { group, project } = props.item;
   return (
     <NavigationRow
@@ -174,7 +176,7 @@ function ProjectNavigationRow(props: {
       subtitle={
         props.shortcut
           ? undefined
-          : [props.hasCoordinator ? "Project chat" : null, project.workspaceRoot]
+          : [props.hasCoordinator ? gt("Project chat") : null, project.workspaceRoot]
               .filter(Boolean)
               .join(" · ")
       }
@@ -196,6 +198,8 @@ export function AndroidCrewProjectsView(props: {
   onOpenEnvironments: () => void;
   canAddProject: boolean;
 }) {
+  const gt = useGT();
+  const title = gt("Crew Projects");
   const navigation = useNavigation();
   const [search, setSearch] = useState("");
   const insets = useSafeAreaInsets();
@@ -213,15 +217,15 @@ export function AndroidCrewProjectsView(props: {
   return (
     <View className="flex-1 bg-screen">
       <WorkspaceListHeader
-        title={CREW_PROJECTS_TITLE}
-        accessibilityLabel={CREW_PROJECTS_TITLE}
+        title={title}
+        accessibilityLabel={title}
         onOpenNavigation={props.navigation.openDrawer}
         onOpenEnvironments={props.onOpenEnvironments}
         search={{
           value: search,
           onChangeText: setSearch,
-          placeholder: "Search Crew projects",
-          accessibilityLabel: "Search Crew projects",
+          placeholder: gt("Search Crew projects"),
+          accessibilityLabel: gt("Search Crew projects"),
         }}
         filter={{ customized: false, items: [] }}
       />
@@ -236,7 +240,7 @@ export function AndroidCrewProjectsView(props: {
         ListHeaderComponent={
           <View className="mb-3 items-end">
             <Button
-              label={props.canAddProject ? "Add project" : "Environments"}
+              label={props.canAddProject ? gt("Add project") : gt("Environments")}
               icon={props.canAddProject ? "folder.badge.plus" : "gearshape"}
               size="compact"
               onPress={props.canAddProject ? props.onAddProject : props.onOpenEnvironments}
@@ -246,10 +250,10 @@ export function AndroidCrewProjectsView(props: {
         ListEmptyComponent={
           <AppText className="p-4 text-center text-foreground-muted">
             {props.navigation.checkingProjects
-              ? "Checking for Crew projects…"
+              ? gt("Checking for Crew projects…")
               : query
-                ? "No matching Crew projects"
-                : "No known Crew projects. Start Crew from a project thread."}
+                ? gt("No matching Crew projects")
+                : gt("No known Crew projects. Start Crew from a project thread.")}
           </AppText>
         }
         renderItem={({ item }) => (
@@ -276,6 +280,7 @@ export function AndroidHomeDrawer(props: {
   onOpenProject: (item: HomeProjectItem) => void;
   onOpenThread: (thread: EnvironmentThreadShell) => void;
 }) {
+  const gt = useGT();
   const { navigation } = props;
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -325,7 +330,7 @@ export function AndroidHomeDrawer(props: {
             </AppText>
             <IconButton
               icon="xmark"
-              accessibilityLabel="Close workspace navigation"
+              accessibilityLabel={gt("Close workspace navigation")}
               onPress={navigation.closeDrawer}
             />
           </View>
@@ -339,7 +344,7 @@ export function AndroidHomeDrawer(props: {
                 {(["projects", "threads"] as const).map((view) => (
                   <NavigationRow
                     key={view}
-                    title={view === "projects" ? CREW_PROJECTS_TITLE : "Threads"}
+                    title={view === "projects" ? gt("Crew Projects") : gt("Threads")}
                     leading={
                       <SymbolView name={view === "projects" ? "folder" : "text.bubble"} size={22} />
                     }
@@ -353,7 +358,7 @@ export function AndroidHomeDrawer(props: {
                 {pins.length > 0 || pinnedThreads.length > 0 ? (
                   <>
                     <AppText className="px-4 pb-2 pt-5 text-drawer-foreground-muted">
-                      Pinned
+                      {gt("Pinned")}
                     </AppText>
                     {pins.map((item) => (
                       <ProjectNavigationRow
@@ -372,7 +377,7 @@ export function AndroidHomeDrawer(props: {
                 ) : null}
                 {recentThreads.length > 0 && (
                   <AppText className="px-4 pb-2 pt-5 text-drawer-foreground-muted">
-                    Recent threads
+                    {gt("Recent threads")}
                   </AppText>
                 )}
               </View>
@@ -381,7 +386,7 @@ export function AndroidHomeDrawer(props: {
           />
         </View>
         <Pressable
-          accessibilityLabel="Close workspace navigation"
+          accessibilityLabel={gt("Close workspace navigation")}
           accessibilityRole="button"
           className="flex-1"
           onPress={navigation.closeDrawer}

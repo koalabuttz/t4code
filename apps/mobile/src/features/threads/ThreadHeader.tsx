@@ -1,3 +1,5 @@
+import { useGT, useMessages } from "gt-react-native";
+
 import { AppBar } from "../../components/ui/AppBar";
 import { useNavigation } from "@react-navigation/native";
 import { prepareCrewEntry } from "@t3tools/client-runtime/state/crew";
@@ -29,6 +31,8 @@ export function ThreadHeader(props: {
   readonly onOpenFilesInspector: () => void;
   readonly teamwork?: TeamworkTarget;
 }) {
+  const gt = useGT();
+  const m = useMessages();
   const navigation = useNavigation();
   const chat = useCrewChat();
   const crewSource = chat?.route.source === true;
@@ -37,12 +41,12 @@ export function ThreadHeader(props: {
   const { toggleAuxiliaryPane, startNewTask } = useAdaptiveWorkspaceLayout();
   const { panes } = useWorkspacePaneState();
   const gitMenu = useThreadGitMenuDefinition(props.gitControls);
-  const terminalMenu = threadTerminalMenu(props.gitControls);
+  const terminalMenu = threadTerminalMenu(props.gitControls, m);
   const filesVisible = props.inspectorMode === "files" && panes.auxiliaryPaneVisible;
   const actions: AppBarAction[] = props.hasThreadCwd
     ? [
         {
-          accessibilityLabel: filesVisible ? "Close files" : "Open files",
+          accessibilityLabel: filesVisible ? gt("Close files") : gt("Open files"),
           icon: "folder",
           selected: filesVisible,
           disabled: !props.gitControls.canOpenFiles,
@@ -54,31 +58,31 @@ export function ThreadHeader(props: {
   const menus = [gitMenu, terminalMenu].filter((menu): menu is AppBarMenu => menu !== null);
   if (chat?.route.coordinator) {
     actions.push({
-      accessibilityLabel: "Project threads",
+      accessibilityLabel: gt("Project threads"),
       icon: "person.2",
       onPress: () => chat.go("threads"),
     });
   } else if (chat) {
     if (!crewSource)
       actions.push({
-        accessibilityLabel: "Project chat",
+        accessibilityLabel: gt("Project chat"),
         icon: "person.2",
         onPress: () => chat.go(),
       });
     menus.push({
-      title: "Project conversations",
+      title: gt("Project conversations"),
       icon: "person.2",
       items: [
-        { id: "chat", title: "Project chat", onPress: () => chat.go() },
-        { id: "threads", title: "Threads", onPress: () => chat.go("threads") },
-        { id: "results", title: "Results", onPress: () => chat.go("results") },
-        { id: "settings", title: "Settings", onPress: () => chat.go("project-settings") },
-        { id: "memory", title: "Save a project note", onPress: () => chat.go("knowledge") },
+        { id: "chat", title: gt("Project chat"), onPress: () => chat.go() },
+        { id: "threads", title: gt("Threads"), onPress: () => chat.go("threads") },
+        { id: "results", title: gt("Results"), onPress: () => chat.go("results") },
+        { id: "settings", title: gt("Settings"), onPress: () => chat.go("project-settings") },
+        { id: "memory", title: gt("Save a project note"), onPress: () => chat.go("knowledge") },
       ],
     });
   } else if (props.teamwork)
     actions.push({
-      accessibilityLabel: "Project crew",
+      accessibilityLabel: gt("Project crew"),
       icon: "person.2",
       onPress: () => {
         if (!props.teamwork) return;
@@ -94,7 +98,10 @@ export function ThreadHeader(props: {
       }
       subtitle={
         chat?.route.coordinator
-          ? `Coordinator · ${props.title} · ${props.subtitle}`
+          ? gt("Coordinator · {title} · {subtitle}", {
+              title: props.title,
+              subtitle: props.subtitle,
+            })
           : chat?.workstream
             ? `${chat.route.projectTitle} · ${props.subtitle}`
             : props.subtitle
@@ -105,12 +112,12 @@ export function ThreadHeader(props: {
       backInSplitView={
         props.onReturnToThread
           ? {
-              accessibilityLabel: "Return to chat",
+              accessibilityLabel: gt("Return to chat"),
               icon: "chevron.left",
               onPress: props.onReturnToThread,
             }
           : crewSource
-            ? { accessibilityLabel: "Back", icon: "chevron.left" }
+            ? { accessibilityLabel: gt("Back"), icon: "chevron.left" }
             : undefined
       }
       actions={actions}

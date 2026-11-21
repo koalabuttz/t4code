@@ -63,7 +63,7 @@ export function ThreadTimeline({
       threadId={threadDetailRef?.threadId ?? null}
       entries={displayedEntries}
     >
-      <MessagesTimeline {...timelineProps} timelineEntries={displayedEntries} />
+      <MessagesTimeline {...timelineProps} syncing={syncing} timelineEntries={displayedEntries} />
     </CrewTimeline>
   );
 }

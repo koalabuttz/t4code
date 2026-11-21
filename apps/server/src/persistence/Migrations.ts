@@ -104,10 +104,32 @@ import Migration0093 from "./Migrations/093_ProviderTurnAttemptIndex.ts";
 import Migration0094 from "./Migrations/094_TurnItemMessageOrdinalIndex.ts";
 import Migration0095 from "./Migrations/095_TurnItemInlineWorkOutput.ts";
 import Migration0096 from "./Migrations/096_RepairStaleTitleRegeneration.ts";
-import Migration0097 from "./Migrations/097_ProjectTeamwork.ts";
-import Migration0098 from "./Migrations/098_CrewArchive.ts";
-import Migration0099 from "./Migrations/099_CrewConversations.ts";
-import Migration0100 from "./Migrations/100_CrewVisibleMessageIndexes.ts";
+import Migration0097 from "./Migrations/097_IssueTrackerBindings.ts";
+import Migration0098 from "./Migrations/098_ActiveShellIndexIndexes.ts";
+import Migration0099 from "./Migrations/099_BackgroundRecoveryIndexes.ts";
+import Migration0100 from "./Migrations/100_TurnStartReadIndexes.ts";
+import Migration0101 from "./Migrations/101_DelegatedTaskReadIndexes.ts";
+import Migration0102 from "./Migrations/102_ThreadItemCounts.ts";
+import ProjectTeamwork from "./Migrations/103_ProjectTeamwork.ts";
+import CrewArchive from "./Migrations/104_CrewArchive.ts";
+import CrewConversations from "./Migrations/105_CrewConversations.ts";
+import CrewVisibleMessageIndexes from "./Migrations/106_CrewVisibleMessageIndexes.ts";
+
+const legacyCrewMigrationStart = 97;
+const upstreamCrewOverlap = [
+  [97, "IssueTrackerBindings", Migration0097],
+  [98, "ActiveShellIndexIndexes", Migration0098],
+  [99, "BackgroundRecoveryIndexes", Migration0099],
+  [100, "TurnStartReadIndexes", Migration0100],
+  [101, "DelegatedTaskReadIndexes", Migration0101],
+  [102, "ThreadItemCounts", Migration0102],
+] as const;
+const crewMigrationEntries = [
+  [103, "ProjectTeamwork", ProjectTeamwork],
+  [104, "CrewArchive", CrewArchive],
+  [105, "CrewConversations", CrewConversations],
+  [106, "CrewVisibleMessageIndexes", CrewVisibleMessageIndexes],
+] as const;
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -207,10 +229,8 @@ const migrationEntries = [
   [94, "TurnItemMessageOrdinalIndex", Migration0094],
   [95, "TurnItemInlineWorkOutput", Migration0095],
   [96, "RepairStaleTitleRegeneration", Migration0096],
-  [97, "ProjectTeamwork", Migration0097],
-  [98, "CrewArchive", Migration0098],
-  [99, "CrewConversations", Migration0099],
-  [100, "CrewVisibleMessageIndexes", Migration0100],
+  ...upstreamCrewOverlap,
+  ...crewMigrationEntries,
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -269,6 +289,76 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
   });
 });
 
+type MigrationRow = { readonly id: number; readonly name: string };
+
+function legacyCrewTail(history: ReadonlyArray<MigrationRow>) {
+  const tail = history.filter(({ id }) => id >= legacyCrewMigrationStart);
+  const isLegacyCrewRow = ({ id, name }: MigrationRow) =>
+    crewMigrationEntries[id - legacyCrewMigrationStart]?.[1] === name;
+  if (!tail.some(isLegacyCrewRow)) return undefined;
+  return tail.every(
+    (row, index) => row.id === legacyCrewMigrationStart + index && isLegacyCrewRow(row),
+  )
+    ? tail
+    : null;
+}
+
+export function reconciledLegacyCrewHistory(
+  history: ReadonlyArray<MigrationRow>,
+): ReadonlyArray<MigrationRow> | null {
+  const tail = legacyCrewTail(history);
+  if (tail === undefined) return history;
+  if (tail === null) return null;
+  return [
+    ...history.filter(({ id }) => id < legacyCrewMigrationStart),
+    ...upstreamCrewOverlap.map(([id, name]) => ({ id, name })),
+    ...crewMigrationEntries.slice(0, tail.length).map(([id, name]) => ({ id, name })),
+  ];
+}
+
+const reconcileLegacyCrewMigrations = Effect.fn("reconcileLegacyCrewMigrations")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return yield* sql.withTransaction(
+    Effect.gen(function* () {
+      const ledger = yield* sql`
+        SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+      `;
+      if (ledger.length === 0) return [];
+      const history = yield* sql<MigrationRow>`
+        SELECT migration_id AS id, name FROM effect_sql_migrations ORDER BY migration_id
+      `;
+      const tail = legacyCrewTail(history);
+      if (tail === undefined) return [];
+      if (tail === null) {
+        return yield* new Migrator.MigrationError({
+          kind: "BadState",
+          message: "Cannot upgrade legacy Crew with missing or unexpected migrations.",
+        });
+      }
+      yield* assertV2MigrationsCanRun(legacyCrewMigrationStart - 1);
+
+      // Preserve Crew schema and data while filling the upstream gap in the same transaction.
+      for (const [index, row] of tail.entries()) {
+        const [id] = crewMigrationEntries[index]!;
+        yield* sql`
+          UPDATE effect_sql_migrations SET migration_id = ${id} WHERE migration_id = ${row.id}
+        `;
+      }
+      for (const [index, [id, name, migration]] of upstreamCrewOverlap.entries()) {
+        yield* Effect.log(DATABASE_MIGRATION_PROGRESS_MESSAGE).pipe(
+          Effect.annotateLogs({
+            migration: `${id}_${name}`,
+            progress: `${index + 1} of ${upstreamCrewOverlap.length}`,
+          }),
+        );
+        yield* migration;
+        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${id}, ${name})`;
+      }
+      return upstreamCrewOverlap.map(([id, name]) => [id, name] as const);
+    }),
+  );
+});
+
 const latestMigrationId = Math.max(...migrationEntries.map(([id]) => id));
 
 // Mirrors the Migrator, which runs only ids above the highest recorded, plus the V2-preview reconciliation.
@@ -304,6 +394,11 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
   // The reconcile takes the write lock; CLI startup must not contend with the server for a no-op.
   const previewMigrations = includesV2 && hasPending ? yield* reconcileV2PreviewMigration() : [];
+  const crewSchemaHead = crewMigrationEntries.at(-1)![0];
+  const crewUpgradeMigrations =
+    hasPending && (toMigrationInclusive === undefined || toMigrationInclusive >= crewSchemaHead)
+      ? yield* reconcileLegacyCrewMigrations()
+      : [];
   if (includesV2) {
     yield* assertV2MigrationsCanRun(toMigrationInclusive);
   }
@@ -324,7 +419,10 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   );
   // One transaction per migration: an index build on a large database can take minutes, and a
   // restart then resumes after the last finished migration instead of rolling all of them back.
-  const executedMigrations: Array<readonly [id: number, name: string]> = [...previewMigrations];
+  const executedMigrations: Array<readonly [id: number, name: string]> = [
+    ...previewMigrations,
+    ...crewUpgradeMigrations,
+  ];
   for (const [index, [id, name]] of pending.entries()) {
     if (latestRecordedId > 0) {
       yield* Effect.log(DATABASE_MIGRATION_PROGRESS_MESSAGE).pipe(

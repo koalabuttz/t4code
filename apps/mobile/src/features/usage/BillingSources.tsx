@@ -1,9 +1,10 @@
 import {
   collectBillingSources,
   formatUsageBalance,
-  formatResetsIn,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
+import { formatResetsIn } from "@t3tools/shared/usageLimitsCopy";
+import { T, useGT, useMessages } from "gt-react-native";
 import { Linking, Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/ui/AppText";
 
@@ -14,6 +15,8 @@ export function BillingSources({
   readonly sources: ReturnType<typeof collectBillingSources>;
   readonly now: number;
 }) {
+  const gt = useGT();
+  const messages = useMessages();
   return sources.map((source) => (
     <View key={source.key} className="gap-3 rounded-xl border border-border-subtle p-4">
       <Text className="text-base font-t3-medium text-foreground">{source.label}</Text>
@@ -34,15 +37,19 @@ export function BillingSources({
           key={balance.currency}
           className="text-lg font-t3-medium tabular-nums text-foreground"
         >
-          {formatUsageBalance(balance)} remaining
+          {gt("{amount} remaining", { amount: formatUsageBalance(balance) })}
         </Text>
       ))}
       {source.limits?.monthlySpend ? (
         <Text className="text-sm text-foreground-muted">
-          This month (UTC):{" "}
           {source.limits.monthlySpend.amount === null
-            ? "Spend unavailable"
-            : `${formatUsageBalance({ currency: source.limits.monthlySpend.currency, remaining: source.limits.monthlySpend.amount })} spent`}
+            ? gt("This month (UTC): Spend unavailable")
+            : gt("This month (UTC): {amount} spent", {
+                amount: formatUsageBalance({
+                  currency: source.limits.monthlySpend.currency,
+                  remaining: source.limits.monthlySpend.amount,
+                }),
+              })}
         </Text>
       ) : null}
       {source.limits?.windows.map((window) => (
@@ -50,7 +57,7 @@ export function BillingSources({
           <View className="flex-row justify-between gap-3">
             <Text className="text-xs text-foreground-muted">{window.label}</Text>
             <Text className="text-xs tabular-nums text-foreground">
-              {remainingPercent(window)}% left
+              {gt("{percent}% left", { percent: remainingPercent(window) })}
             </Text>
           </View>
           <View
@@ -62,13 +69,15 @@ export function BillingSources({
             <View className="h-full bg-primary" style={{ width: `${remainingPercent(window)}%` }} />
           </View>
           {window.resetsAt ? (
-            <Text className="text-xs text-foreground-muted">{formatResetsIn(window, now)}</Text>
+            <Text className="text-xs text-foreground-muted">
+              {formatResetsIn(window, now, messages)}
+            </Text>
           ) : null}
         </View>
       ))}
       {source.limits && !source.limits.unavailable ? (
         <Text className="text-xs text-foreground-muted">
-          Updated {new Date(source.limits.checkedAt).toLocaleString()}
+          {gt("Updated {time}", { time: new Date(source.limits.checkedAt).toLocaleString() })}
         </Text>
       ) : null}
       {source.limits?.externalUsage ? (
@@ -80,7 +89,9 @@ export function BillingSources({
             if (url) void Linking.openURL(url).catch(() => undefined);
           }}
         >
-          <Text className="text-sm font-t3-medium text-primary">Manage billing</Text>
+          <Text className="text-sm font-t3-medium text-primary">
+            <T>Manage billing</T>
+          </Text>
         </Pressable>
       ) : null}
     </View>

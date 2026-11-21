@@ -25,6 +25,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as Exit from "effect/Exit";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as InputStore from "./AlbedoInputStore.ts";
 import * as CompactionStore from "./AlbedoCompactionStore.ts";
@@ -54,10 +55,10 @@ const layer = Layer.mergeAll(
     NativeOutcomes.layer,
     CompactionStore.layer,
   ).pipe(
-    Layer.provide([
-      SecureRandom.layerWebCrypto,
+    Layer.provide(SecureRandom.layerWebCrypto),
+    Layer.provideMerge(
       NodeSqliteClient.layer({ filename: ":memory:", readerWorker: false, writerWorker: false }),
-    ]),
+    ),
   ),
 );
 
@@ -105,94 +106,166 @@ const setup = Effect.gen(function* () {
 });
 
 describe("Albedo T3 adapter", () => {
-  it.effect.each(["compacted", "unchanged", "failed", "lost_reply", "unsent"] as const)(
-    "recovers native compaction without a second dispatch when %s",
+  it.effect.each([
+    "compacted",
+    "unchanged",
+    "failed",
+    "lost_reply",
+    "running",
+    "interrupted",
+    "unsent",
+    "claimed_unsent",
+  ] as const)("recovers native compaction with the same action identity when %s", (state) =>
+    Effect.gen(function* () {
+      const { fake, adapter, open, runtime, runtimeScope, providerThread, take } = yield* setup;
+      const input = turnInput(providerThread);
+      const message = { ...input.message, text: "/compact" };
+      const nativeBefore = yield* fake.client.readSession(
+        providerThread.nativeThreadRef!.nativeId!,
+      );
+      if (state === "lost_reply") fake.loseCompactionReply();
+      if (state === "running" || state === "interrupted") fake.setCompactionState(state);
+      const prepared =
+        state === "claimed_unsent"
+          ? yield* (yield* CompactionStore.AlbedoCompactionStore).claim({
+              providerInstanceId: instanceId,
+              runId: input.runId,
+              messageId: message.messageId,
+              sessionId: providerThread.nativeThreadRef!.nativeId!,
+            })
+          : null;
+      if (state === "unchanged" || state === "failed")
+        fake.setCompactionResult({
+          selection_applied: true,
+          effective_strategy: "summary",
+          state,
+          observation: null,
+          failure:
+            state === "failed"
+              ? { code: "strategy_failed", detail: "Compaction strategy failed." }
+              : null,
+        });
+      expect(runtime.compactThread).toBeDefined();
+      let firstTurn: ProviderAdapterV2Event | undefined;
+      if (state !== "unsent" && state !== "claimed_unsent") {
+        const start = runtime.compactThread!({ ...input, message }).pipe(Effect.result);
+        const first = yield* Effect.gen(function* () {
+          if (state !== "running") return yield* start;
+          const wait = yield* start.pipe(Effect.forkScoped);
+          yield* Deferred.await(fake.compactionStarted);
+          fake.setCompactionState("completed");
+          yield* TestClock.adjust("200 millis");
+          return yield* Fiber.join(wait);
+        });
+        expect(first._tag).toBe(state === "lost_reply" ? "Failure" : "Success");
+        if (first._tag === "Failure") {
+          expect(first.failure).toMatchObject({
+            _tag: "ProviderAdapterTurnStartError",
+            outcomeUnresolved: true,
+          });
+        } else {
+          firstTurn = Option.getOrThrow(yield* take((event) => event.type === "turn.terminal"));
+        }
+      }
+      yield* Scope.close(runtimeScope, Exit.void);
+      const reattached = yield* adapter.openSession(open);
+      const recovered = yield* Effect.acquireRelease(
+        Queue.unbounded<ProviderAdapterV2Event>(),
+        Queue.shutdown,
+      );
+      yield* reattached.events.pipe(
+        Stream.runForEach((event) => Queue.offer(recovered, event)),
+        Effect.forkScoped,
+      );
+      yield* reattached.ensureThread({ ...open, existingProviderThread: providerThread });
+      let rebuilt = 0;
+      const resumed = yield* reattached.resumeTurn!({
+        ...input,
+        messageId: message.messageId,
+        unsubmittedMessage: Effect.sync(() => {
+          rebuilt++;
+          return message;
+        }),
+      }).pipe(Effect.result);
+      expect(resumed._tag).toBe("Success");
+      const status = state === "failed" || state === "interrupted" ? "failed" : "completed";
+      const events = yield* Stream.fromQueue(recovered).pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+      );
+      const row = events.find(
+        (event) => event.type === "turn_item.updated" && event.turnItem.type === "compaction",
+      );
+      expect(row).toMatchObject({
+        turnItem: { type: "compaction", status },
+      });
+      const terminal = events.find((event) => event.type === "turn.terminal");
+      expect(terminal).toMatchObject({ status });
+      if (state === "interrupted")
+        expect(terminal).toMatchObject({ failure: { code: "compaction_interrupted" } });
+      if (firstTurn !== undefined) expect(terminal).toEqual(firstTurn);
+      if (state === "compacted" || state === "unsent")
+        expect(row).toMatchObject({
+          turnItem: {
+            beforeTokenCount: 12000,
+            afterTokenCount: 3000,
+            summary: "Retained Python variables and the working plan.",
+          },
+        });
+      expect(rebuilt).toBe(state === "unsent" ? 1 : 0);
+      expect(fake.compactions).toEqual([
+        {
+          sessionId: providerThread.nativeThreadRef!.nativeId,
+          actionId: prepared?.actionId ?? expect.stringMatching(/^[0-9a-f-]{36}$/),
+        },
+      ]);
+      const reads =
+        state === "lost_reply" ? 2 : state === "running" || state === "claimed_unsent" ? 1 : 0;
+      expect(fake.compactionReads).toEqual(
+        Array.from({ length: reads }, () => fake.compactions[0]),
+      );
+      expect(fake.submissions).toHaveLength(0);
+      expect(fake.configurations).toHaveLength(0);
+      expect(new Set(fake.creations.map((creation) => creation.sessionId))).toEqual(
+        new Set([providerThread.nativeThreadRef!.nativeId]),
+      );
+      const nativeAfter = yield* fake.client.readSession(providerThread.nativeThreadRef!.nativeId!);
+      expect(nativeAfter.kernel).toEqual(nativeBefore.kernel);
+      expect(nativeAfter.history).toEqual(nativeBefore.history);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+  );
+  it.effect.each(["legacy", "expired"] as const)(
+    "keeps a %s compaction unresolved without submitting a replacement",
     (state) =>
       Effect.gen(function* () {
-        const { fake, adapter, open, runtime, runtimeScope, providerThread, take } = yield* setup;
+        const { fake, runtime, providerThread } = yield* setup;
         const input = turnInput(providerThread);
         const message = { ...input.message, text: "/compact" };
-        const nativeBefore = yield* fake.client.readSession(
-          providerThread.nativeThreadRef!.nativeId!,
-        );
-        if (state === "lost_reply") fake.loseCompactionReply();
-        if (state === "unchanged" || state === "failed")
-          fake.setCompactionResult({
-            selection_applied: true,
-            effective_strategy: "summary",
-            state,
-            observation: null,
-            failure:
-              state === "failed"
-                ? { code: "strategy_failed", detail: "Compaction strategy failed." }
-                : null,
-          });
-        expect(runtime.compactThread).toBeDefined();
-        let firstTurn: ProviderAdapterV2Event | undefined;
-        if (state !== "unsent") {
-          const first = yield* runtime.compactThread!({ ...input, message }).pipe(Effect.result);
-          expect(first._tag).toBe(state === "lost_reply" ? "Failure" : "Success");
-          if (state !== "lost_reply")
-            firstTurn = Option.getOrThrow(yield* take((event) => event.type === "turn.terminal"));
-        }
-        yield* Scope.close(runtimeScope, Exit.void);
-        const reattached = yield* adapter.openSession(open);
-        const recovered = yield* Effect.acquireRelease(
-          Queue.unbounded<ProviderAdapterV2Event>(),
-          Queue.shutdown,
-        );
-        yield* reattached.events.pipe(
-          Stream.runForEach((event) => Queue.offer(recovered, event)),
-          Effect.forkScoped,
-        );
-        yield* reattached.ensureThread({ ...open, existingProviderThread: providerThread });
-        let rebuilt = 0;
-        const resumed = yield* reattached.resumeTurn!({
-          ...input,
+        const key = {
+          providerInstanceId: instanceId,
+          runId: input.runId,
           messageId: message.messageId,
-          unsubmittedMessage: Effect.sync(() => {
-            rebuilt++;
-            return message;
-          }),
-        }).pipe(Effect.result);
-        expect(resumed._tag).toBe(state === "lost_reply" ? "Failure" : "Success");
-        if (state === "lost_reply") {
-          if (resumed._tag === "Failure") expect(resumed.failure.message).toContain("uncertain");
+          sessionId: providerThread.nativeThreadRef!.nativeId!,
+        };
+        if (state === "legacy") {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`INSERT INTO albedo_compactions
+            (provider_instance_id, run_id, message_id, session_id)
+            VALUES (${key.providerInstanceId}, ${key.runId}, ${key.messageId}, ${key.sessionId})`;
         } else {
-          const events = yield* Stream.fromQueue(recovered).pipe(
-            Stream.takeUntil((event) => event.type === "turn.terminal"),
-            Stream.runCollect,
-          );
-          const row = events.find(
-            (event) => event.type === "turn_item.updated" && event.turnItem.type === "compaction",
-          );
-          expect(row).toMatchObject({
-            turnItem: { type: "compaction", status: state === "failed" ? "failed" : "completed" },
-          });
-          const terminal = events.find((event) => event.type === "turn.terminal");
-          expect(terminal).toMatchObject({ status: state === "failed" ? "failed" : "completed" });
-          if (firstTurn !== undefined) expect(terminal).toEqual(firstTurn);
-          if (state === "compacted" || state === "unsent")
-            expect(row).toMatchObject({
-              turnItem: {
-                beforeTokenCount: 12000,
-                afterTokenCount: 3000,
-                summary: "Retained Python variables and the working plan.",
-              },
-            });
+          const store = yield* CompactionStore.AlbedoCompactionStore;
+          yield* store.claim(key);
+          fake.expireCompactionIdentities();
         }
-        expect(rebuilt).toBe(state === "unsent" ? 1 : 0);
-        expect(fake.compactions).toEqual([providerThread.nativeThreadRef!.nativeId]);
-        expect(fake.submissions).toHaveLength(0);
-        expect(fake.configurations).toHaveLength(0);
-        expect(new Set(fake.creations.map((creation) => creation.sessionId))).toEqual(
-          new Set([providerThread.nativeThreadRef!.nativeId]),
+        const error = yield* Effect.flip(
+          runtime.resumeTurn!({ ...input, messageId: message.messageId }),
         );
-        const nativeAfter = yield* fake.client.readSession(
-          providerThread.nativeThreadRef!.nativeId!,
-        );
-        expect(nativeAfter.kernel).toEqual(nativeBefore.kernel);
-        expect(nativeAfter.history).toEqual(nativeBefore.history);
+        expect(error).toMatchObject({
+          _tag: "ProviderAdapterTurnStartError",
+          outcomeUnresolved: true,
+        });
+        expect(fake.compactions).toHaveLength(0);
+        expect(fake.compactionReads).toHaveLength(state === "legacy" ? 0 : 1);
       }).pipe(Effect.scoped, Effect.provide(layer)),
   );
   it.effect("shares the collection subscription and detaches one runtime independently", () =>

@@ -9,6 +9,7 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import { Command } from "effect/cli";
 import * as HttpServer from "effect/http/HttpServer";
@@ -56,6 +57,7 @@ it.live.each(["running", "stopped", "failing"] as const)(
         Layer.provide(AuthHttp.layerAuthenticatedAuth),
         Layer.provide(Layer.succeedContext(services)),
       );
+      const requests = yield* Ref.make(0);
       const server = yield* Layer.build(
         HttpRouter.serve(
           mode === "failing"
@@ -65,7 +67,12 @@ it.live.each(["running", "stopped", "failing"] as const)(
                 HttpServerResponse.empty({ status: 503 }),
               )
             : routes,
-          { disableListenLog: true, disableLogger: true },
+          {
+            disableListenLog: true,
+            disableLogger: true,
+            middleware: (effect) =>
+              Ref.update(requests, (count) => count + 1).pipe(Effect.andThen(effect)),
+          },
         ).pipe(Layer.provideMerge(NodeHttpServer.layerTest)),
       ).pipe(Effect.provideContext(services));
       const address = Context.get(server, HttpServer.HttpServer).address;
@@ -83,6 +90,7 @@ it.live.each(["running", "stopped", "failing"] as const)(
         config.baseDir,
         issued.sessionId,
       ]).pipe(Effect.provideContext(services), Effect.result);
+      expect(yield* Ref.get(requests)).toBe(mode === "stopped" ? 0 : 1);
       if (mode === "failing") {
         expect(Result.isFailure(result)).toBe(true);
         expect((yield* auth.listSessions()).map((session) => session.sessionId)).toEqual([
@@ -93,7 +101,6 @@ it.live.each(["running", "stopped", "failing"] as const)(
       }
       expect(Result.isSuccess(result)).toBe(true);
       if (mode === "running") yield* Deferred.await(invalidated);
-      else expect(yield* Deferred.isDone(invalidated)).toBe(false);
       expect(yield* auth.listSessions()).toEqual([]);
       expect(yield* sessions.verify(issued.token).pipe(Effect.flip)).toMatchObject({
         _tag: "SessionTokenRevokedError",

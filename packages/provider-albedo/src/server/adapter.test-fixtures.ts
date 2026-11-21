@@ -18,7 +18,7 @@ import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { AlbedoClient, AlbedoTransportError } from "./AlbedoClient.ts";
+import { AlbedoClient, AlbedoHttpError, AlbedoTransportError } from "./AlbedoClient.ts";
 import * as Protocol from "./protocol.ts";
 import type * as Session from "./sessionProtocol.ts";
 import { generation, session } from "./session.test-fixtures.ts";
@@ -112,7 +112,11 @@ export const fakeDaemon = Effect.gen(function* () {
   const submissions: Protocol.Submission[] = [];
   const creations: Protocol.SessionCreation[] = [];
   const configurations: Array<typeof Protocol.SessionSelection.Type> = [];
-  const compactions: string[] = [];
+  const compactions: Array<{ sessionId: string; actionId: string }> = [];
+  const compactionReads: typeof compactions = [];
+  const compactionStarted = yield* Deferred.make<void>();
+  const compactionSessions = new Map<string, string>();
+  let compactionState: "running" | "completed" | "interrupted" = "completed";
   let compactionResult: typeof Protocol.CompactionResult.Type = {
     selection_applied: true,
     effective_strategy: "summary",
@@ -127,6 +131,15 @@ export const fakeDaemon = Effect.gen(function* () {
     failure: null,
   };
   let loseCompactionReply = false;
+  let loseCompactionRead = false;
+  let compactionExpired = false;
+  const compactionReceipt = (sessionId: string, actionId: string): Protocol.CompactionReceipt => ({
+    id: actionId,
+    session_id: sessionId,
+    ...(compactionState === "completed"
+      ? { state: compactionState, result: compactionResult }
+      : { state: compactionState, result: null }),
+  });
   const send = Effect.fn("FakeAlbedo.send")(function* (values: ReadonlyArray<Session.Event>) {
     const events = values.map((event) => ({ ...event, sequence: ++sequence }));
     native = { ...native, cursor: { generation, sequence } };
@@ -149,21 +162,43 @@ export const fakeDaemon = Effect.gen(function* () {
     yield* Queue.offer(queue, { generation, cursor: sequence, events });
   });
   const client = AlbedoClient.of({
-    compactSession: (id) =>
-      Effect.suspend(() => {
-        compactions.push(id);
-        return loseCompactionReply
-          ? Effect.fail(
-              new AlbedoTransportError({
-                operation: "session.compact",
-                cause: "Response lost after compaction",
-              }),
-            )
-          : Effect.succeed(compactionResult);
-      }),
+    compactSession: Effect.fn("AlbedoFixture.compactSession")(function* (sessionId, actionId) {
+      compactions.push({ sessionId, actionId });
+      compactionSessions.set(actionId, sessionId);
+      const receipt = compactionReceipt(sessionId, actionId);
+      yield* Deferred.succeed(compactionStarted, undefined);
+      if (loseCompactionReply) {
+        loseCompactionReply = false;
+        return yield* new AlbedoTransportError({
+          operation: "session.compact",
+          cause: "Response lost after compaction",
+        });
+      }
+      return receipt;
+    }),
+    readCompaction: Effect.fn("AlbedoFixture.readCompaction")(function* (sessionId, actionId) {
+      compactionReads.push({ sessionId, actionId });
+      if (compactionExpired) {
+        return yield* new AlbedoHttpError({
+          operation: "session.compaction.read",
+          status: 410,
+          code: "identity_expired",
+        });
+      }
+      if (loseCompactionRead) {
+        loseCompactionRead = false;
+        return yield* new AlbedoTransportError({
+          operation: "session.compaction.read",
+          cause: "Daemon unavailable after compaction",
+        });
+      }
+      return compactionSessions.get(actionId) === sessionId
+        ? compactionReceipt(sessionId, actionId)
+        : null;
+    }),
     server: {
       instance_id: "daemon-test",
-      protocol: 3,
+      protocol: 4,
       state: "ready",
       capabilities: {
         durable_inputs: 1,
@@ -413,11 +448,20 @@ export const fakeDaemon = Effect.gen(function* () {
     creations,
     configurations,
     compactions,
+    compactionReads,
+    compactionStarted,
+    setCompactionState: (state: typeof compactionState) => {
+      compactionState = state;
+    },
     setCompactionResult: (result: typeof Protocol.CompactionResult.Type) => {
       compactionResult = result;
     },
+    expireCompactionIdentities: () => {
+      compactionExpired = true;
+    },
     loseCompactionReply: () => {
       loseCompactionReply = true;
+      loseCompactionRead = true;
     },
     loseInputReply: () => {
       loseInputReply = true;

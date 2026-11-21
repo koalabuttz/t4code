@@ -5,9 +5,14 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
+import ProjectTeamwork from "./Migrations/103_ProjectTeamwork.ts";
+import CrewArchive from "./Migrations/104_CrewArchive.ts";
+import CrewConversations from "./Migrations/105_CrewConversations.ts";
+import CrewVisibleMessageIndexes from "./Migrations/106_CrewVisibleMessageIndexes.ts";
 
 const v2Migrations = migrationManifest.filter(([id]) => id >= 55);
 const newerMigrationId = Math.max(...migrationManifest.map(([id]) => id)) + 1;
@@ -29,6 +34,88 @@ const v2TableCount = Effect.gen(function* () {
 });
 
 describe("runMigrations", () => {
+  it.effect.each([false, true])(
+    "upgrades legacy Crew history with the visibility-index migration already present: %s",
+    (hasVisibilityIndexes) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: 96 });
+        yield* Migrator.make({})({
+          loader: Migrator.fromRecord({
+            "97_ProjectTeamwork": ProjectTeamwork,
+            "98_CrewArchive": CrewArchive,
+            "99_CrewConversations": CrewConversations,
+            ...(hasVisibilityIndexes
+              ? { "100_CrewVisibleMessageIndexes": CrewVisibleMessageIndexes }
+              : {}),
+          }),
+        });
+        yield* sql`INSERT INTO project_teamwork (project_id, revision, payload_json)
+          VALUES ('project-1', 12, '{"coordinatorThreadId":"coordinator-1"}')`;
+        yield* sql`INSERT INTO project_crew_conversations
+          (project_id, collection, id, thread_id, payload_json)
+          VALUES ('project-1', 'workstreams', 'worker-1', 'worker-1', '{}')`;
+        yield* sql`UPDATE project_crew_event_cursor SET sequence = 65`;
+        yield* sql`UPDATE effect_sql_migrations SET created_at = '2026-11-18 00:00:00'
+          WHERE migration_id = 97`;
+        const before = yield* history;
+
+        yield* sql`
+          CREATE TRIGGER fail_crew_upgrade BEFORE INSERT ON effect_sql_migrations
+          WHEN NEW.name = 'ThreadItemCounts'
+          BEGIN SELECT RAISE(ABORT, 'injected failure'); END
+        `;
+        assert.isTrue(Exit.isFailure(yield* Effect.exit(runMigrations())));
+        assert.deepStrictEqual(yield* history, before);
+        assert.deepStrictEqual(
+          yield* sql`SELECT name FROM sqlite_master WHERE name = 'issue_tracker_bindings'`,
+          [],
+        );
+        yield* sql`DROP TRIGGER fail_crew_upgrade`;
+
+        const expected = migrationManifest.filter(
+          ([id]) => (id >= 97 && id <= 102) || (id === 106 && !hasVisibilityIndexes),
+        );
+        assert.deepStrictEqual(yield* runMigrations(), expected);
+        assert.deepStrictEqual(yield* history, migrationManifest);
+        assert.deepStrictEqual(
+          yield* sql`SELECT created_at FROM effect_sql_migrations WHERE migration_id = 103`,
+          [{ created_at: "2026-11-18 00:00:00" }],
+        );
+        assert.deepStrictEqual(yield* sql`SELECT revision FROM project_teamwork`, [
+          { revision: 12 },
+        ]);
+        assert.deepStrictEqual(yield* sql`SELECT id FROM project_crew_conversations`, [
+          { id: "worker-1" },
+        ]);
+        assert.deepStrictEqual(yield* sql`SELECT sequence FROM project_crew_event_cursor`, [
+          { sequence: 65 },
+        ]);
+        yield* sql`INSERT INTO issue_tracker_bindings (project_id, tracker, scope, updated_at)
+          VALUES ('project-1', 'linear', 'team', '2026-11-21')`;
+        assert.deepStrictEqual(yield* runMigrations(), []);
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("adds Crew tables to a database migrated by upstream", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 102 });
+      yield* sql`INSERT INTO issue_tracker_bindings (project_id, tracker, scope, updated_at)
+        VALUES ('project-1', 'linear', 'team', '2026-11-21')`;
+
+      assert.deepStrictEqual(
+        yield* runMigrations(),
+        migrationManifest.filter(([id]) => id >= 103),
+      );
+      assert.deepStrictEqual(yield* history, migrationManifest);
+      assert.deepStrictEqual(yield* sql`SELECT project_id FROM issue_tracker_bindings`, [
+        { project_id: "project-1" },
+      ]);
+      assert.deepStrictEqual(yield* sql`SELECT * FROM project_teamwork`, []);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
   it.effect("refuses to start when another migration took a V2 id", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
