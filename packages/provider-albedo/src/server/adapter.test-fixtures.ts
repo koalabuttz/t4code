@@ -176,33 +176,26 @@ export const fakeDaemon = Effect.gen(function* () {
       }
       return receipt;
     }),
-    readCompaction: (sessionId, actionId) =>
-      Effect.suspend(() => {
-        compactionReads.push({ sessionId, actionId });
-        if (compactionExpired) {
-          return Effect.fail(
-            new AlbedoHttpError({
-              operation: "session.compaction.read",
-              status: 410,
-              code: "identity_expired",
-            }),
-          );
-        }
-        if (loseCompactionRead) {
-          loseCompactionRead = false;
-          return Effect.fail(
-            new AlbedoTransportError({
-              operation: "session.compaction.read",
-              cause: "Daemon unavailable after compaction",
-            }),
-          );
-        }
-        return Effect.succeed(
-          compactionSessions.get(actionId) === sessionId
-            ? compactionReceipt(sessionId, actionId)
-            : null,
-        );
-      }),
+    readCompaction: Effect.fn("AlbedoFixture.readCompaction")(function* (sessionId, actionId) {
+      compactionReads.push({ sessionId, actionId });
+      if (compactionExpired) {
+        return yield* new AlbedoHttpError({
+          operation: "session.compaction.read",
+          status: 410,
+          code: "identity_expired",
+        });
+      }
+      if (loseCompactionRead) {
+        loseCompactionRead = false;
+        return yield* new AlbedoTransportError({
+          operation: "session.compaction.read",
+          cause: "Daemon unavailable after compaction",
+        });
+      }
+      return compactionSessions.get(actionId) === sessionId
+        ? compactionReceipt(sessionId, actionId)
+        : null;
+    }),
     server: {
       instance_id: "daemon-test",
       protocol: 4,

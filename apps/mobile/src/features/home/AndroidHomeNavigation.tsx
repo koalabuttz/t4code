@@ -1,4 +1,4 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { LegendList } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -22,12 +22,13 @@ import { NavigationRow } from "../../components/ui/NavigationRow";
 import { scopedProjectKey, scopedThreadKey } from "../../lib/scopedEntities";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 import type { AndroidHomeView } from "../../persistence/mobile-preferences";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
 import { serverEnvironment } from "../../state/server";
 import {
   readCrewProjectFootprint,
   type CrewProjectFootprint,
 } from "../../state/crew-project-footprints";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { workspaceConnections } from "../../state/workspace";
 import { WorkspaceListHeader } from "../layout/workspace/WorkspaceListHeader";
 import { openCrewPage } from "../threads/crewProjectNavigation";
@@ -49,7 +50,7 @@ export function useAndroidHomeNavigation(
 ) {
   const enabled = Platform.OS === "android";
   const preferences = useAtomValue(mobilePreferencesAtom);
-  const save = useAtomSet(updateMobilePreferencesAtom);
+  const save = useAtomCommand(saveMobilePreferences);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const view =
     enabled && AsyncResult.isSuccess(preferences)
@@ -144,7 +145,7 @@ export function useAndroidHomeNavigation(
     closeDrawer: () => setDrawerOpen(false),
     setView: (next: AndroidHomeView) => {
       setDrawerOpen(false);
-      if (view !== next) save({ androidHomeView: next });
+      if (enabled) void save({ androidHomeView: next });
     },
     isProjectChat: (thread: EnvironmentThreadShell) =>
       coordinators.get(scopedProjectKey(thread.environmentId, thread.projectId)) === thread.id,

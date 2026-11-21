@@ -904,8 +904,9 @@ export const makeAdapter = Effect.fn("AlbedoAdapter.make")(function* (options: {
               (cause) => cause._tag !== "AlbedoHttpError" || cause.status >= 500,
               () =>
                 read.pipe(
-                  Effect.flatMap((known) =>
-                    known === null ? put.pipe(Effect.mapError(unresolved)) : Effect.succeed(known),
+                  Effect.filterOrElse(
+                    (known) => known !== null,
+                    () => put.pipe(Effect.mapError(unresolved)),
                   ),
                 ),
             ),

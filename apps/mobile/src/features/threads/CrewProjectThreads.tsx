@@ -1,7 +1,7 @@
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { useIsFocused, useNavigation } from "@react-navigation/native";
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from "@effect/atom-react";
 import { scopedProjectKey } from "@t3tools/client-runtime/environment";
 import { crewScrollOffset, isCrewCoordinatorCandidate } from "@t3tools/client-runtime/state/crew";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
@@ -28,10 +28,11 @@ import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useContentBottomInset, useSearchToolbarInset } from "../../components/ui/useBarInset";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
 import { threadListEnvironmentsAtom } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentScope } from "../../state/session";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { useQueuedThreadKeys } from "../../state/use-thread-outbox";
 import { ThreadUndoNotice } from "../home/ThreadUndoNotice";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
@@ -116,7 +117,7 @@ export function CrewProjectThreads({
   const canRead = useEnvironmentScope(environmentId, AuthOrchestrationReadScope);
   const { search, cursor, requestCursor } = filters;
   const preferences = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const preferencesLoaded = AsyncResult.isSuccess(preferences);
   const collapsedGroups = preferencesLoaded
     ? preferences.value.collapsedCrewThreadGroups
@@ -126,7 +127,7 @@ export function CrewProjectThreads({
   const toggleGroup = (title: CrewSection["title"]) => {
     if (!preferencesLoaded) return;
     const key = collapseKey(title);
-    savePreferences({
+    void savePreferences({
       transform: (current) => {
         const groups = current.collapsedCrewThreadGroups ?? [];
         return {

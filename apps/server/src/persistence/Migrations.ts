@@ -116,6 +116,14 @@ import CrewConversations from "./Migrations/105_CrewConversations.ts";
 import CrewVisibleMessageIndexes from "./Migrations/106_CrewVisibleMessageIndexes.ts";
 
 const legacyCrewMigrationStart = 97;
+const upstreamCrewOverlap = [
+  [97, "IssueTrackerBindings", Migration0097],
+  [98, "ActiveShellIndexIndexes", Migration0098],
+  [99, "BackgroundRecoveryIndexes", Migration0099],
+  [100, "TurnStartReadIndexes", Migration0100],
+  [101, "DelegatedTaskReadIndexes", Migration0101],
+  [102, "ThreadItemCounts", Migration0102],
+] as const;
 const crewMigrationEntries = [
   [103, "ProjectTeamwork", ProjectTeamwork],
   [104, "CrewArchive", CrewArchive],
@@ -221,12 +229,7 @@ const migrationEntries = [
   [94, "TurnItemMessageOrdinalIndex", Migration0094],
   [95, "TurnItemInlineWorkOutput", Migration0095],
   [96, "RepairStaleTitleRegeneration", Migration0096],
-  [97, "IssueTrackerBindings", Migration0097],
-  [98, "ActiveShellIndexIndexes", Migration0098],
-  [99, "BackgroundRecoveryIndexes", Migration0099],
-  [100, "TurnStartReadIndexes", Migration0100],
-  [101, "DelegatedTaskReadIndexes", Migration0101],
-  [102, "ThreadItemCounts", Migration0102],
+  ...upstreamCrewOverlap,
   ...crewMigrationEntries,
 ] as const;
 
@@ -287,10 +290,6 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
 });
 
 type MigrationRow = { readonly id: number; readonly name: string };
-
-const upstreamCrewOverlap = migrationEntries.filter(
-  ([id]) => id >= legacyCrewMigrationStart && id < crewMigrationEntries[0][0],
-);
 
 function legacyCrewTail(history: ReadonlyArray<MigrationRow>) {
   const tail = history.filter(({ id }) => id >= legacyCrewMigrationStart);
