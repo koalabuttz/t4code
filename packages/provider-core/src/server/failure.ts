@@ -141,6 +141,7 @@ function curatedCauseMessages(cause: unknown): {
         case "CodexGoalObjectiveTooLongError":
         case "ProviderSetupError":
         case "ProviderAdapterThreadInUseError":
+        case "ProviderAdapterThreadReattachError":
         case "ProviderCompactionUnsupportedError":
           return { known: stringField(cause, "message"), category: categoryMessage() };
         case "CodexAppServerRequestError": {

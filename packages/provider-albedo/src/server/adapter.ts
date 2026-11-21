@@ -773,10 +773,11 @@ export const makeAdapter = Effect.fn("AlbedoAdapter.make")(function* (options: {
             return yield* failure(
               "This conversation belongs to another Albedo home. Reconnect to its original daemon",
             );
+          const connection = existing === null ? client : yield* options.connect;
           const selected =
             existing === null
               ? yield* Models.resolve(input.modelSelection).pipe(
-                  Effect.provideService(AlbedoClient, client),
+                  Effect.provideService(AlbedoClient, connection),
                 )
               : null;
           const binding =
@@ -798,8 +799,8 @@ export const makeAdapter = Effect.fn("AlbedoAdapter.make")(function* (options: {
             input.existingProviderThread.nativeThreadRef.nativeId !== binding.creation.sessionId
           )
             return yield* failure("The saved Albedo session does not match this provider thread");
-          yield* client.createSession(binding.creation);
-          const native = yield* client.readSession(binding.creation.sessionId);
+          yield* connection.createSession(binding.creation);
+          const native = yield* connection.readSession(binding.creation.sessionId);
           if (native.workspace !== input.runtimePolicy.cwd)
             return yield* failure(
               "Albedo's workspace differs from the requested workspace. Rebind it before executing this assignment",
@@ -828,6 +829,7 @@ export const makeAdapter = Effect.fn("AlbedoAdapter.make")(function* (options: {
           snapshot = native;
           yield* observe(native);
           if (watcher !== null) yield* Fiber.interrupt(watcher);
+          client = connection;
           cursor = undefined;
           nativeConversation = yield* NativeConversation.make({
             nativeId: native.id,
@@ -1212,7 +1214,17 @@ export const makeAdapter = Effect.fn("AlbedoAdapter.make")(function* (options: {
             existingProviderThread: input.providerThread,
             modelSelection: input.modelSelection ?? open.modelSelection,
             runtimePolicy: input.runtimePolicy ?? open.runtimePolicy,
-          }),
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new Adapter.ProviderAdapterThreadReattachError({
+                  driver,
+                  providerThreadId: input.providerThread.id,
+                  detail: isProtocolError(cause) ? cause.detail : cause.message,
+                  cause,
+                }),
+            ),
+          ),
         startTurn: start,
         compactThread: (input) => start(input, undefined, true),
         resumeTurn: (input) => start(Adapter.resumeTurnInput(input), input.unsubmittedMessage),

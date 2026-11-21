@@ -268,6 +268,21 @@ export class ProviderAdapterResumeThreadError extends Schema.TaggedError<Provide
   }
 }
 
+/** Reattach to the existing native thread after resolving the reported error. */
+export class ProviderAdapterThreadReattachError extends Schema.TaggedError<ProviderAdapterThreadReattachError>()(
+  "ProviderAdapterThreadReattachError",
+  {
+    driver: ProviderDriverKind,
+    providerThreadId: ProviderThreadId,
+    detail: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 /**
  * The native thread is live in another process that owns its writes. Starting
  * a replacement would split the conversation, so callers must not fall back.
@@ -509,6 +524,7 @@ export const ProviderAdapterV2Error = Schema.Union([
   ProviderAdapterOpenSessionError,
   ProviderAdapterCloseSessionError,
   ProviderAdapterResumeThreadError,
+  ProviderAdapterThreadReattachError,
   ProviderAdapterThreadInUseError,
   ProviderAdapterEnsureThreadError,
   ProviderAdapterReadThreadSnapshotError,

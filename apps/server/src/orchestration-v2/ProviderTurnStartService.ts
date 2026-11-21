@@ -1742,11 +1742,11 @@ export const layer: Layer.Layer<
         resumedHandoffContext = undefined;
         resumedRetryHandoff = undefined;
         if (!(yield* isCurrentAttemptInStatus("starting"))) return undefined;
-        // Another client is still writing to the native thread. A fresh
-        // session here would silently split the conversation from it.
+        // A live writer or durable session binding still owns the native thread.
         if (
           resumed._tag === "Failure" &&
-          resumed.failure._tag === "ProviderAdapterThreadInUseError"
+          (resumed.failure._tag === "ProviderAdapterThreadInUseError" ||
+            resumed.failure._tag === "ProviderAdapterThreadReattachError")
         ) {
           return yield* loadFromProvider(Effect.fail(resumed.failure));
         }
