@@ -25,6 +25,21 @@ import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 
 export type HomeProjectSortOrder = Exclude<SidebarProjectSortOrder, "manual">;
 
+export function regularHomeThreads(
+  threads: readonly EnvironmentThreadShell[],
+  coordinators: ReadonlyMap<string, string>,
+  search: string,
+) {
+  if (coordinators.size === 0 || search.trim() !== "") return threads;
+  return threads.filter(
+    (thread) =>
+      coordinators.get(scopedProjectKey(thread.environmentId, thread.projectId)) !== thread.id ||
+      thread.hasPendingApprovals ||
+      thread.hasPendingUserInput ||
+      thread.hasActionableProposedPlan,
+  );
+}
+
 export interface HomeProjectScope {
   readonly key: string;
   readonly title: string;

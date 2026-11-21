@@ -294,7 +294,7 @@ export function derivePendingThreadRequests(
 export function createQuestionHistoryProjector<
   Row extends ThreadStructureVisibleTurnItem =
     OrchestrationV2ThreadProjection["visibleTurnItems"][number],
->() {
+>(includeRow?: (row: Row) => boolean) {
   type Rows = ReadonlyArray<Row>;
   type Requests = OrchestrationV2ThreadProjection["runtimeRequests"];
   let previousRows: Rows | undefined;
@@ -302,7 +302,8 @@ export function createQuestionHistoryProjector<
   let previousResult: Rows | undefined;
   let byId = new Map<RuntimeRequestId, Requests[number]>();
   const cache = new WeakMap<Row, { request: Requests[number]; row: Row }>();
-  const projectRow = (row: Row): Row => {
+  const projectRow = (row: Row): Row | null => {
+    if (includeRow && !includeRow(row)) return null;
     const item = row.item;
     if (item.type !== "user_input_request" || item.questionAnswer) return row;
     const request = byId.get(item.requestId);
@@ -333,7 +334,7 @@ export function createQuestionHistoryProjector<
     for (const [index, row] of rows.entries()) {
       const next = projectRow(row);
       if (next !== row) result ??= rows.slice(0, index);
-      result?.push(next);
+      if (next !== null) result?.push(next);
     }
     return result ?? rows;
   };

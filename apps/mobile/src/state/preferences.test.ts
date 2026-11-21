@@ -26,7 +26,9 @@ vi.mock("../lib/runtime", async () => {
 });
 
 import { createMobilePreferencesState } from "./preferences";
+import { MobileDatabase } from "../persistence/mobile-database";
 import * as MobilePreferences from "../persistence/mobile-preferences";
+import { MobileSecureStorage } from "../persistence/mobile-secure-storage";
 
 function deferred<A>() {
   let resolve!: (value: A) => void;
@@ -60,6 +62,32 @@ function makePreferencesState(
 }
 
 describe("mobile preferences state", () => {
+  it.effect("restores Crew thread group choices alongside ordinary project groups", () => {
+    const collapsedCrewThreadGroups = [
+      JSON.stringify(["desktop", "project", "Resolved"]),
+      JSON.stringify(["laptop", "project", "Waiting"]),
+    ];
+    const collapsedProjectGroups = ["desktop:project"];
+    const database = Layer.mock(MobileDatabase, {
+      loadPreferencesJson: Effect.succeedSome({
+        payload: JSON.stringify({
+          collapsedCrewThreadGroups: [...collapsedCrewThreadGroups, null],
+          collapsedProjectGroups,
+        }),
+        updatedAt: 1,
+      }),
+    });
+    const secureStorage = Layer.mock(MobileSecureStorage, { getItem: () => Effect.succeed(null) });
+    return Effect.gen(function* () {
+      const store = yield* MobilePreferences.MobilePreferencesStore;
+      expect(yield* store.load).toEqual({ collapsedCrewThreadGroups, collapsedProjectGroups });
+    }).pipe(
+      Effect.provide(
+        MobilePreferences.layer.pipe(Layer.provide(Layer.merge(database, secureStorage))),
+      ),
+    );
+  });
+
   it.effect("preserves an optimistic patch when the initial load finishes later", () =>
     Effect.gen(function* () {
       const pendingLoad = deferred<MobilePreferences.Preferences>();

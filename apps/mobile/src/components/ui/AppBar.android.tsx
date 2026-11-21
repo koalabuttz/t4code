@@ -121,6 +121,7 @@ function AppBarView(props: AppBarProps & { readonly searchState?: SearchState })
       <WorkspaceAppBar
         title={props.title}
         titleContent={props.titleContent}
+        leading={props.leading}
         search={
           search
             ? {

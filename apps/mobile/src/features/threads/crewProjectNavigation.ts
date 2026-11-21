@@ -1,4 +1,4 @@
-import { StackActions, type NavigationProp } from "@react-navigation/native";
+import { CommonActions, StackActions, type NavigationProp } from "@react-navigation/native";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { CrewView } from "@t3tools/client-runtime/state/crew";
 import type {
@@ -19,13 +19,25 @@ export type CrewPage =
   | "task"
   | "task-edit"
   | "milestones";
-export type CrewProjectPage =
-  | CrewPage
-  | "threads"
-  | "results"
-  | "project-settings"
-  | "advanced"
-  | "exchange";
+export const CREW_PROJECT_TABS = [
+  { value: "threads", label: "Threads" },
+  { value: "results", label: "Results" },
+  { value: "project-settings", label: "Settings" },
+] as const;
+export type CrewProjectTab = (typeof CREW_PROJECT_TABS)[number]["value"];
+export type CrewProjectPage = CrewPage | CrewProjectTab | "advanced" | "exchange";
+
+export function isCrewProjectTab(page: CrewProjectPage | undefined): page is CrewProjectTab {
+  return CREW_PROJECT_TABS.some((tab) => tab.value === page);
+}
+
+export function selectCrewProjectTab(
+  navigation: Pick<NavigationProp<ReactNavigation.RootParamList>, "dispatch">,
+  routeKey: string,
+  tab: CrewProjectTab,
+) {
+  navigation.dispatch({ ...CommonActions.setParams({ page: tab }), source: routeKey });
+}
 type CrewNavigation = Pick<
   NavigationProp<ReactNavigation.RootParamList>,
   "navigate" | "dispatch"

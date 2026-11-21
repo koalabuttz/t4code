@@ -7,6 +7,7 @@ import {
   MessageId,
   NodeId,
   RunId,
+  ThreadId,
   TurnItemId,
   type OrchestrationV2Checkpoint,
   type OrchestrationV2ConversationMessage,
@@ -237,6 +238,64 @@ describe("quietThreadAtom", () => {
 
 describe("timelineVisibleTurnItemsAtom", () => {
   const ref = { environmentId: EnvironmentId.make("environment-1"), threadId: v2ThreadId };
+
+  it("hides legacy Crew forwards while keeping ordinary messages and consultation returns", () => {
+    const forward = {
+      ...assistant,
+      type: "user_message",
+      createdBy: "agent",
+      creationSource: "server",
+      senderThreadId: ThreadId.make("worker"),
+      messageId: MessageId.make("crew:project:attention:attention:20"),
+      inputIntent: "turn_start",
+      text: 'Crew attention attention:20: user-message. Source: {"messageId":"source"}\nFix clipping',
+      attachments: [],
+    } as const satisfies OrchestrationV2TurnItem;
+    const items = [
+      forward,
+      {
+        ...forward,
+        id: TurnItemId.make("item-user"),
+        messageId: MessageId.make("message-user"),
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+      },
+      {
+        ...forward,
+        id: TurnItemId.make("item-consultation"),
+        messageId: MessageId.make("crew:project:consultation:return"),
+        text: "Crew consultation layout answered. From worker.",
+      },
+      { ...assistant, id: TurnItemId.make("item-reply") },
+    ];
+    const stateAtom = Atom.make(
+      AsyncResult.success({
+        ...EMPTY_ENVIRONMENT_THREAD_STATE,
+        data: Option.some<OrchestrationV2ThreadProjection>({
+          ...v2Projection,
+          turnItems: items,
+          visibleTurnItems: items.map((item, index) => ({
+            position: index,
+            visibility: "local",
+            sourceThreadId: v2ThreadId,
+            sourceItemId: item.id,
+            item,
+          })),
+        }),
+      }),
+    );
+    const details = createEnvironmentThreadDetailAtoms(() => stateAtom);
+    const registry = AtomRegistry.make();
+    for (const atom of [
+      details.visibleTurnItemsAtom(ref),
+      details.quietVisibleTurnItemsAtom(ref),
+    ]) {
+      expect(registry.get(atom).map((row) => row.item.id)).toEqual(
+        items.slice(1).map((item) => item.id),
+      );
+    }
+    registry.dispose();
+  });
 
   it("holds through streamed assistant text while the message reads its own text", () => {
     const stateAtom = Atom.make(

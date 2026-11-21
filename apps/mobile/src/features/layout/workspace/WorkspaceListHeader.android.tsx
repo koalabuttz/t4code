@@ -3,6 +3,7 @@ import { useNavigation, useNavigationState } from "@react-navigation/native";
 import { BackHandler, Keyboard } from "react-native";
 
 import { AppBar } from "../../../components/ui/AppBar";
+import { AndroidHeaderIconButton } from "../../../components/ui/AndroidScreenHeader.android";
 import { useWorkspaceConnectionState } from "../../../state/workspace";
 import { useHardwareKeyboardCommand } from "../../keyboard/hardwareKeyboardCommands";
 import { WorkspaceBrandTitle } from "./WorkspaceBrandTitle";
@@ -58,12 +59,23 @@ export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
 
   return (
     <AppBar
-      title="T3 Code"
+      title={props.title ?? "T3 Code"}
+      leading={
+        props.onOpenNavigation ? (
+          <AndroidHeaderIconButton
+            accessibilityLabel="Open workspace navigation"
+            icon="line.3.horizontal"
+            onPress={props.onOpenNavigation}
+          />
+        ) : undefined
+      }
       titleContent={
-        <WorkspaceBrandTitle
-          accessibilityLabel={props.accessibilityLabel}
-          onOpenEnvironments={props.onOpenEnvironments}
-        />
+        props.title === undefined ? (
+          <WorkspaceBrandTitle
+            accessibilityLabel={props.accessibilityLabel}
+            onOpenEnvironments={props.onOpenEnvironments}
+          />
+        ) : undefined
       }
       search={{
         value: search.value,
@@ -75,7 +87,7 @@ export function WorkspaceListHeader(props: WorkspaceListHeaderProps) {
         onClose: closeSearch,
       }}
       menus={
-        connectionState.hasConnections
+        connectionState.hasConnections && props.filter.items.length > 0
           ? [
               {
                 title: "Filter threads",

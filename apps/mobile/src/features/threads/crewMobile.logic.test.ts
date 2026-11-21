@@ -336,6 +336,75 @@ describe("mobile Crew source adaptation", () => {
       ),
     ).toBe(true);
   });
+
+  it("keeps a resolved workstream in Resolved when the live shell omits its idle worker", () => {
+    const initial = data();
+    const scope = {
+      environmentId: EnvironmentId.make("environment-test"),
+      projectId: initial.snapshot.projectId,
+    };
+    const conversation = { ...scope, threadId: worker };
+    const settled = { ...initial.snapshot, tasks: [task({ status: "done" })] };
+    const input = {
+      scope,
+      workstreams: [
+        {
+          conversation,
+          title: "Android",
+          status: "resolved" as const,
+          linkedAt: "2026-11-17T00:00:00Z",
+          updatedAt: "2026-11-17T00:00:00Z",
+        },
+      ],
+      links: [{ workstream: conversation, taskId: "work", initiativeId: "one" }],
+      threads: [],
+      supervision: mobileCrewSupervision({ ...initial, snapshot: settled }, [], "current"),
+      freshness: "current" as const,
+      search: "",
+    };
+    const section = (groups: ReturnType<typeof mobileCrewWorkstreamGroups>) =>
+      groups.find((group) => group.rows.length > 0)?.title;
+    expect(section(mobileCrewWorkstreamGroups(input))).toBe("Resolved");
+    const search = mobileCrewWorkstreamGroups({
+      ...input,
+      search: "Andriod",
+      workstreams: [
+        ...input.workstreams,
+        {
+          ...input.workstreams[0]!,
+          title: "Andriod",
+          conversation: { ...conversation, environmentId: EnvironmentId.make("other") },
+        },
+        {
+          ...input.workstreams[0]!,
+          title: "Andriod",
+          status: "unlinked",
+          conversation: { ...conversation, threadId: ThreadId.make("unlinked") },
+        },
+      ],
+    });
+    expect(search.flatMap((group) => group.rows.map((row) => row.workstream.conversation))).toEqual(
+      [conversation],
+    );
+    expect(section(mobileCrewWorkstreamGroups({ ...input, freshness: "disconnected" }))).toBe(
+      "Needs you",
+    );
+    const failedStop = {
+      id: "stop",
+      kind: "stop" as const,
+      status: "failed" as const,
+      threadId: worker,
+      taskId: "work",
+      initiativeId: "one",
+    };
+    const supervision = mobileCrewSupervision(
+      { ...initial, snapshot: settled, deliveries: [failedStop] },
+      [],
+      "current",
+    );
+    expect(section(mobileCrewWorkstreamGroups({ ...input, supervision }))).toBe("Needs you");
+  });
+
   it("clears only an unchanged saved quiet note and preserves in-flight edits or unconfirmed sends", () => {
     const submitted = { text: "Original note", recipients: [worker], intent: "note" as const };
     expect(mobileCrewDraftAfterSave(submitted, submitted, true)).toEqual({

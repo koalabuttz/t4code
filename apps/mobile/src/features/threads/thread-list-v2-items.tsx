@@ -177,26 +177,6 @@ function ThreadListV2Duration(props: {
   );
 }
 
-const CARD_MENU_ACTIONS: MenuAction[] = [
-  { id: "settle", title: "Settle", image: "checkmark" },
-  { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
-];
-
-const SLIM_MENU_ACTIONS: MenuAction[] = [
-  { id: "unsettle", title: "Un-settle", image: "arrow.uturn.backward" },
-  { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
-];
-
-const SNOOZED_MENU_ACTIONS: MenuAction[] = [
-  { id: "unsnooze", title: "Wake thread", image: "clock" },
-  { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
-];
-
-const LEGACY_MENU_ACTIONS: MenuAction[] = [
-  { id: "archive", title: "Archive", image: "archivebox" },
-  { id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } },
-];
-
 function ThreadListV2Section(props: {
   readonly label: string;
   readonly pane?: "screen" | "sidebar";
@@ -274,12 +254,97 @@ function ThreadListV2Section(props: {
   );
 }
 
-const ThreadListV2SectionDivider = memo(function ThreadListV2SectionDivider(props: {
+export const ThreadListV2SectionDivider = memo(function ThreadListV2SectionDivider(props: {
   readonly label: string;
   readonly pane?: "screen" | "sidebar";
 }) {
   return <ThreadListV2Section {...props} />;
 });
+
+export function ThreadListV2CollapsibleSection({
+  label,
+  count,
+  expanded,
+  searching,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  expanded: boolean;
+  searching: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <ThreadListV2Section
+      label={expanded ? label : `${label} (${count})`}
+      disclosure={{
+        expanded,
+        disabled: searching,
+        onToggle,
+        accessibilityLabel: `${label}, ${count} ${count === 1 ? "thread" : "threads"}`,
+        accessibilityHint: searching
+          ? "Shows matching threads while searching."
+          : expanded
+            ? "Collapses this group."
+            : "Expands this group.",
+      }}
+    />
+  );
+}
+
+interface ThreadListV2AdditionalAction {
+  readonly item: MenuAction;
+  readonly onPress: () => void;
+}
+
+export function ThreadListV2FallbackRow(props: {
+  readonly title: string;
+  readonly detail: string;
+  readonly onPress?: (() => void) | undefined;
+  readonly additionalAction?: ThreadListV2AdditionalAction | undefined;
+}) {
+  const appearance = getThreadListV2RowAppearance(useUniwindTheme(), false, false);
+  const label = `${props.title}, ${props.detail}`;
+  const row = (
+    <RowPressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      className={appearance.className}
+      disabled={props.onPress === undefined}
+      interactionClassName={appearance.interactionClassName}
+      interactionOpacity={appearance.interactionOpacity}
+      onPress={props.onPress}
+      style={appearance.cardStyle}
+    >
+      <View className={cn(THREAD_LIST_V2_ROW_CONTENT_CLASS_NAME, "gap-0.5")}>
+        <Text
+          className={cn("text-base font-t3-medium", appearance.foregroundClassName)}
+          numberOfLines={2}
+        >
+          {props.title}
+        </Text>
+        <Text className={cn("text-xs", appearance.tertiaryForegroundClassName)} numberOfLines={2}>
+          {props.detail}
+        </Text>
+      </View>
+    </RowPressable>
+  );
+  const action = props.additionalAction;
+  return action ? (
+    <Menu
+      accessibilityLabel={label}
+      actions={[action.item]}
+      onPressAction={({ nativeEvent }) => {
+        if (nativeEvent.event === action.item.id) action.onPress();
+      }}
+      shouldOpenOnLongPress
+    >
+      {row}
+    </Menu>
+  ) : (
+    row
+  );
+}
 
 type ThreadListV2ShelfHeaderProps = {
   readonly count: number;
@@ -668,21 +733,26 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly pane?: "screen" | "sidebar";
   readonly showTrailingDivider?: boolean;
   readonly selected?: boolean;
+  readonly selectionDisabled?: boolean;
+  readonly mutationsDisabled?: boolean;
+  readonly statusDetail?: string;
+  readonly additionalAction?: ThreadListV2AdditionalAction | undefined;
+  readonly allowProjectPromotion?: boolean;
   readonly fullSwipeWidth?: number;
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
   readonly onOpenThreadPullRequests: (
     thread: EnvironmentThreadShell,
     pr: ThreadPrPresentation,
   ) => void;
-  readonly onDeleteThread: (thread: EnvironmentThreadShell) => void;
-  readonly onNewThreadOnBranch: (thread: EnvironmentThreadShell) => void;
+  readonly onDeleteThread?: (thread: EnvironmentThreadShell) => void;
+  readonly onNewThreadOnBranch?: (thread: EnvironmentThreadShell) => void;
   readonly onRenameThread: (thread: EnvironmentThreadShell) => void;
   readonly onRegenerateThreadTitle: (thread: EnvironmentThreadShell) => void;
   readonly onSettleThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly onSnoozeThread: (thread: EnvironmentThreadShell, snoozedUntil: string) => void;
   readonly onUnsnoozeThread: (thread: EnvironmentThreadShell) => void;
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void;
-  readonly onArchiveThread: (thread: EnvironmentThreadShell) => void;
+  readonly onArchiveThread?: (thread: EnvironmentThreadShell) => void;
   readonly onPinThread: (thread: EnvironmentThreadShell) => void;
   readonly onUnpinThread: (thread: EnvironmentThreadShell) => void;
   readonly onSetThreadAutoSettle: (thread: EnvironmentThreadShell, enabled: boolean) => void;
@@ -785,7 +855,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const recede = shouldRecedeThreadRow({ status, selected });
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const timeLabel = props.timeLabel;
-  const rowAccessibilityLabel = threadListV2RowAccessibilityLabel({
+  const threadAccessibilityLabel = threadListV2RowAccessibilityLabel({
     title: thread.title,
     variant,
     woke: showsWoke,
@@ -798,16 +868,28 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     hasQueuedMessages: props.hasQueuedMessages === true,
     regeneratingTitle: isRegeneratingTitle,
   });
+  const rowAccessibilityLabel = props.statusDetail
+    ? `${threadAccessibilityLabel}, ${props.statusDetail}`
+    : threadAccessibilityLabel;
 
+  const hasOperateScope = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
+  const canOperateThread = hasOperateScope && !props.mutationsDisabled;
   const visitThread = useAtomCommand(threadEnvironment.visit, { reportFailure: false });
   const markThreadUnread = useAtomCommand(threadEnvironment.markUnread, { reportFailure: false });
   const handleAcknowledgeWoke = useCallback(() => {
-    if (props.wokeAt === null) return;
+    if (props.wokeAt === null || props.mutationsDisabled || props.selectionDisabled) return;
     void visitThread({
       environmentId: thread.environmentId,
       input: { threadId: thread.id, visitedAt: props.wokeAt },
     });
-  }, [props.wokeAt, thread.environmentId, thread.id, visitThread]);
+  }, [
+    props.mutationsDisabled,
+    props.selectionDisabled,
+    props.wokeAt,
+    thread.environmentId,
+    thread.id,
+    visitThread,
+  ]);
   // VoiceOver cannot focus buttons inside the accessible row.
   const rowAccessibilityActions = useMemo(
     () => [
@@ -817,9 +899,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [prBadgeLabel, showsWoke],
   );
 
-  const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
+  const handleDelete = useCallback(() => onDeleteThread?.(thread), [onDeleteThread, thread]);
   const handleRename = useCallback(() => onRenameThread(thread), [onRenameThread, thread]);
-  const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   const handleRegenerateTitle = useCallback(
     () => onRegenerateThreadTitle(thread),
     [onRegenerateThreadTitle, thread],
@@ -847,7 +928,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
   const handleMoveUp = useCallback(() => onMoveThread?.(thread, "up"), [onMoveThread, thread]);
   const handleMoveDown = useCallback(() => onMoveThread?.(thread, "down"), [onMoveThread, thread]);
-  const handleArchive = useCallback(() => onArchiveThread(thread), [onArchiveThread, thread]);
+  const handleArchive = useCallback(() => onArchiveThread?.(thread), [onArchiveThread, thread]);
 
   const canUnsettle = variant === "slim";
   // The gate's only time-dependent edge is the queued-turn grace window, so its
@@ -865,6 +946,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     snoozeSupported: props.snoozeSupported,
     snoozable: canSnooze(thread, { now: snoozeGateNow }),
     snoozed: snoozedRow,
+    archiveAllowed: onArchiveThread !== undefined,
   });
   const snoozePresets = resolveThreadListV2SnoozePresets({
     secondary: swipeActions.secondary,
@@ -939,7 +1021,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         : [],
     [props.autoSettleOptOutSupported, thread.autoSettleDisabledAt],
   );
-  const canTurnIntoProject = canTurnThreadIntoProject(thread);
+  const canTurnIntoProject =
+    props.allowProjectPromotion !== false && canTurnThreadIntoProject(thread);
   const titleMenuItems = useMemo<MenuAction[]>(
     () => [
       { id: "rename", title: "Rename", image: "square.and.pencil" },
@@ -963,8 +1046,19 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   );
   const menuActions = useMemo<MenuAction[]>(() => {
     const nested = Platform.OS === "ios";
+    const archive: MenuAction[] = onArchiveThread
+      ? [{ id: "archive", title: "Archive", image: "archivebox" }]
+      : [];
+    const deleteAction: MenuAction[] = onDeleteThread
+      ? [{ id: "delete", title: "Delete", image: "trash", attributes: { destructive: true } }]
+      : [];
+    const snooze: MenuAction[] =
+      swipeActions.secondary === "snooze"
+        ? [{ id: "snooze", title: "Snooze", image: "clock", subactions: snoozePresetActions }]
+        : [];
     const direct: MenuAction[] = [
-      ...(thread.branch
+      ...(props.additionalAction ? [props.additionalAction.item] : []),
+      ...(thread.branch && onNewThreadOnBranch
         ? [
             {
               id: "new-thread-on-branch",
@@ -979,64 +1073,47 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     if (snoozedRow) {
       return layoutThreadListV2RowMenuActions({
         nested,
-        direct: [...direct, SNOOZED_MENU_ACTIONS[0]!],
+        direct: [...direct, { id: "unsnooze", title: "Wake thread", image: "clock" }],
         reorder: [],
         pin: [],
-        secondary: [
-          ...titleMenuItems,
-          ...autoSettleMenuItems,
-          LEGACY_MENU_ACTIONS[0]!,
-          SNOOZED_MENU_ACTIONS[1]!,
-        ],
+        secondary: [...titleMenuItems, ...autoSettleMenuItems, ...archive, ...deleteAction],
       });
     }
     if (!props.settlementSupported) {
       return layoutThreadListV2RowMenuActions({
         nested,
-        direct: [...direct, LEGACY_MENU_ACTIONS[0]!],
+        direct: [...direct, ...(onArchiveThread ? archive : snooze)],
         reorder: reorderMenuItems,
         pin: pinMenuItems,
-        secondary: [...titleMenuItems, LEGACY_MENU_ACTIONS[1]!],
+        secondary: [...titleMenuItems, ...deleteAction],
       });
     }
     if (canUnsettle) {
       return layoutThreadListV2RowMenuActions({
         nested,
-        direct: [...direct, SLIM_MENU_ACTIONS[0]!],
+        direct: [...direct, { id: "unsettle", title: "Un-settle", image: "arrow.uturn.backward" }],
         reorder: reorderMenuItems.filter(
           (action) => action.id !== "move-up" && action.id !== "move-down",
         ),
         pin: pinMenuItems,
-        secondary: [
-          ...titleMenuItems,
-          ...autoSettleMenuItems,
-          LEGACY_MENU_ACTIONS[0]!,
-          SLIM_MENU_ACTIONS[1]!,
-        ],
+        secondary: [...titleMenuItems, ...autoSettleMenuItems, ...archive, ...deleteAction],
       });
     }
     return layoutThreadListV2RowMenuActions({
       nested,
-      direct: [
-        ...direct,
-        CARD_MENU_ACTIONS[0]!,
-        ...(swipeActions.secondary === "snooze"
-          ? [{ id: "snooze", title: "Snooze", image: "clock", subactions: snoozePresetActions }]
-          : []),
-      ],
+      direct: [...direct, { id: "settle", title: "Settle", image: "checkmark" }, ...snooze],
       reorder: reorderMenuItems,
       pin: pinMenuItems,
-      secondary: [
-        ...titleMenuItems,
-        ...autoSettleMenuItems,
-        LEGACY_MENU_ACTIONS[0]!,
-        CARD_MENU_ACTIONS[1]!,
-      ],
+      secondary: [...titleMenuItems, ...autoSettleMenuItems, ...archive, ...deleteAction],
     });
   }, [
     autoSettleMenuItems,
     canUnsettle,
+    onArchiveThread,
+    onDeleteThread,
+    onNewThreadOnBranch,
     pinMenuItems,
+    props.additionalAction,
     props.settlementSupported,
     reorderMenuItems,
     snoozePresetActions,
@@ -1047,7 +1124,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   ]);
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {
-      if (nativeEvent.event === "new-thread-on-branch") onNewThreadOnBranch(thread);
+      if (!canOperateThread || props.selectionDisabled) return;
+      if (props.additionalAction?.item.id === nativeEvent.event) {
+        props.additionalAction.onPress();
+        return;
+      }
+      if (nativeEvent.event === "new-thread-on-branch") onNewThreadOnBranch?.(thread);
       if (nativeEvent.event === "settle") handleSettle();
       if (nativeEvent.event === "unsettle") handleUnsettle();
       if (nativeEvent.event === "unsnooze") handleUnsnooze();
@@ -1061,7 +1143,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "archive") handleArchive();
       if (nativeEvent.event === "rename") handleRename();
       if (nativeEvent.event === "regenerate-title") handleRegenerateTitle();
-      if (nativeEvent.event === "turn-into-project") void turnThreadIntoProject(thread);
+      if (nativeEvent.event === "turn-into-project" && canTurnIntoProject)
+        void turnThreadIntoProject(thread);
       if (nativeEvent.event === "mark-unread") {
         void markThreadUnread({
           environmentId: thread.environmentId,
@@ -1101,6 +1184,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       }
     },
     [
+      canOperateThread,
+      canTurnIntoProject,
+      props.additionalAction,
+      props.selectionDisabled,
       onNewThreadOnBranch,
       thread,
       handleArchive,
@@ -1123,6 +1210,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ],
   );
   const primaryAction = useMemo(() => {
+    if (swipeActions.primary === null) return null;
     if (swipeActions.primary === "archive") {
       return {
         accessibilityLabel: `Archive ${thread.title}`,
@@ -1177,11 +1265,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         : null,
     [handleMenuAction, snoozePresetActions, swipeActions.secondary, thread.title],
   );
-  const swipeAccessibilityHint = !canOperateThread
-    ? "Opens the thread"
-    : secondaryAction === null
-      ? `Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`
-      : `Opens the thread. Swipe left for ${primaryAction.label.toLowerCase()} and snooze actions.`;
+  const swipeAccessibilityHint =
+    !canOperateThread || primaryAction === null
+      ? "Opens the thread"
+      : secondaryAction === null
+        ? `Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`
+        : `Opens the thread. Swipe left for ${primaryAction.label.toLowerCase()} and snooze actions.`;
 
   const titleTextInset = props.project ? projectIconSize + 8 : 0;
   const cardContent = (
@@ -1237,6 +1326,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               className="-m-2.5 flex-row items-center gap-1 p-2.5"
               accessibilityRole="button"
               accessibilityLabel="Dismiss Woke notification"
+              disabled={props.mutationsDisabled || props.selectionDisabled}
               onPress={handleAcknowledgeWoke}
               onLongPress={() => undefined}
               style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
@@ -1334,6 +1424,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             numberOfLines={1}
           >
             {thread.runtime.lastError}
+          </Text>
+        ) : props.statusDetail ? (
+          <Text
+            className={cn("flex-1 text-xs", rowAppearance.tertiaryForegroundClassName)}
+            numberOfLines={1}
+          >
+            {props.statusDetail}
           </Text>
         ) : props.environmentLabel ? (
           <View className="min-w-0 flex-1 flex-row items-center gap-1">
@@ -1461,7 +1558,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         accessibilityHint={swipeAccessibilityHint}
         accessibilityLabel={rowAccessibilityLabel}
         accessibilityRole="button"
-        accessibilityState={{ selected }}
+        accessibilityState={{ selected, disabled: props.selectionDisabled }}
+        disabled={props.selectionDisabled}
         accessibilityActions={rowAccessibilityActions}
         onAccessibilityAction={(event) => {
           if (event.nativeEvent.actionName === "openPullRequests") handleOpenPullRequests();
@@ -1492,7 +1590,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         accessibilityHint={swipeAccessibilityHint}
         accessibilityLabel={rowAccessibilityLabel}
         accessibilityRole="button"
-        accessibilityState={{ selected }}
+        accessibilityState={{ selected, disabled: props.selectionDisabled }}
+        disabled={props.selectionDisabled}
         className={rowAppearance.className}
         onPress={() => {
           close();
@@ -1532,7 +1631,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             >
               {thread.title}
             </Text>
-            {providerNameLabel ? (
+            {props.statusDetail || providerNameLabel ? (
               <Text
                 className={cn(
                   "text-xs",
@@ -1543,7 +1642,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
                 ellipsizeMode="middle"
                 numberOfLines={1}
               >
-                {providerNameLabel}
+                {props.statusDetail ?? providerNameLabel}
               </Text>
             ) : null}
             {props.searchMatch ? (
@@ -1575,44 +1674,50 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </RowPressable>
     );
 
-  if (!canOperateThread)
+  if (!canOperateThread || props.selectionDisabled)
     return <View style={rowAppearance.swipeContainerStyle}>{rowContent(() => {})}</View>;
+
+  const menu = (close: () => void) => (
+    <Menu
+      accessibilityLabel={rowAccessibilityLabel}
+      actions={menuActions}
+      onPressAction={handleMenuAction}
+      shouldOpenOnLongPress
+    >
+      {rowContent(close)}
+    </Menu>
+  );
 
   return (
     <View collapsable={false}>
       {customSnoozeOpen && (
         <CustomSnoozeSheet onClose={() => setCustomSnoozeOpen(false)} onSnooze={handleSnooze} />
       )}
-      <ThreadSwipeable
-        dormant={dormant}
-        threadKey={`${thread.environmentId}:${thread.id}`}
-        backgroundColor={rowAppearance.swipeBackgroundColor}
-        compactActions={variant === "slim"}
-        containerStyle={rowAppearance.swipeContainerStyle}
-        enableTrackpadSwipe
-        fullSwipeAction="primary"
-        fullSwipeWidth={props.fullSwipeWidth ?? windowWidth - 32}
-        listAnimatesLayout
-        onDelete={handleDelete}
-        onSwipeableClose={props.onSwipeableClose}
-        onSwipeableWillOpen={props.onSwipeableWillOpen}
-        primaryAction={primaryAction}
-        secondaryAction={secondaryAction}
-        resetKey={`${thread.environmentId}:${thread.id}:${variant}:${snoozedRow}:${thread.settledAt}:${thread.unsettledAt}:${thread.snoozedUntil}:${thread.pinnedAt}`}
-        simultaneousWith={props.simultaneousSwipeGesture}
-        threadTitle={thread.title}
-      >
-        {(close) => (
-          <Menu
-            accessibilityLabel={rowAccessibilityLabel}
-            actions={menuActions}
-            onPressAction={handleMenuAction}
-            shouldOpenOnLongPress
-          >
-            {rowContent(close)}
-          </Menu>
-        )}
-      </ThreadSwipeable>
+      {primaryAction === null ? (
+        <View style={rowAppearance.swipeContainerStyle}>{menu(() => {})}</View>
+      ) : (
+        <ThreadSwipeable
+          dormant={dormant}
+          threadKey={`${thread.environmentId}:${thread.id}`}
+          backgroundColor={rowAppearance.swipeBackgroundColor}
+          compactActions={variant === "slim"}
+          containerStyle={rowAppearance.swipeContainerStyle}
+          enableTrackpadSwipe
+          fullSwipeAction="primary"
+          fullSwipeWidth={props.fullSwipeWidth ?? windowWidth - 32}
+          listAnimatesLayout
+          onDelete={handleDelete}
+          onSwipeableClose={props.onSwipeableClose}
+          onSwipeableWillOpen={props.onSwipeableWillOpen}
+          primaryAction={primaryAction}
+          secondaryAction={secondaryAction}
+          resetKey={`${thread.environmentId}:${thread.id}:${variant}:${snoozedRow}:${thread.settledAt}:${thread.unsettledAt}:${thread.snoozedUntil}:${thread.pinnedAt}`}
+          simultaneousWith={props.simultaneousSwipeGesture}
+          threadTitle={thread.title}
+        >
+          {menu}
+        </ThreadSwipeable>
+      )}
     </View>
   );
 });

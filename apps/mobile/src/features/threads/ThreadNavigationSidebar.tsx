@@ -14,6 +14,7 @@ import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-searc
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { THREAD_LIST_ROW_LAYOUT } from "./threadListAnimations";
 import { useAtomValue } from "@effect/atom-react";
+import { useNavigation } from "@react-navigation/native";
 import { useMemo, useRef, useState } from "react";
 import { Platform, StyleSheet, View } from "react-native";
 import { GestureDetector, useNativeGesture } from "react-native-gesture-handler";
@@ -45,13 +46,22 @@ import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { requestThreadMessageJump } from "./threadMessageJump";
 import { useThreadListSearchMatches } from "./useThreadListSearchMatches";
 import { useHomeListOptions } from "../home/home-list-options";
-import { useProjectListSelection } from "../home/use-project-list-selection";
+import {
+  useProjectListSelection,
+  useWorkspaceProjectSelection,
+} from "../home/use-project-list-selection";
+import {
+  AndroidHomeDrawer,
+  AndroidCrewProjectsView,
+  useAndroidHomeNavigation,
+} from "../home/AndroidHomeNavigation";
 import {
   buildHomeListFilterMenuItems,
   homeListFilterEnvironments,
 } from "../home/home-list-filter-menu";
 import {
   buildHomeProjectScopes,
+  regularHomeThreads,
   resolveHomeProjectFilterScope,
   sortHomeProjectScopes,
 } from "../home/homeThreadList";
@@ -128,7 +138,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const insets = useSafeAreaInsets();
   const { fabClearance, fabSize } = useAndroidControlSizing();
   const projects = useProjects();
-  const threads = useAtomValue(steadyNavigationThreadShellsAtom);
+  const allThreads = useAtomValue(steadyNavigationThreadShellsAtom);
+  const androidHome = useAndroidHomeNavigation(projects, props.visible);
+  const navigation = useNavigation();
+  const threads = useMemo(
+    () => regularHomeThreads(allThreads, androidHome.coordinators, props.searchQuery),
+    [allThreads, androidHome.coordinators, props.searchQuery],
+  );
   const selectedThreadKey = useSidebarRowThreadKey(props.selectedThreadKey);
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
@@ -183,6 +199,17 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       }),
     [projects, options.selectedEnvironmentId, options.projectGroupingMode],
   );
+  const navigationScopes = useMemo(
+    () =>
+      Platform.OS === "android" && options.selectedEnvironmentId !== null
+        ? buildHomeProjectScopes({
+            projects,
+            environmentId: null,
+            projectGroupingMode: options.projectGroupingMode,
+          })
+        : projectScopes,
+    [options.projectGroupingMode, options.selectedEnvironmentId, projectScopes, projects],
+  );
   const projectFilterOptions = pickableProjectGroups(
     sortHomeProjectScopes({
       scopes: projectScopes,
@@ -195,6 +222,11 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     label: scope.title,
   }));
   const selectProject = useProjectListSelection(projectScopes, setSelectedProjectKey);
+  const openProject = useWorkspaceProjectSelection(navigationScopes, (key, scope) => {
+    if (scope) setSelectedEnvironmentId(scope.environmentId);
+    setSelectedProjectKey(key);
+    androidHome.setView("threads");
+  });
   const projectTitleByProjectKey = useMemo(
     () =>
       new Map(
@@ -533,6 +565,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
   const header = (
     <WorkspaceListHeader
       accessibilityLabel="T3 Code, Threads"
+      {...(Platform.OS === "android" ? { onOpenNavigation: androidHome.openDrawer } : {})}
       onOpenEnvironments={props.onOpenEnvironmentSettings}
       onOpenSettings={props.onOpenSettings}
       search={{
@@ -643,6 +676,37 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
     );
   }
 
+  const drawer = props.visible ? (
+    <AndroidHomeDrawer
+      navigation={androidHome}
+      scopes={navigationScopes}
+      threads={allThreads}
+      onOpenProject={openProject}
+      onOpenThread={props.onSelectThread}
+    />
+  ) : null;
+  if (androidHome.view === "projects") {
+    return (
+      <>
+        <AndroidCrewProjectsView
+          navigation={androidHome}
+          scopes={navigationScopes}
+          onAddProject={() =>
+            navigation.navigate(
+              "AddProject",
+              options.selectedEnvironmentId
+                ? { environmentId: options.selectedEnvironmentId }
+                : undefined,
+            )
+          }
+          onOpenEnvironments={props.onOpenEnvironmentSettings}
+          canAddProject={catalogState.hasReadyEnvironment}
+        />
+        {drawer}
+      </>
+    );
+  }
+
   // Android: the bar floats below the list.
   return (
     <View testID="thread-navigation-sidebar" className="flex-1 bg-header">
@@ -694,6 +758,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
       </View>
       {header}
       <ThreadUndoNotice visible={props.visible} />
+      {drawer}
     </View>
   );
 }

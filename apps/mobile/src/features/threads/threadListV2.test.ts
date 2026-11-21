@@ -278,6 +278,27 @@ describe("threadListV2RowAccessibilityLabel", () => {
 });
 
 describe("resolveThreadListV2SwipeActions", () => {
+  it("omits the legacy archive swipe when the list does not offer archive", () => {
+    const capabilities = {
+      variant: "card",
+      settlementSupported: false,
+      snoozeSupported: false,
+      snoozable: true,
+    } as const;
+    expect(resolveThreadListV2SwipeActions(capabilities).primary).toBe("archive");
+    expect(resolveThreadListV2SwipeActions({ ...capabilities, archiveAllowed: false })).toEqual({
+      primary: null,
+      secondary: null,
+    });
+    expect(
+      resolveThreadListV2SwipeActions({
+        ...capabilities,
+        archiveAllowed: false,
+        settlementSupported: true,
+      }).primary,
+    ).toBe("settle");
+  });
+
   it("offers snooze for a presented input request and moves it onto the snoozed shelf", () => {
     const raw = makeRawThreadShell({
       pendingRuntimeRequest: {

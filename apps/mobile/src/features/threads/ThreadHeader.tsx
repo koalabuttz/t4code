@@ -31,9 +31,9 @@ export function ThreadHeader(props: {
 }) {
   const navigation = useNavigation();
   const chat = useCrewChat();
-  const goBack = useWorkspaceBackNavigation(
-    chat?.route.coordinator === true || chat?.route.source === true,
-  );
+  const crewSource = chat?.route.source === true;
+  const preserveStack = crewSource || chat?.route.coordinator === true;
+  const goBack = useWorkspaceBackNavigation(preserveStack);
   const { toggleAuxiliaryPane, startNewTask } = useAdaptiveWorkspaceLayout();
   const { panes } = useWorkspacePaneState();
   const gitMenu = useThreadGitMenuDefinition(props.gitControls);
@@ -52,14 +52,14 @@ export function ThreadHeader(props: {
       ]
     : [];
   const menus = [gitMenu, terminalMenu].filter((menu): menu is AppBarMenu => menu !== null);
-  if (chat) {
-    if (chat.route.source)
-      actions.push({
-        accessibilityLabel: "Return to origin",
-        icon: "chevron.left",
-        onPress: goBack,
-      });
-    else if (!chat.route.coordinator)
+  if (chat?.route.coordinator) {
+    actions.push({
+      accessibilityLabel: "Project threads",
+      icon: "person.2",
+      onPress: () => chat.go("threads"),
+    });
+  } else if (chat) {
+    if (!crewSource)
       actions.push({
         accessibilityLabel: "Project chat",
         icon: "person.2",
@@ -69,30 +69,11 @@ export function ThreadHeader(props: {
       title: "Project conversations",
       icon: "person.2",
       items: [
-        ...(!chat.route.coordinator
-          ? [{ id: "chat", title: "Project chat", onPress: () => chat.go() }]
-          : []),
+        { id: "chat", title: "Project chat", onPress: () => chat.go() },
         { id: "threads", title: "Threads", onPress: () => chat.go("threads") },
         { id: "results", title: "Results", onPress: () => chat.go("results") },
         { id: "settings", title: "Settings", onPress: () => chat.go("project-settings") },
         { id: "memory", title: "Save a project note", onPress: () => chat.go("knowledge") },
-        ...(chat.route.coordinator
-          ? [
-              {
-                id: "pause",
-                title: chat.stop
-                  ? "Stop recovery"
-                  : chat.actionInitiative?.status === "active"
-                    ? "Pause work"
-                    : "Plan and recovery",
-                onPress: chat.pauseOrRecover,
-                disabled:
-                  chat.actionInitiative?.status === "active" &&
-                  !chat.stop &&
-                  !chat.controls.canEdit,
-              },
-            ]
-          : []),
       ],
     });
   } else if (props.teamwork)
@@ -118,8 +99,8 @@ export function ThreadHeader(props: {
             ? `${chat.route.projectTitle} · ${props.subtitle}`
             : props.subtitle
       }
-      onBack={chat?.route.source || chat?.route.coordinator ? goBack : undefined}
-      onBackToList={chat?.route.source || chat?.route.coordinator ? undefined : goBack}
+      onBack={preserveStack ? goBack : undefined}
+      onBackToList={preserveStack ? undefined : goBack}
       onCompose={props.draft ? undefined : startNewTask}
       backInSplitView={
         props.onReturnToThread
@@ -128,7 +109,9 @@ export function ThreadHeader(props: {
               icon: "chevron.left",
               onPress: props.onReturnToThread,
             }
-          : undefined
+          : crewSource
+            ? { accessibilityLabel: "Back", icon: "chevron.left" }
+            : undefined
       }
       actions={actions}
       menus={menus}

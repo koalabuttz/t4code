@@ -1,7 +1,6 @@
 import { useNavigation } from "@react-navigation/native";
 import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@t3tools/contracts";
 import {
-  isCrewCoordinatorCandidate,
   crewSelectedInitiative,
   crewSelectedTask,
   crewScrollOffset,
@@ -14,65 +13,25 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { canLinkCrewWorkstream, sameCrewProject } from "@t3tools/shared/crewConversation";
+import { sameCrewProject } from "@t3tools/shared/crewConversation";
 import { useRef, useState, type ReactNode } from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText, AppTextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
-import { useBarOverlap } from "../../components/ui/useBarInset";
+import { ListActionRow } from "../../components/ui/ListActionRow";
+import { ListRow } from "../../components/ui/ListRow";
+import { ListRowLayout } from "../../components/ui/ListRowLayout";
+import { ListSection } from "../../components/ui/ListSection";
+import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { openCrewPage, openCrewSource, type CrewProjectPage } from "./crewProjectNavigation";
-import { mobileCrewWorkstreamGroups } from "./crewMobile.logic";
-import {
-  useCrewCollection,
-  useCrewControls,
-  useCrewHumanAttention,
-  useCrewProject,
-} from "./use-crew-project";
+import { openCrewPage, openCrewSource } from "./crewProjectNavigation";
+import { useCrewCollection, useCrewProject, useCrewRead } from "./use-crew-project";
 import type { CrewMessageRef } from "@t3tools/contracts/crewConversation";
-
-export function CrewProjectDestinations({
-  scope,
-  page,
-}: {
-  scope: CrewProjectScope;
-  page?: CrewProjectPage | undefined;
-}) {
-  const navigation = useNavigation();
-  const overlap = useBarOverlap();
-  return (
-    <View
-      className="flex-row flex-wrap items-center gap-2 border-b border-border px-4 pb-2 pt-2"
-      style={{ marginTop: overlap }}
-    >
-      {(
-        [
-          [undefined, "Chat"],
-          ["threads", "Threads"],
-          ["results", "Results"],
-          ["project-settings", "Settings"],
-        ] as const
-      ).map(([target, label]) => {
-        const selected = (page === "overview" ? undefined : page) === target;
-        return (
-          <Button
-            key={label}
-            label={label}
-            size="compact"
-            tone={selected ? "primary" : "secondary"}
-            disabled={selected}
-            onPress={() => openCrewPage(navigation, scope, target)}
-          />
-        );
-      })}
-    </View>
-  );
-}
 
 function CrewPageScroll({
   scope,
@@ -88,12 +47,17 @@ function CrewPageScroll({
   const [initial] = useState(() => appAtomRegistry.get(atom));
   const scroll = useRef<React.ElementRef<typeof ScrollView>>(null);
   const restored = useRef(initial === 0);
+  const settingsPage = page === "project-settings" || page === "advanced" || page === "results";
+  const PageScrollView = settingsPage ? ScreenScrollView : ScrollView;
   return (
-    <ScrollView
+    <PageScrollView
       ref={scroll}
-      className="flex-1"
+      className={settingsPage ? "flex-1 ios:bg-sheet" : "flex-1"}
       contentContainerClassName="gap-4 px-5 pt-4"
-      contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{
+        paddingBottom: settingsPage ? Math.max(insets.bottom, 18) + 18 : insets.bottom + 24,
+      }}
+      showsVerticalScrollIndicator={!settingsPage}
       keyboardShouldPersistTaps="handled"
       scrollEventThrottle={100}
       onScroll={(event) => {
@@ -108,7 +72,7 @@ function CrewPageScroll({
       }}
     >
       {children}
-    </ScrollView>
+    </PageScrollView>
   );
 }
 
@@ -119,54 +83,84 @@ export function CrewProjectPages({
 }: {
   scope: CrewProjectScope;
   project: EnvironmentProject;
-  page: "threads" | "results" | "project-settings" | "advanced";
+  page: "results" | "project-settings" | "advanced";
 }) {
   const navigation = useNavigation();
+  const recovery = useCrewRead(page === "advanced" ? scope : null);
   return (
     <CrewPageScroll scope={scope} page={page}>
-      {page === "threads" ? (
-        <WorkstreamList scope={scope} />
-      ) : page === "results" ? (
+      {page === "results" ? (
         <ProjectResults scope={scope} />
       ) : page === "project-settings" ? (
         <>
-          <AppText className="text-lg font-t3-semibold" accessibilityRole="header">
-            Project
-          </AppText>
           <ProjectDetails scope={scope} project={project} />
-          <Button
-            label="Crew and permissions"
-            onPress={() => openCrewPage(navigation, scope, "settings")}
-          />
-          <Button
-            label="Memory and context"
-            onPress={() => openCrewPage(navigation, scope, "knowledge")}
-          />
-          <Button label="Advanced" onPress={() => openCrewPage(navigation, scope, "advanced")} />
+          <ListSection title="Crew">
+            <ListRow
+              icon="person.2"
+              label="Crew and permissions"
+              onPress={() => openCrewPage(navigation, scope, "settings")}
+            />
+            <ListRow
+              icon="doc.text"
+              label="Memory and context"
+              onPress={() => openCrewPage(navigation, scope, "knowledge")}
+            />
+            <ListRow
+              icon="gearshape"
+              label="Advanced"
+              onPress={() => openCrewPage(navigation, scope, "advanced")}
+            />
+          </ListSection>
         </>
       ) : (
         <>
-          <Button
-            label="Inter-thread board"
-            onPress={() => openCrewPage(navigation, scope, "board")}
-          />
-          <Button
-            label="Received context"
-            onPress={() => openCrewPage(navigation, scope, "context")}
-          />
-          <Button
-            label="Execution history"
-            onPress={() => openCrewPage(navigation, scope, "history")}
-          />
-          <Button
-            label="Recovery and handover"
-            onPress={() => openCrewPage(navigation, scope, "recovery")}
-          />
-          <Button label="Roles" onPress={() => openCrewPage(navigation, scope, "roles")} />
-          <Button
-            label="Initiatives and approval"
-            onPress={() => openCrewPage(navigation, scope, "settings")}
-          />
+          <ListSection title="Conversations">
+            <ListRow
+              icon="text.bubble"
+              label="Inter-thread board"
+              onPress={() => openCrewPage(navigation, scope, "board")}
+            />
+            <ListRow
+              icon="doc.text"
+              label="Received context"
+              onPress={() => openCrewPage(navigation, scope, "context")}
+            />
+          </ListSection>
+          <ListSection title="Activity">
+            <ListRow
+              icon="clock"
+              label="Execution history"
+              onPress={() => openCrewPage(navigation, scope, "history")}
+            />
+            <ListRow
+              icon="arrow.clockwise"
+              label="Recovery and handover"
+              onPress={() => {
+                const initiatives = recovery.data?.snapshot.initiatives;
+                const initiative =
+                  initiatives?.findLast((entry) => entry.status === "active") ??
+                  initiatives?.findLast((entry) => entry.status === "paused");
+                if (initiative)
+                  appAtomRegistry.set(
+                    crewSelectedInitiative(scopedProjectKey(scope)),
+                    initiative.id,
+                  );
+                openCrewPage(navigation, scope, "recovery");
+              }}
+            />
+          </ListSection>
+          <ListSection title="Management">
+            <ListRow
+              icon="person.2"
+              label="Roles"
+              onPress={() => openCrewPage(navigation, scope, "roles")}
+            />
+            <ListRow
+              icon="checkmark.circle"
+              label="Initiatives and approval"
+              onPress={() => openCrewPage(navigation, scope, "settings")}
+            />
+          </ListSection>
         </>
       )}
     </CrewPageScroll>
@@ -291,253 +285,86 @@ function ProjectDetails({
   const [title, setTitle] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const nextTitle = title?.trim() ?? "";
+  const canRename = canEdit && freshness === "current";
+  const canSave = canRename && !busy && nextTitle.length > 0 && nextTitle !== project.title;
   const initiative = snapshot?.initiatives.findLast(
     (item) => item.status === "active" || item.status === "paused" || item.status === "draft",
   );
+  const saveName = () => {
+    if (!canSave) return;
+    setBusy(true);
+    setError(null);
+    void update({
+      environmentId: scope.environmentId,
+      input: { projectId: scope.projectId, title: nextTitle },
+    })
+      .then((result) => {
+        if (result._tag === "Success") setTitle(null);
+        else if (!isAtomCommandInterrupted(result)) {
+          const failure = squashAtomCommandFailure(result);
+          setError(failure instanceof Error ? failure.message : "Could not rename the project.");
+        }
+      })
+      .finally(() => setBusy(false));
+  };
   return (
-    <View className="gap-3">
-      <AppText>{project.title}</AppText>
-      <AppText selectable>{project.workspaceRoot}</AppText>
-      {initiative && <AppText numberOfLines={4}>{initiative.brief}</AppText>}
-      {error && <AppText accessibilityRole="alert">{error}</AppText>}
+    <ListSection title="Project details">
       {title === null ? (
-        <Button
+        <ListActionRow
+          icon="pencil"
           label="Rename project"
-          disabled={!canEdit || freshness !== "current"}
+          description={project.title}
+          disabled={!canRename}
           onPress={() => setTitle(project.title)}
         />
       ) : (
-        <>
+        <View className="gap-3 p-4">
+          <AppText className="text-sm font-t3-medium text-foreground-muted">Name</AppText>
           <AppTextInput
+            accessibilityLabel="Project name"
+            className="min-h-11 min-w-0 rounded-xl border-continuous bg-card px-3 text-base text-foreground"
             value={title}
             onChangeText={setTitle}
+            returnKeyType="done"
             editable={!busy}
-            accessibilityLabel="Project name"
-            className="rounded-xl border border-border p-3"
           />
           <View className="flex-row flex-wrap gap-2">
-            <Button
-              label="Save name"
-              disabled={
-                !canEdit ||
-                freshness !== "current" ||
-                !title.trim() ||
-                title.trim() === project.title
-              }
-              loading={busy}
-              onPress={() => {
-                setBusy(true);
-                setError(null);
-                void update({
-                  environmentId: scope.environmentId,
-                  input: { projectId: scope.projectId, title: title.trim() },
-                })
-                  .then((result) => {
-                    if (result._tag === "Success") setTitle(null);
-                    else if (!isAtomCommandInterrupted(result)) {
-                      const failure = squashAtomCommandFailure(result);
-                      setError(
-                        failure instanceof Error
-                          ? failure.message
-                          : "Could not rename the project.",
-                      );
-                    }
-                  })
-                  .finally(() => setBusy(false));
-              }}
-            />
+            <Button label="Save name" disabled={!canSave} loading={busy} onPress={saveName} />
             <Button label="Cancel" disabled={busy} onPress={() => setTitle(null)} />
           </View>
-        </>
+        </View>
       )}
-    </View>
-  );
-}
-
-function WorkstreamList({ scope }: { scope: CrewProjectScope }) {
-  const navigation = useNavigation();
-  const { threads, snapshot, freshness, supervision } = useCrewProject(scope);
-  const canRead = useEnvironmentScope(scope.environmentId, AuthOrchestrationReadScope);
-  const [search, setSearch] = useState("");
-  const [linking, setLinking] = useState(false);
-  const [cursor, setCursor] = useState<string>();
-  const [requestCursor, setRequestCursor] = useState<string>();
-  const workstreams = useCrewCollection(scope, {
-    collection: "workstreams",
-    limit: 100,
-    ...(cursor ? { cursor } : {}),
-  });
-  const taskLinks = useCrewCollection(scope, { collection: "task-links", limit: 100 });
-  const attention = useCrewHumanAttention(
-    scope,
-    freshness === "current" ? (snapshot?.coordinatorThreadId ?? null) : null,
-    snapshot?.revision,
-    requestCursor,
-  );
-  const controls = useCrewControls(scope, snapshot?.revision, freshness === "current");
-  const entries = workstreams.data?.workstreams ?? [];
-  const groups = mobileCrewWorkstreamGroups({
-    scope,
-    workstreams: entries,
-    links: taskLinks.data?.taskLinks ?? [],
-    threads,
-    supervision,
-    freshness,
-    search,
-  });
-  const linkable = threads.filter(
-    (thread) =>
-      isCrewCoordinatorCandidate(scope, thread) &&
-      !thread.archivedAt &&
-      canLinkCrewWorkstream(
-        scope,
-        thread.environmentId,
-        thread.source,
-        snapshot?.coordinatorThreadId ?? null,
-      ) &&
-      !entries.some(
-        (entry) => entry.status !== "unlinked" && entry.conversation.threadId === thread.id,
-      ),
-  );
-  return (
-    <>
-      <AppTextInput
-        accessibilityLabel="Search work threads"
-        placeholder="Search work threads"
-        value={search}
-        onChangeText={setSearch}
-        className="rounded-xl border border-border px-3 py-3"
-      />
-      {freshness !== "current" && (
-        <AppText accessibilityRole="alert">
-          Updates are last known. Execution is unconfirmed.
+      {error && (
+        <AppText accessibilityRole="alert" className="px-4 pb-3 text-sm text-danger-foreground">
+          {error}
         </AppText>
       )}
-      {workstreams.error && <AppText accessibilityRole="alert">{workstreams.error}</AppText>}
-      {controls.error && (
-        <AppText accessibilityRole="alert" className="text-danger">
-          {controls.error}
-        </AppText>
-      )}
-      {attention.checking && <AppText>Checking pending requests…</AppText>}
-      {attention.error && (
-        <Button label="Refresh pending requests" size="compact" onPress={attention.refresh} />
-      )}
-      {freshness === "current" &&
-        attention.requests.map((item) => {
-          const pending = item.pendingRequest;
-          const thread = threads.find(
-            (entry) => entry.id === item.source.conversation.threadId && entry.deletedAt === null,
-          );
-          return pending &&
-            item.coordinator.threadId === snapshot?.coordinatorThreadId &&
-            thread ? (
-            <Button
-              key={item.id}
-              size="compact"
-              label={`${item.reason === "approval" ? "Review request" : "Open question"} · ${thread.title}`}
-              onPress={() =>
-                openCrewSource(navigation, scope, item.source.conversation, undefined, pending)
-              }
-            />
-          ) : null;
-        })}
-      {attention.nextCursor && (
-        <Button
-          label="Check next request page"
-          size="compact"
-          onPress={() => setRequestCursor(attention.nextCursor ?? undefined)}
+      <View className="border-t border-border-subtle">
+        <ListRowLayout
+          icon="folder"
+          label="Workspace"
+          meta={
+            <AppText textRole="footnote" className="text-foreground-muted" selectable>
+              {project.workspaceRoot}
+            </AppText>
+          }
         />
-      )}
-      {requestCursor && (
-        <Button
-          label="First request page"
-          size="compact"
-          onPress={() => setRequestCursor(undefined)}
-        />
-      )}
-      {groups.map(
-        ({ title, rows }) =>
-          rows.length > 0 && (
-            <View key={title} className="gap-2">
-              <AppText accessibilityRole="header" className="font-t3-semibold">
-                {title}
+      </View>
+      {initiative && (
+        <View className="border-t border-border-subtle">
+          <ListRowLayout
+            icon="doc.text"
+            label="Project brief"
+            meta={
+              <AppText textRole="footnote" className="text-foreground-muted" numberOfLines={4}>
+                {initiative.brief}
               </AppText>
-              {rows.map(({ workstream, detail, unread }) => (
-                <View
-                  key={workstream.conversation.threadId}
-                  className="gap-2 rounded-xl border border-border p-3"
-                >
-                  <AppText className="font-t3-semibold">
-                    {workstream.title}
-                    {unread ? " · Unread" : ""}
-                  </AppText>
-                  <AppText className="text-foreground-muted">{detail}</AppText>
-                  <View className="flex-row flex-wrap gap-2">
-                    <Button
-                      label="Open thread"
-                      accessibilityLabel={`Open ${workstream.title}`}
-                      size="compact"
-                      disabled={!canRead}
-                      onPress={() => openCrewSource(navigation, scope, workstream.conversation)}
-                    />
-                    <Button
-                      label={workstream.status === "resolved" ? "Reopen" : "Resolve"}
-                      size="compact"
-                      disabled={!controls.canEditConversations}
-                      onPress={() =>
-                        void controls.change({
-                          type: "workstream.status",
-                          threadId: workstream.conversation.threadId,
-                          status: workstream.status === "resolved" ? "open" : "resolved",
-                        })
-                      }
-                    />
-                  </View>
-                </View>
-              ))}
-            </View>
-          ),
-      )}
-      {workstreams.data && groups.every((group) => group.rows.length === 0) && (
-        <AppText>
-          {search
-            ? "No matching work threads."
-            : "Work threads will appear here as the coordinator delegates."}
-        </AppText>
-      )}
-      {workstreams.data?.nextCursor && (
-        <Button
-          label="Next page"
-          onPress={() => setCursor(workstreams.data?.nextCursor ?? undefined)}
-        />
-      )}
-      {cursor && <Button label="First page" onPress={() => setCursor(undefined)} />}
-      <Button
-        label={linking ? "Hide available conversations" : "Link an existing conversation"}
-        onPress={() => setLinking(!linking)}
-      />
-      {linking &&
-        linkable.slice(0, 30).map((thread) => (
-          <Button
-            key={thread.id}
-            label={`Link ${thread.title}`}
-            disabled={!controls.canEditConversations}
-            onPress={() => {
-              void controls
-                .change({
-                  type: "workstream.link",
-                  threadId: thread.id,
-                  title: thread.title.slice(0, 160),
-                })
-                .then((saved) => {
-                  if (saved) setLinking(false);
-                });
-            }}
+            }
           />
-        ))}
-      {linking && linkable.length === 0 && <AppText>No other conversations can be linked.</AppText>}
-    </>
+        </View>
+      )}
+    </ListSection>
   );
 }
 
@@ -569,28 +396,41 @@ function ProjectResults({ scope }: { scope: CrewProjectScope }) {
   const key = scopedProjectKey(scope);
   return (
     <>
-      {query.error && <AppText accessibilityRole="alert">{query.error}</AppText>}
-      {!snapshot ? (
-        <AppText>Loading project results…</AppText>
-      ) : groups.size === 0 ? (
-        <AppText>Submitted results will appear here.</AppText>
-      ) : null}
+      {query.error && (
+        <AppText className="px-4 text-danger-foreground" accessibilityRole="alert">
+          {query.error}
+        </AppText>
+      )}
+      {groups.size === 0 && (
+        <ListSection title="Results">
+          <ListRowLayout
+            icon="doc.text"
+            label={
+              snapshot ? "No results yet" : query.error ? "Results unavailable" : "Loading results…"
+            }
+            {...(snapshot ? { description: "Submitted results will appear here." } : {})}
+          />
+        </ListSection>
+      )}
       {[...groups.entries()].map(([id, group]) => (
-        <View key={id} className="gap-2">
-          <AppText accessibilityRole="header" className="font-t3-semibold">
-            {group.title}
-          </AppText>
-          {group.tasks.map((task) => (
-            <View key={task.id} className="gap-2 rounded-xl border border-border p-3">
-              <AppText className="font-t3-semibold">{task.title}</AppText>
-              <AppText>{crewReviewLabel(task)}</AppText>
-              {task.submission?.evidence && (
-                <AppText numberOfLines={3}>{task.submission.evidence}</AppText>
-              )}
-              <Button
-                label="Open result details"
-                accessibilityLabel={`Open result details for ${task.title}`}
-                size="compact"
+        <ListSection key={id} title={group.title}>
+          {group.tasks.map((task, index) => (
+            <View key={task.id} className={index > 0 ? "border-t border-border-subtle" : undefined}>
+              <ListRow
+                icon="doc.text"
+                label={task.title}
+                description={crewReviewLabel(task)}
+                meta={
+                  task.submission?.evidence ? (
+                    <AppText
+                      textRole="footnote"
+                      className="text-foreground-muted"
+                      numberOfLines={3}
+                    >
+                      {task.submission.evidence}
+                    </AppText>
+                  ) : null
+                }
                 onPress={() => {
                   appAtomRegistry.set(crewSelectedInitiative(key), task.initiativeId);
                   appAtomRegistry.set(crewSelectedTask(key), task.id);
@@ -599,12 +439,15 @@ function ProjectResults({ scope }: { scope: CrewProjectScope }) {
               />
             </View>
           ))}
-        </View>
+        </ListSection>
       ))}
-      <Button
-        label="Integrated milestones"
-        onPress={() => openCrewPage(navigation, scope, "milestones")}
-      />
+      <ListSection>
+        <ListRow
+          icon="checkmark.circle"
+          label="Integrated milestones"
+          onPress={() => openCrewPage(navigation, scope, "milestones")}
+        />
+      </ListSection>
     </>
   );
 }

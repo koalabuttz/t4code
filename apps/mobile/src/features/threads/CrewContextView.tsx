@@ -10,7 +10,10 @@ import { crewHistoryText } from "@t3tools/shared/crewHistory";
 import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { AppText } from "../../components/ui/AppText";
-import { Button } from "../../components/ui/Button";
+import { ListActionRow } from "../../components/ui/ListActionRow";
+import { ListRow } from "../../components/ui/ListRow";
+import { ListRowLayout } from "../../components/ui/ListRowLayout";
+import { ListSection } from "../../components/ui/ListSection";
 
 export function CrewContextView({
   environmentId,
@@ -64,71 +67,101 @@ export function CrewContextView({
   );
   const packet = delivered.data?.context?.packet;
   return (
-    <View className="gap-3">
-      <AppText className="font-t3-semibold">Project context</AppText>
-      <AppText>
-        Corrections affect future packets. Delivered packets remain historical evidence.
-      </AppText>
-      <View className="flex-row flex-wrap gap-2">
-        {members.map((id) => (
-          <Button
-            key={id}
-            label={
-              id === state.coordinatorThreadId
-                ? "Coordinator"
-                : (state.tasks.find((t) => t.ownerThreadId === id)?.title ?? "Worker")
-            }
-            tone={id === threadId ? "primary" : "secondary"}
-            onPress={() => setThreadId(id)}
-          />
-        ))}
-      </View>
-      <Button label="Refresh delivered context" onPress={delivered.refresh} />
-      {delivered.error && <AppText accessibilityRole="alert">{delivered.error}</AppText>}
-      {packet ? (
-        <>
-          <AppText>
-            Delivered at revision {packet.revision} · {packet.bytes} bytes · {packet.omitted}{" "}
-            sources omitted to fit
-          </AppText>
-          <AppText selectable>{packet.text}</AppText>
-          {packet.sources.map((item) => (
-            <View key={`${item.kind}:${item.id}`} className="gap-2">
-              <AppText>
-                {item.title} · {item.reason} · revision {item.revision}
-              </AppText>
-              <Button label="Inspect source" onPress={() => setSource(item)} />
-              {item.threadId && (
-                <Button label="Source conversation" onPress={() => onOpenThread(item.threadId!)} />
-              )}
+    <>
+      {members.length > 0 && (
+        <ListSection title="Conversations">
+          {members.map((id, index) => (
+            <View key={id} className={index > 0 ? "border-t border-border-subtle" : undefined}>
+              <ListRow
+                label={
+                  id === state.coordinatorThreadId
+                    ? "Coordinator"
+                    : (state.tasks.find((t) => t.ownerThreadId === id)?.title ?? "Worker")
+                }
+                icon="text.bubble"
+                selected={id === threadId}
+                onPress={() => setThreadId(id)}
+              />
             </View>
           ))}
-        </>
-      ) : (
-        <AppText>No Crew context delivery is recorded for this conversation yet.</AppText>
+        </ListSection>
       )}
+      <ListSection
+        title="Delivered context"
+        footer="Corrections affect future packets. Delivered packets remain historical evidence."
+      >
+        {packet ? (
+          <ListRowLayout
+            icon="doc.text"
+            label={`Delivered at revision ${packet.revision}`}
+            description={`${packet.bytes} bytes · ${packet.omitted} sources omitted to fit`}
+            meta={<AppText selectable>{packet.text}</AppText>}
+          />
+        ) : (
+          <ListRowLayout label="No Crew context delivery is recorded for this conversation yet." />
+        )}
+        <ListActionRow
+          icon="arrow.clockwise"
+          label="Refresh delivered context"
+          onPress={delivered.refresh}
+        />
+      </ListSection>
+      {delivered.error && (
+        <AppText accessibilityRole="alert" className="px-4 text-danger-foreground">
+          {delivered.error}
+        </AppText>
+      )}
+      {packet?.sources.map((item) => (
+        <ListSection key={`${item.kind}:${item.id}`} title={item.title}>
+          <ListRow
+            icon="doc.text"
+            label="Inspect source"
+            description={`${item.reason} · revision ${item.revision}`}
+            onPress={() => setSource(item)}
+          />
+          {item.threadId && (
+            <ListRow
+              icon="text.bubble"
+              label="Source conversation"
+              onPress={() => onOpenThread(item.threadId!)}
+            />
+          )}
+        </ListSection>
+      ))}
       {source && (
-        <View className="gap-2">
-          <AppText>{source.title} · source history</AppText>
-          {history.error && <AppText accessibilityRole="alert">{history.error}</AppText>}
-          {history.data?.events.map((event) => (
-            <AppText key={event.revision}>
-              Revision {event.revision} · {event.action.type}
-              {"\n"}
-              {crewHistoryText(event.action)}
+        <ListSection title={`${source.title} · source history`}>
+          {history.error && (
+            <AppText accessibilityRole="alert" className="px-4 py-3 text-danger-foreground">
+              {history.error}
             </AppText>
+          )}
+          {history.data?.events.length === 0 && (
+            <ListRowLayout label="No source history recorded" />
+          )}
+          {!history.data && !history.error && <ListRowLayout label="Loading source history…" />}
+          {history.data?.events.map((event) => (
+            <ListRowLayout
+              key={event.revision}
+              label={`Revision ${event.revision} · ${event.action.type}`}
+              description={crewHistoryText(event.action)}
+            />
           ))}
-        </View>
+        </ListSection>
       )}
       {preview && (
-        <>
-          <Button
+        <ListSection title="Coordinator context">
+          <ListActionRow
+            icon="doc.text"
             label={showPreview ? "Hide context preview" : "Preview current coordinator context"}
             onPress={() => setShowPreview(!showPreview)}
           />
-          {showPreview && <AppText selectable>{preview.text}</AppText>}
-        </>
+          {showPreview && (
+            <AppText selectable className="px-4 pb-3">
+              {preview.text}
+            </AppText>
+          )}
+        </ListSection>
       )}
-    </View>
+    </>
   );
 }

@@ -5,7 +5,8 @@ import type {
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildHomeProjectScopes, findHomeProjectScope } from "./homeThreadList";
+import { buildHomeProjectScopes, findHomeProjectScope, regularHomeThreads } from "./homeThreadList";
+import { scopedProjectKey } from "../../lib/scopedEntities";
 import { makeThreadShellFixture } from "../../test-fixtures";
 import { buildThreadListV2Items } from "../threads/threadListV2";
 
@@ -45,6 +46,22 @@ function makeThread(
 }
 
 describe("home project scopes", () => {
+  it("keeps scoped coordinators in Projects while preserving search and requests in Threads", () => {
+    const chat = makeThread({
+      environmentId: EnvironmentId.make("local"),
+      projectId: ProjectId.make("app"),
+      id: ThreadId.make("coordinator"),
+      title: "App coordinator",
+    });
+    const regular = { ...chat, id: ThreadId.make("regular"), title: "Fix a test" };
+    const other = { ...chat, environmentId: EnvironmentId.make("remote") };
+    const index = new Map([[scopedProjectKey(chat.environmentId, chat.projectId), chat.id]]);
+    expect(regularHomeThreads([chat, regular, other], index, "")).toEqual([regular, other]);
+    expect(regularHomeThreads([chat], index, "coordinator")).toEqual([chat]);
+    const needsApproval = { ...chat, hasPendingApprovals: true };
+    expect(regularHomeThreads([needsApproval], index, "")).toEqual([needsApproval]);
+  });
+
   it("filters threads across both scratch hosts while retaining the selected environment boundary", () => {
     const localEnvironmentId = EnvironmentId.make("local");
     const remoteEnvironmentId = EnvironmentId.make("remote");

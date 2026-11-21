@@ -86,6 +86,17 @@ type TurnItem = OrchestrationV2ThreadProjection["turnItems"][number];
 type VisibleTurnItem = OrchestrationV2ThreadProjection["visibleTurnItems"][number];
 type AppThread = OrchestrationV2ThreadProjection["thread"];
 
+function showTimelineRow({ item }: ThreadStructureVisibleTurnItem): boolean {
+  return !(
+    item.type === "user_message" &&
+    item.messageId.startsWith("crew:") &&
+    item.createdBy === "agent" &&
+    item.creationSource === "server" &&
+    item.senderThreadId !== undefined &&
+    /^Crew attention attention:\d+: user-message\. Source: \{/.test(item.text)
+  );
+}
+
 // Items are stripped once each: unchanged items keep their identity across
 // structure changes, which the incremental timeline relies on.
 const structureTurnItems = new WeakMap<TurnItem, ThreadStructureTurnItem>();
@@ -355,7 +366,7 @@ export function createEnvironmentThreadDetailAtoms<E>(
 
   // Presentation only: the projection keeps every row for other readers.
   const visibleTurnItemsAtomFamily = Atom.family((key: string) => {
-    const projectQuestionHistory = createQuestionHistoryProjector();
+    const projectQuestionHistory = createQuestionHistoryProjector<VisibleTurnItem>(showTimelineRow);
     let previousRows: OrchestrationV2ThreadProjection["visibleTurnItems"] | null = null;
     let previousNotice: UsageLimitNoticeRows | null = null;
     let previous = EMPTY_VISIBLE_TURN_ITEMS;
@@ -374,7 +385,8 @@ export function createEnvironmentThreadDetailAtoms<E>(
   });
 
   const quietVisibleTurnItemsAtomFamily = Atom.family((key: string) => {
-    const projectQuestionHistory = createQuestionHistoryProjector<ThreadStructureVisibleTurnItem>();
+    const projectQuestionHistory =
+      createQuestionHistoryProjector<ThreadStructureVisibleTurnItem>(showTimelineRow);
     return Atom.make((get) => {
       const thread = get(quietThreadAtomFamily(key));
       return thread === null

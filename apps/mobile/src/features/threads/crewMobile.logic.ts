@@ -23,12 +23,15 @@ import type {
 } from "@t3tools/contracts/crewConversation";
 import { CrewMessageRef } from "@t3tools/contracts/crewConversation";
 import type { Atom } from "effect/reactivity";
-import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { crewTaskExecution } from "@t3tools/shared/crewExecution";
-import { classifyCrewSupervision } from "@t3tools/shared/crewSupervision";
+import {
+  classifyCrewSupervision,
+  isResolvedCrewWorkstreamWithoutShell,
+} from "@t3tools/shared/crewSupervision";
 import { sameCrewConversation, sameCrewProject } from "@t3tools/shared/crewConversation";
+import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@t3tools/shared/paletteSearch";
 
 type MessageDraft = Atom.Type<ReturnType<typeof crewMessageDraft>>;
 type TimelineMetadata = Awaited<ReturnType<typeof readCrewTimelineMetadata>>;
@@ -299,14 +302,13 @@ export function mobileCrewWorkstreamGroups(input: {
   freshness: Parameters<typeof mobileCrewSupervision>[2];
   search: string;
 }) {
-  const search = input.search.trim().toLowerCase();
+  const search = foldSearchQuery(input.search);
   const groups = new Map<
     WorkstreamGroup,
     {
       workstream: CrewWorkstream;
       shell: EnvironmentThreadShell | undefined;
       detail: string;
-      unread: boolean;
     }[]
   >([
     ["Needs you", []],
@@ -331,13 +333,19 @@ export function mobileCrewWorkstreamGroups(input: {
       continue;
     const { threadId } = workstream.conversation;
     const shell = shells.get(threadId);
-    if (search && !`${workstream.title} ${shell?.title ?? ""}`.toLowerCase().includes(search))
-      continue;
     const linked = tasksByWorkstream.get(threadId);
     const facts =
       input.supervision?.items.filter(
         (item) => (item.taskId !== null && linked?.has(item.taskId)) || item.threadId === threadId,
       ) ?? [];
+    const resolvedWithoutShell =
+      !shell &&
+      isResolvedCrewWorkstreamWithoutShell({
+        threadId,
+        status: workstream.status,
+        freshness: input.freshness,
+        items: facts,
+      });
     const needsYou = facts.find(
       (item) =>
         item.attention &&
@@ -357,21 +365,23 @@ export function mobileCrewWorkstreamGroups(input: {
     );
     const active = facts.find((item) => item.underway && item.kind !== "review");
     const waiting = facts.find((item) => item.kind === "review" || item.kind === "dependencies");
-    const group: WorkstreamGroup =
-      input.freshness !== "current" ||
-      !shell ||
-      needsYou ||
-      ["approval", "input", "failed", "unknown", "unavailable", "disconnected"].includes(
-        threadExecution.state,
-      )
+    const group: WorkstreamGroup = resolvedWithoutShell
+      ? "Resolved"
+      : input.freshness !== "current" ||
+          !shell ||
+          needsYou ||
+          ["approval", "input", "failed", "unknown", "unavailable", "disconnected"].includes(
+            threadExecution.state,
+          )
         ? "Needs you"
         : active || ["working", "starting"].includes(threadExecution.state)
           ? "Working"
           : workstream.status === "resolved" && !waiting
             ? "Resolved"
             : "Waiting";
-    const detail =
-      input.freshness !== "current"
+    const detail = resolvedWithoutShell
+      ? "Resolved"
+      : input.freshness !== "current"
         ? "Execution is unconfirmed"
         : !shell
           ? "Open the thread to check its current status"
@@ -385,17 +395,28 @@ export function mobileCrewWorkstreamGroups(input: {
                 : group === "Needs you"
                   ? "Open the thread to check its current request or execution"
                   : "Waiting for a message or assignment"));
-    const lastVisit = shell?.lastVisitedAt;
     groups.get(group)?.push({
       workstream,
       shell,
       detail,
-      unread: Boolean(
-        lastVisit &&
-        shell?.source.latestVisibleMessage &&
-        DateTime.toEpochMillis(shell.source.latestVisibleMessage.updatedAt) > Date.parse(lastVisit),
-      ),
     });
   }
-  return Array.from(groups, ([title, rows]) => ({ title, rows }));
+  const sections = Array.from(groups, ([title, rows]) => ({ title, rows }));
+  if (!search) return sections;
+  const ranked = rankSearchItems(
+    sections.flatMap(({ title, rows }) => rows.map((row) => ({ title, row }))),
+    ({ row }, options) => {
+      const match = (title: string) =>
+        scoreThreadSearch(search, { title, activityAt: null }, 0, { ...options, picks: false });
+      const workstreamMatch = match(row.workstream.title);
+      const shellMatch = row.shell?.title ? match(row.shell.title) : null;
+      return shellMatch && (!workstreamMatch || shellMatch.score > workstreamMatch.score)
+        ? shellMatch
+        : workstreamMatch;
+    },
+  );
+  return sections.map(({ title }) => ({
+    title,
+    rows: ranked.flatMap(({ item }) => (item.title === title ? [item.row] : [])),
+  }));
 }

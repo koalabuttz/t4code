@@ -121,8 +121,9 @@ export function resolveThreadListV2SwipeActions(input: {
   readonly snoozeSupported: boolean;
   readonly snoozable: boolean;
   readonly snoozed?: boolean;
+  readonly archiveAllowed?: boolean;
 }): {
-  readonly primary: Exclude<ThreadListV2SwipeAction, "snooze">;
+  readonly primary: Exclude<ThreadListV2SwipeAction, "snooze"> | null;
   readonly secondary: "snooze" | null;
 } {
   if (input.snoozed === true) {
@@ -132,7 +133,9 @@ export function resolveThreadListV2SwipeActions(input: {
     ? input.variant === "slim"
       ? "unsettle"
       : "settle"
-    : "archive";
+    : input.archiveAllowed === false
+      ? null
+      : "archive";
   return {
     primary,
     secondary: input.snoozeSupported && input.snoozable ? "snooze" : null,

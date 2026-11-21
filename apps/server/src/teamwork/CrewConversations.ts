@@ -723,29 +723,8 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
               });
               break;
             }
-            case "attention.retry": {
-              const current = yield* get(projectId, "attention", action.id, CrewAttention);
-              if (
-                current?.progress.state !== "failed" ||
-                current.progress.deliveryId !== action.previousDeliveryId
-              )
-                return yield* fail("Retry only the exact failed coordinator delivery.");
-              yield* put(projectId, "attention", current.id, current.source.conversation.threadId, {
-                ...current,
-                coordinator: ref(projectId, state.coordinatorThreadId),
-                progress: { state: "queued", deliveryId },
-                updatedAt: now,
-              });
-              yield* outbox(
-                projectId,
-                state.revision + 1,
-                deliveryId,
-                state.coordinatorThreadId,
-                "crew-attention",
-                { id: current.id, actor, limit },
-              );
-              break;
-            }
+            case "attention.retry":
+              return yield* fail("Ask in Project chat to review the work-thread message.");
           }
           return yield* commit(state, input.commandId, actor, actionJson, now);
         }),
@@ -883,15 +862,55 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
         if (active[0]?.status !== "pending") return;
         const storedPayload = yield* decodeDelivery(row.payload_json);
         const state = yield* deps.load(projectId);
-        const consultation =
-          row.kind === "crew-attention"
-            ? null
-            : yield* get(projectId, "consultations", storedPayload.id, CrewConsultation);
-        const attention =
-          row.kind === "crew-attention"
-            ? yield* get(projectId, "attention", storedPayload.id, CrewAttention)
-            : null;
         const now = DateTime.formatIso(yield* DateTime.now);
+        if (row.kind === "crew-attention") {
+          const attention = yield* get(projectId, "attention", storedPayload.id, CrewAttention);
+          const messageId = MessageId.make(row.id);
+          const messages = yield* deps.threads.getMessagesById(row.thread_id, [messageId]);
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              if (messages.has(messageId)) {
+                yield* sql`UPDATE project_teamwork_outbox SET status = 'delivered' WHERE id = ${row.id}`;
+                return;
+              }
+              yield* sql`UPDATE project_teamwork_outbox SET status = 'cancelled' WHERE id = ${row.id}`;
+              if (
+                attention?.progress.state !== "queued" ||
+                attention.progress.deliveryId !== row.id
+              )
+                return;
+              yield* put(
+                projectId,
+                "attention",
+                attention.id,
+                attention.source.conversation.threadId,
+                {
+                  ...attention,
+                  progress: { state: "pending" },
+                  updatedAt: now,
+                },
+              );
+              yield* commit(
+                state,
+                CommandId.make(`${row.id}:result`),
+                null,
+                yield* encodeState({
+                  type: "crew.conversation",
+                  deliveryId: row.id,
+                  status: "cancelled",
+                }),
+                now,
+              );
+            }),
+          );
+          return;
+        }
+        const consultation = yield* get(
+          projectId,
+          "consultations",
+          storedPayload.id,
+          CrewConsultation,
+        );
         if (
           row.kind === "crew-consultation" &&
           consultation?.deliveryId === row.id &&
@@ -962,14 +981,6 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
               const response = yield* canonical(projectId, consultation.progress.exchange.response);
               text = `Crew consultation ${consultation.id} answered. From ${consultation.destination.threadId}. Canonical source: ${yield* encodeState(consultation.progress.exchange.response)}\n${response.text.slice(0, 10000)}`;
               senderThreadId = consultation.destination.threadId;
-            } else if (
-              row.kind === "crew-attention" &&
-              attention !== null &&
-              state.coordinatorThreadId === row.thread_id
-            ) {
-              const source = yield* canonical(projectId, attention.source);
-              text = `Crew attention ${attention.id}: ${attention.reason}. Source: ${yield* encodeState(attention.source)}\n${source.text.slice(0, 6000)}\nRead context, consult the existing workstream or arrange a visible handoff. Do not implement the request yourself or answer human-only approvals.`;
-              senderThreadId = attention.source.conversation.threadId;
             } else
               return yield* fail("This conversation delivery no longer matches current state.");
             const currentLimit = yield* deps.authorize(projectId, payload.actor as ThreadId | null);
@@ -1040,32 +1051,6 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
                   );
               }
             }
-            if (attention !== null)
-              yield* put(
-                projectId,
-                "attention",
-                attention.id,
-                attention.source.conversation.threadId,
-                {
-                  ...attention,
-                  updatedAt: now,
-                  progress: Result.isFailure(outcome)
-                    ? {
-                        state: "failed",
-                        deliveryId: CommandId.make(row.id),
-                        runId: null,
-                        detail:
-                          "Coordinator delivery failed. Inspect the source and coordinator state.",
-                      }
-                    : outcome.success.delivery === "queued"
-                      ? { state: "queued", deliveryId: CommandId.make(row.id) }
-                      : {
-                          state: "delivered",
-                          deliveryId: CommandId.make(row.id),
-                          runId: outcome.success.run.id,
-                        },
-                },
-              );
             yield* sql`UPDATE project_teamwork_outbox SET status = ${Result.isSuccess(outcome) ? "delivered" : "failed"} WHERE id = ${row.id}`;
             yield* commit(
               state,
@@ -1407,7 +1392,6 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
           const existing =
             yield* sql`SELECT id FROM project_crew_conversations WHERE project_id = ${projectId} AND collection = 'attention' AND thread_id = ${event.threadId} AND json_extract(payload_json, '$.source.messageId') = ${message.id} AND json_extract(payload_json, '$.reason') = 'user-message' LIMIT 1`;
           if (existing.length) return;
-          const deliveryId = CommandId.make(`crew:${projectId}:attention:${id}`);
           yield* put(projectId, "attention", id, event.threadId, {
             id,
             source,
@@ -1415,18 +1399,10 @@ export const makeCrewConversations = Effect.fn("CrewConversations.make")(functio
             reason: "user-message",
             correlationId: null,
             pendingRequest: null,
-            progress: { state: "queued", deliveryId },
+            progress: { state: "pending" },
             createdAt: now,
             updatedAt: now,
           });
-          yield* outbox(
-            projectId,
-            state.revision + 1,
-            deliveryId,
-            coordinator.threadId,
-            "crew-attention",
-            { id, actor: null, limit: null },
-          );
           yield* commit(
             state,
             CommandId.make(`crew:event:${stored.sequence}`),

@@ -19,9 +19,17 @@ import {
   useWorkspacePaneState,
 } from "../layout/AdaptiveWorkspaceLayout";
 import { AndroidHomeFabLayout } from "./AndroidHomeFab";
+import {
+  AndroidHomeDrawer,
+  AndroidCrewProjectsView,
+  useAndroidHomeNavigation,
+} from "./AndroidHomeNavigation";
 import { HomeScreen } from "./HomeScreen";
 import { useHomeListOptions } from "./home-list-options";
-import { useProjectListSelection } from "./use-project-list-selection";
+import {
+  useProjectListSelection,
+  useWorkspaceProjectSelection,
+} from "./use-project-list-selection";
 import {
   runWhenHomeCovered,
   useAtomValueWhileVisible,
@@ -29,6 +37,7 @@ import {
 } from "./home-route-visibility";
 import {
   buildHomeProjectScopes,
+  regularHomeThreads,
   resolveHomeProjectFilterScope,
   sortHomeProjectScopes,
 } from "./homeThreadList";
@@ -50,10 +59,11 @@ export function HomeRouteScreen() {
   const projects = useProjects();
   // Stop rebuilding the streaming thread list while Thread covers Home.
   const visible = useHomeRouteVisible();
-  const threads = useLaunchingThreads(
+  const allThreads = useLaunchingThreads(
     useAtomValueWhileVisible(steadyNavigationThreadShellsAtom, visible),
   );
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
+  const androidHome = useAndroidHomeNavigation(projects, visible);
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
   const selectTab = useSelectWorkspaceTab();
@@ -68,6 +78,10 @@ export function HomeRouteScreen() {
     else if (workspace) workspace.dispatch({ type: "query", query, tab: "threads" });
     else setLocalSearchQuery(query);
   };
+  const threads = useMemo(
+    () => regularHomeThreads(allThreads, androidHome.coordinators, searchQuery),
+    [allThreads, androidHome.coordinators, searchQuery],
+  );
   // Split layouts keep the query; only the stacked layout opens the thread over the list.
   // Android's search field keeps its own open state, which a cleared query would leave open.
   const clearsSearchOnOpen = Platform.OS !== "android" && !layout.usesSplitView;
@@ -127,6 +141,17 @@ export function HomeRouteScreen() {
       }),
     [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
   );
+  const navigationScopes = useMemo(
+    () =>
+      Platform.OS === "android" && selectedEnvironmentId !== null
+        ? buildHomeProjectScopes({
+            projects,
+            environmentId: null,
+            projectGroupingMode: listOptions.projectGroupingMode,
+          })
+        : projectScopes,
+    [listOptions.projectGroupingMode, projectScopes, projects, selectedEnvironmentId],
+  );
   const projectFilterOptions = useMemo(
     () =>
       pickableProjectGroups(
@@ -145,6 +170,11 @@ export function HomeRouteScreen() {
   const selectedProjectKey =
     resolveHomeProjectFilterScope(projectScopes, projects, listOptions)?.key ?? null;
   const selectProject = useProjectListSelection(projectScopes, setSelectedProjectKey);
+  const openProject = useWorkspaceProjectSelection(navigationScopes, (key, scope) => {
+    if (scope) setSelectedEnvironmentId(scope.environmentId);
+    setSelectedProjectKey(key);
+    androidHome.setView("threads");
+  });
 
   if (layout.usesSplitView && !nativePrimaryColumn) {
     return (
@@ -156,11 +186,43 @@ export function HomeRouteScreen() {
     );
   }
 
+  const drawer =
+    Platform.OS === "android" && visible ? (
+      <AndroidHomeDrawer
+        navigation={androidHome}
+        scopes={navigationScopes}
+        threads={allThreads}
+        onOpenProject={openProject}
+        onOpenThread={handleSelectThread}
+      />
+    ) : null;
+
+  if (androidHome.view === "projects") {
+    return (
+      <>
+        <AndroidCrewProjectsView
+          navigation={androidHome}
+          scopes={navigationScopes}
+          onAddProject={() =>
+            navigation.navigate(
+              "AddProject",
+              selectedEnvironmentId ? { environmentId: selectedEnvironmentId } : undefined,
+            )
+          }
+          onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
+          canAddProject={catalogState.hasReadyEnvironment}
+        />
+        {drawer}
+      </>
+    );
+  }
+
   return (
     <AndroidHomeFabLayout onStartNewTask={startNewTask}>
       <>
         <WorkspaceListHeader
           accessibilityLabel="T3 Code, Threads"
+          {...(Platform.OS === "android" ? { onOpenNavigation: androidHome.openDrawer } : {})}
           onOpenEnvironments={() => openSettings(navigation, "SettingsEnvironments")}
           search={{
             value: searchQuery,
@@ -228,6 +290,7 @@ export function HomeRouteScreen() {
           visible={visible}
         />
         <ThreadUndoNotice visible={visible} />
+        {drawer}
       </>
     </AndroidHomeFabLayout>
   );

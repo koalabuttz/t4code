@@ -427,6 +427,31 @@ describe("Crew supervision", () => {
         threadId: worker,
       });
     }
+    const confirmedStop = {
+      ...reset,
+      threadExecution: [],
+      deliveries: [
+        {
+          id: "old-stop",
+          threadId: worker,
+          kind: "stop",
+          status: "delivered",
+          initiativeId: "one",
+          taskId: "task",
+          workerInactive: true,
+        },
+      ],
+    } as const;
+    const stopped = classifyCrewSupervision(confirmedStop);
+    expect(stopped.initiatives[0]?.pause.state).toBe("stopped");
+    expect(stopped.attention.some((item) => item.threadId === worker)).toBe(false);
+    expect(
+      classifyCrewSupervision({ ...confirmedStop, threadExecution: reset.threadExecution })
+        .initiatives[0]?.pause.state,
+    ).toBe("stopping");
+    expect(
+      classifyCrewSupervision({ ...confirmedStop, freshness: "stale" }).initiatives[0]?.pause.state,
+    ).toBe("unknown");
   });
 
   it("surfaces coordinator failures, failed messages and project-wide handover prerequisites", () => {
